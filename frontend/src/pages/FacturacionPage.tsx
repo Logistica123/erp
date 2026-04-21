@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Loader2, FileText, ExternalLink } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery } from '@tanstack/react-query';
@@ -117,6 +118,11 @@ export function FacturacionPage() {
             Facturas emitidas por el ERP, sincronizadas desde DistriApp o importadas vía ARCA.
           </p>
         </div>
+        <Link to="/erp/facturacion/nueva">
+          <Button>
+            <Plus className="w-4 h-4 mr-1" /> Nueva factura
+          </Button>
+        </Link>
       </div>
 
       {/* KPIs */}

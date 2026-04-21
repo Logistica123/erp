@@ -8,6 +8,7 @@ import { ConciliacionPage } from './pages/ConciliacionPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EstadosContablesPage } from './pages/EstadosContablesPage';
 import { FacturacionPage } from './pages/FacturacionPage';
+import { NuevaFacturaPage } from './pages/NuevaFacturaPage';
 import { LibroDiarioPage } from './pages/LibroDiarioPage';
 import { LibroMayorPage } from './pages/LibroMayorPage';
 import { LoginPage } from './pages/LoginPage';
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="/erp/periodos" element={<PeriodosPage />} handle={{ crumb: 'Períodos' }} />
             <Route path="/erp/estados-contables" element={<EstadosContablesPage />} handle={{ crumb: 'Estados Contables' }} />
             <Route path="/erp/facturacion" element={<FacturacionPage />} handle={{ crumb: 'Facturación' }} />
+            <Route path="/erp/facturacion/nueva" element={<NuevaFacturaPage />} handle={{ crumb: 'Nueva factura' }} />
             <Route path="/erp/bancos" element={<BancosPage />} handle={{ crumb: 'Bancos' }} />
             <Route path="/erp/conciliacion" element={<ConciliacionPage />} handle={{ crumb: 'Conciliación' }} />
             <Route path="/erp/ordenes-pago" element={<OrdenesPagoPage />} handle={{ crumb: 'Órdenes de pago' }} />

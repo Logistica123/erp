@@ -105,8 +105,12 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.op.anular');
 
         // Facturación (venta)
+        Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])
+            ->name('erp.fv.catalogos');
         Route::get('/facturas-venta', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'index'])
             ->name('erp.fv.index');
+        Route::post('/facturas-venta/emitir', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'emitir'])
+            ->name('erp.fv.emitir');
         Route::get('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'show'])
             ->whereNumber('id')->name('erp.fv.show');
 

@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'arca_gateway' => [
+        'url' => env('ARCA_GATEWAY_URL', 'http://127.0.0.1:8000'),
+        'client_id' => env('ARCA_CLIENT_ID'),
+        'api_key' => env('ARCA_API_KEY'),
+        'timeout' => env('ARCA_GATEWAY_TIMEOUT', 60),
+    ],
+
 ];

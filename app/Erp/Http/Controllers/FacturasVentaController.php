@@ -2,7 +2,9 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Services\EmisorFacturaService;
 use App\Http\Controllers\Controller;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -12,6 +14,62 @@ use Illuminate\Support\Facades\DB;
  */
 class FacturasVentaController extends Controller
 {
+    public function __construct(private EmisorFacturaService $emisor) {}
+
+    /**
+     * Catálogos combinados para el form de Nueva Factura:
+     * clientes activos, tipos de comprobante, PVs, alícuotas IVA, monedas.
+     */
+    public function catalogosEmision(Request $request): JsonResponse
+    {
+        return response()->json([
+            'clientes' => DB::table('erp_auxiliares')
+                ->where('empresa_id', 1)->where('tipo', 'Cliente')->where('activo', 1)
+                ->orderBy('nombre')
+                ->get(['id', 'nombre', 'cuit', 'codigo']),
+            'tipos_comprobante' => DB::table('erp_tipos_comprobante')
+                ->where('activo', 1)
+                ->whereIn('clase', ['FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO'])
+                ->orderBy('id')
+                ->get(['id', 'codigo_interno', 'nombre', 'letra', 'clase', 'discrimina_iva']),
+            'puntos_venta' => DB::table('erp_puntos_venta')
+                ->where('empresa_id', 1)->where('activo', 1)->where('bloqueado', 0)
+                ->orderBy('numero')
+                ->get(['id', 'numero', 'nombre', 'tipo_emision']),
+            'alicuotas_iva' => DB::table('erp_alicuotas_iva')
+                ->where('activo', 1)->orderBy('tasa')
+                ->get(['id', 'codigo_interno', 'nombre', 'tasa']),
+            'monedas' => DB::table('erp_monedas')
+                ->where('activa', 1)->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre', 'simbolo']),
+        ]);
+    }
+
+    public function emitir(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'cliente_id' => ['required', 'integer'],
+            'tipo_comprobante_id' => ['required', 'integer'],
+            'punto_venta_id' => ['required', 'integer'],
+            'concepto_afip' => ['required', 'integer', 'min:1', 'max:3'],
+            'fecha_emision' => ['required', 'date'],
+            'descripcion' => ['required', 'string', 'max:500'],
+            'cantidad' => ['required', 'numeric', 'min:0.0001'],
+            'precio_unit' => ['required', 'numeric', 'min:0'],
+            'alicuota_iva_id' => ['required', 'integer'],
+            'moneda_id' => ['nullable', 'integer'],
+            'cotizacion' => ['nullable', 'numeric', 'min:0.0001'],
+        ]);
+
+        $user = $request->user();
+        try {
+            $result = $this->emisor->emitir($data, 1, $user?->id ?? 1);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+        return response()->json(['message' => 'Factura emitida OK', ...$result]);
+    }
+
     public function index(Request $request)
     {
         $q = DB::table('erp_facturas_venta as f')

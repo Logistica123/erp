@@ -63,6 +63,7 @@ const sections: NavSection[] = [
     label: 'ERP · Fiscal',
     items: [
       { to: '/erp/facturacion', label: 'Facturación (ARCA)', icon: FileText },
+      { to: '/erp/libro-iva-ventas', label: 'Libro IVA Ventas', icon: FileBarChart },
       { to: '/erp/impuestos', label: 'IVA / IIBB', icon: Receipt },
     ],
   },

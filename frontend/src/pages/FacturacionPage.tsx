@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Loader2, FileText, ExternalLink, Plus } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Plus, DollarSign } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { fmtMoney } from '@/lib/cn';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Link } from 'react-router-dom';
 
@@ -75,9 +76,17 @@ function formatNro(tipo: string, letra: string | null, pv: number, nro: number):
   return `${lbl}  ${pvStr}-${nroStr}`;
 }
 
+type CobroCatalogos = {
+  medios_pago: { id: number; codigo: string; nombre: string; afecta_caja: number; afecta_banco: number }[];
+  cajas: { id: number; codigo: string; nombre: string }[];
+  cuentas_bancarias: { id: number; codigo: string; nombre: string }[];
+};
+
 export function FacturacionPage() {
+  const qc = useQueryClient();
   const [estado, setEstado] = useState<string>('');
   const [origen, setOrigen] = useState<string>('');
+  const [cobroFactura, setCobroFactura] = useState<Factura | null>(null);
 
   const { data, isLoading, error } = useQuery<Resp>({
     queryKey: ['facturas-venta', { estado, origen }],
@@ -213,6 +222,7 @@ export function FacturacionPage() {
                     <th className="px-4 py-3">Origen</th>
                     <th className="px-4 py-3">Estado</th>
                     <th className="px-4 py-3">Asiento</th>
+                    <th className="px-4 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -257,6 +267,13 @@ export function FacturacionPage() {
                           <span className="text-[12px] text-gray-400">—</span>
                         )}
                       </td>
+                      <td className="px-4 py-3">
+                        {f.estado === 'EMITIDA' && f.tipo_clase === 'FACTURA' && (
+                          <Button size="sm" variant="outline" onClick={() => setCobroFactura(f)}>
+                            <DollarSign className="w-3 h-3" /> Cobrar
+                          </Button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -265,6 +282,186 @@ export function FacturacionPage() {
           )}
         </CardBody>
       </Card>
+
+      <CobroModal
+        factura={cobroFactura}
+        onClose={() => setCobroFactura(null)}
+        onSuccess={() => {
+          setCobroFactura(null);
+          qc.invalidateQueries({ queryKey: ['facturas-venta'] });
+          qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
+        }}
+      />
     </div>
+  );
+}
+
+function CobroModal({
+  factura, onClose, onSuccess,
+}: {
+  factura: Factura | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [medioId, setMedioId] = useState<number>(0);
+  const [cajaId, setCajaId] = useState<number>(0);
+  const [ctaBancId, setCtaBancId] = useState<number>(0);
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [referencia, setReferencia] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: cats } = useQuery<CobroCatalogos>({
+    queryKey: ['fv-catalogos-cobro'],
+    queryFn: () => api.get<CobroCatalogos>('/api/erp/facturas-venta/catalogos'),
+    enabled: !!factura,
+  });
+
+  // Defaults cuando llegan los catálogos
+  if (cats && medioId === 0 && cats.medios_pago[0]) {
+    setMedioId(cats.medios_pago[0].id);
+  }
+  if (cats && cajaId === 0 && cats.cajas[0]) setCajaId(cats.cajas[0].id);
+  if (cats && ctaBancId === 0 && cats.cuentas_bancarias[0]) setCtaBancId(cats.cuentas_bancarias[0].id);
+
+  const medio = cats?.medios_pago.find((m) => m.id === medioId);
+  const afectaCaja = !!medio?.afecta_caja;
+  const afectaBanco = !!medio?.afecta_banco;
+
+  const mutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      api.post(`/api/erp/facturas-venta/${factura!.id}/cobrar`, payload),
+    onSuccess: () => { setError(null); onSuccess(); },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const onSubmit = (ev: React.FormEvent) => {
+    ev.preventDefault();
+    setError(null);
+    mutation.mutate({
+      fecha,
+      medio_pago_id: medioId,
+      caja_id: afectaCaja ? cajaId : null,
+      cuenta_bancaria_id: afectaBanco ? ctaBancId : null,
+      referencia: referencia || null,
+    });
+  };
+
+  if (!factura) return null;
+
+  return (
+    <Modal
+      open={!!factura}
+      onClose={onClose}
+      title={`Cobrar — ${factura.tipo_codigo}${factura.letra ? '-' + factura.letra : ''} ${String(factura.pto_vta).padStart(4, '0')}-${String(factura.numero).padStart(8, '0')}`}
+      size="sm"
+    >
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div className="bg-gray-50 rounded-md p-3 text-sm">
+          <div className="text-xs text-gray-500 uppercase">Cliente</div>
+          <div className="font-medium">{factura.cliente_nombre}</div>
+          <div className="mt-2 text-xs text-gray-500 uppercase">Monto a cobrar</div>
+          <div className="font-mono text-xl font-bold">{fmtMoney(parseFloat(factura.imp_total))}</div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Fecha</label>
+          <input
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            className="w-full border rounded-md px-3 py-2 text-sm"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Medio de pago</label>
+          <select
+            value={medioId}
+            onChange={(e) => setMedioId(+e.target.value)}
+            className="w-full border rounded-md px-3 py-2 text-sm"
+            required
+          >
+            <option value={0} disabled>Seleccionar medio...</option>
+            {cats?.medios_pago.map((m) => (
+              <option key={m.id} value={m.id}>{m.nombre}</option>
+            ))}
+          </select>
+        </div>
+
+        {afectaCaja && (
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Caja</label>
+            <select
+              value={cajaId}
+              onChange={(e) => setCajaId(+e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm"
+              required
+            >
+              <option value={0} disabled>Seleccionar caja...</option>
+              {cats?.cajas.map((c) => (
+                <option key={c.id} value={c.id}>{c.nombre}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {afectaBanco && (
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cuenta bancaria</label>
+            <select
+              value={ctaBancId}
+              onChange={(e) => setCtaBancId(+e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm"
+              required
+            >
+              <option value={0} disabled>Seleccionar cuenta...</option>
+              {cats?.cuentas_bancarias.map((c) => (
+                <option key={c.id} value={c.id}>{c.nombre}</option>
+              ))}
+            </select>
+            {(!cats?.cuentas_bancarias || cats.cuentas_bancarias.length === 0) && (
+              <div className="text-xs text-amber-600 mt-1">
+                No hay cuentas bancarias. Usá medio EFECTIVO o creá una en Tesorería.
+              </div>
+            )}
+          </div>
+        )}
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
+            Referencia (opcional)
+          </label>
+          <input
+            type="text"
+            value={referencia}
+            onChange={(e) => setReferencia(e.target.value)}
+            placeholder="Nro. transferencia / cheque / recibo..."
+            className="w-full border rounded-md px-3 py-2 text-sm"
+          />
+        </div>
+
+        {error && (
+          <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button
+            type="submit"
+            disabled={
+              mutation.isPending ||
+              !medioId ||
+              (afectaCaja && !cajaId) ||
+              (afectaBanco && !ctaBancId)
+            }
+          >
+            {mutation.isPending ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Registrando...</> : 'Registrar cobro'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

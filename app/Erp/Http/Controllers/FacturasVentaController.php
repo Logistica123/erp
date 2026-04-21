@@ -2,6 +2,7 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Services\CobroFacturaService;
 use App\Erp\Services\EmisorFacturaService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
@@ -14,7 +15,29 @@ use Illuminate\Support\Facades\DB;
  */
 class FacturasVentaController extends Controller
 {
-    public function __construct(private EmisorFacturaService $emisor) {}
+    public function __construct(
+        private EmisorFacturaService $emisor,
+        private CobroFacturaService $cobrador,
+    ) {}
+
+    public function cobrar(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'fecha' => ['required', 'date'],
+            'medio_pago_id' => ['required', 'integer'],
+            'caja_id' => ['nullable', 'integer'],
+            'cuenta_bancaria_id' => ['nullable', 'integer'],
+            'referencia' => ['nullable', 'string', 'max:100'],
+        ]);
+        $data['factura_id'] = $id;
+        $user = $request->user();
+        try {
+            $result = $this->cobrador->cobrar($data, 1, $user?->id ?? 1);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+        return response()->json(['message' => 'Cobro registrado OK', ...$result]);
+    }
 
     /**
      * Catálogos combinados para el form de Nueva Factura:
@@ -42,6 +65,16 @@ class FacturasVentaController extends Controller
             'monedas' => DB::table('erp_monedas')
                 ->where('activa', 1)->orderBy('codigo')
                 ->get(['id', 'codigo', 'nombre', 'simbolo']),
+            'medios_pago' => DB::table('erp_medios_pago')
+                ->where('activo', 1)->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre', 'afecta_caja', 'afecta_banco']),
+            'cajas' => DB::table('erp_cajas')
+                ->where('empresa_id', 1)->where('activo', 1)->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre']),
+            'cuentas_bancarias' => DB::table('erp_cuentas_bancarias')
+                ->where('empresa_id', 1)->where('activo', 1)->whereNull('deleted_at')
+                ->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre']),
         ]);
     }
 
@@ -53,12 +86,19 @@ class FacturasVentaController extends Controller
             'punto_venta_id' => ['required', 'integer'],
             'concepto_afip' => ['required', 'integer', 'min:1', 'max:3'],
             'fecha_emision' => ['required', 'date'],
-            'descripcion' => ['required', 'string', 'max:500'],
-            'cantidad' => ['required', 'numeric', 'min:0.0001'],
-            'precio_unit' => ['required', 'numeric', 'min:0'],
-            'alicuota_iva_id' => ['required', 'integer'],
             'moneda_id' => ['nullable', 'integer'],
             'cotizacion' => ['nullable', 'numeric', 'min:0.0001'],
+            // Multi-item (preferido)
+            'items' => ['nullable', 'array', 'min:1', 'max:50'],
+            'items.*.descripcion' => ['required_with:items', 'string', 'max:500'],
+            'items.*.cantidad' => ['required_with:items', 'numeric', 'min:0.0001'],
+            'items.*.precio_unit' => ['required_with:items', 'numeric', 'min:0'],
+            'items.*.alicuota_iva_id' => ['required_with:items', 'integer'],
+            // Single-item (back-compat)
+            'descripcion' => ['nullable', 'string', 'max:500'],
+            'cantidad' => ['nullable', 'numeric', 'min:0.0001'],
+            'precio_unit' => ['nullable', 'numeric', 'min:0'],
+            'alicuota_iva_id' => ['nullable', 'integer'],
         ]);
 
         $user = $request->user();

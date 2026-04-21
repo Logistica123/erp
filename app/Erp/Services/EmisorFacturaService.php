@@ -25,19 +25,16 @@ class EmisorFacturaService
     ) {}
 
     /**
-     * @param array{
-     *   cliente_id:int,
-     *   tipo_comprobante_id:int,
-     *   punto_venta_id:int,
-     *   concepto_afip:int,
-     *   fecha_emision:string,
-     *   descripcion:string,
-     *   cantidad:float|string,
-     *   precio_unit:float|string,
-     *   alicuota_iva_id:int,
-     *   moneda_id?:int,
-     *   cotizacion?:float|string,
-     * }  $input
+     * Acepta dos formatos de entrada:
+     *
+     * A) Multi-item (preferido): input['items'] = [
+     *       {descripcion, cantidad, precio_unit, alicuota_iva_id}, ...
+     *    ]
+     *
+     * B) Single-item (back-compat): input.descripcion / cantidad / precio_unit / alicuota_iva_id
+     *
+     * El resto (cliente_id, tipo_comprobante_id, punto_venta_id, concepto_afip, fecha_emision,
+     *  moneda_id?, cotizacion?) es compartido.
      */
     public function emitir(array $input, int $empresaId = 1, int $usuarioId = 1): array
     {
@@ -53,23 +50,59 @@ class EmisorFacturaService
         $tipoCbte = DB::table('erp_tipos_comprobante')->where('id', $input['tipo_comprobante_id'])->first();
         if (!$tipoCbte) throw new RuntimeException('Tipo de comprobante no existe');
 
-        $alicuota = DB::table('erp_alicuotas_iva')->where('id', $input['alicuota_iva_id'])->first();
-        if (!$alicuota) throw new RuntimeException('Alícuota IVA no existe');
-
         $monedaId = $input['moneda_id'] ?? 1;
         $monedaCodigo = DB::table('erp_monedas')->where('id', $monedaId)->value('codigo') ?? 'ARS';
 
-        // 2. Cálculos
-        // AFIP requiere imp_iva e iva[] siempre, excepto letra C (monotributista).
-        // `discrimina_iva=0` en tipos B significa "no se muestra al cliente",
-        // pero en el payload a WSFE igual hay que declararlo.
-        $cantidad = (float) $input['cantidad'];
-        $precio = (float) $input['precio_unit'];
-        $tasa = (float) $alicuota->tasa;
+        // Normalizar input a array de items
+        $rawItems = $input['items'] ?? [[
+            'descripcion' => $input['descripcion'] ?? 'Ítem',
+            'cantidad' => $input['cantidad'] ?? 1,
+            'precio_unit' => $input['precio_unit'] ?? 0,
+            'alicuota_iva_id' => $input['alicuota_iva_id'] ?? null,
+        ]];
+        if (empty($rawItems)) throw new RuntimeException('Al menos un ítem es requerido');
+
         $esLetraC = ($tipoCbte->letra === 'C');
-        $imp_neto = round($cantidad * $precio, 2);
-        $imp_iva = $esLetraC ? 0 : round($imp_neto * $tasa, 2);
+
+        // Procesar items: lookup alícuota, calcular neto/iva por línea
+        $items = [];
+        $alicuotasCache = [];
+        foreach ($rawItems as $idx => $it) {
+            $alicId = (int) ($it['alicuota_iva_id'] ?? 0);
+            if (!$alicId) throw new RuntimeException("Ítem #".($idx+1).": alícuota requerida");
+            $alic = $alicuotasCache[$alicId] ??= DB::table('erp_alicuotas_iva')->where('id', $alicId)->first();
+            if (!$alic) throw new RuntimeException("Alícuota IVA $alicId no existe");
+
+            $cantidad = (float) ($it['cantidad'] ?? 0);
+            $precio = (float) ($it['precio_unit'] ?? 0);
+            $lineNeto = round($cantidad * $precio, 2);
+            $lineIva = $esLetraC ? 0 : round($lineNeto * (float) $alic->tasa, 2);
+
+            $items[] = [
+                'descripcion' => (string) ($it['descripcion'] ?? 'Ítem'),
+                'cantidad' => $cantidad,
+                'precio_unit' => $precio,
+                'alicuota' => $alic,
+                'imp_neto' => $lineNeto,
+                'imp_iva' => $lineIva,
+            ];
+        }
+
+        // Totales
+        $imp_neto = round(array_sum(array_column($items, 'imp_neto')), 2);
+        $imp_iva = round(array_sum(array_column($items, 'imp_iva')), 2);
         $imp_total = round($imp_neto + $imp_iva, 2);
+
+        // Agrupar IVA por alícuota para el gateway
+        $ivaAgrupado = [];
+        foreach ($items as $it) {
+            $aid = $it['alicuota']->id;
+            $ivaAgrupado[$aid] ??= [
+                'alicuota' => $it['alicuota'], 'base_imp' => 0, 'importe' => 0,
+            ];
+            $ivaAgrupado[$aid]['base_imp'] += $it['imp_neto'];
+            $ivaAgrupado[$aid]['importe'] += $it['imp_iva'];
+        }
 
         // 3. Resolver doc_tipo/doc_nro y condición IVA receptor desde cliente
         [$docTipo, $docNro] = $this->resolverDoc($cliente);
@@ -116,11 +149,13 @@ class EmisorFacturaService
             $payload['fecha_venc_pago'] = $input['fecha_venc_pago'] ?? $fecha;
         }
         if ($imp_iva > 0) {
-            $payload['iva'] = [[
-                'id' => (int) $alicuota->id,  // código AFIP de la alícuota (3,4,5,6,8,9)
-                'base_imp' => (string) $imp_neto,
-                'importe' => (string) $imp_iva,
-            ]];
+            $payload['iva'] = array_values(array_map(function ($grp) {
+                return [
+                    'id' => (int) $grp['alicuota']->id,
+                    'base_imp' => (string) round($grp['base_imp'], 2),
+                    'importe' => (string) round($grp['importe'], 2),
+                ];
+            }, $ivaAgrupado));
         }
 
         $resp = Http::withHeaders([
@@ -177,25 +212,28 @@ class EmisorFacturaService
             'updated_at' => now(),
         ]);
 
-        // Item (schema erp_factura_venta_items: concepto, imp_neto, alícuota, sin imp_total)
-        DB::table('erp_factura_venta_items')->insert([
-            'factura_id' => $facturaId,
-            'nro_linea' => 1,
-            'concepto' => $input['descripcion'],
-            'cantidad' => $cantidad,
-            'precio_unitario' => $precio,
-            'alicuota_iva_id' => $alicuota->id,
-            'imp_neto' => $imp_neto,
-            'imp_iva' => $imp_iva,
-        ]);
+        // Items: una fila por línea
+        foreach ($items as $idx => $it) {
+            DB::table('erp_factura_venta_items')->insert([
+                'factura_id' => $facturaId,
+                'nro_linea' => $idx + 1,
+                'concepto' => $it['descripcion'],
+                'cantidad' => $it['cantidad'],
+                'precio_unitario' => $it['precio_unit'],
+                'alicuota_iva_id' => $it['alicuota']->id,
+                'imp_neto' => $it['imp_neto'],
+                'imp_iva' => $it['imp_iva'],
+            ]);
+        }
 
-        // IVA desglose (si hay)
-        if ($imp_iva > 0) {
+        // IVA desglose agrupado por alícuota
+        foreach ($ivaAgrupado as $grp) {
+            if ($grp['importe'] <= 0) continue;
             DB::table('erp_factura_venta_iva')->insert([
                 'factura_id' => $facturaId,
-                'alicuota_iva_id' => $alicuota->id,
-                'base_imponible' => $imp_neto,
-                'importe_iva' => $imp_iva,
+                'alicuota_iva_id' => $grp['alicuota']->id,
+                'base_imponible' => round($grp['base_imp'], 2),
+                'importe_iva' => round($grp['importe'], 2),
             ]);
         }
 

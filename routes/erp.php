@@ -104,6 +104,14 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/ordenes-pago/{id}/anular', [OrdenesPagoController::class, 'anular'])
             ->whereNumber('id')->name('erp.op.anular');
 
+        // Dashboard
+        Route::get('/dashboard/stats', [\App\Erp\Http\Controllers\DashboardController::class, 'stats'])
+            ->name('erp.dashboard.stats');
+
+        // Libro IVA
+        Route::get('/libro-iva/ventas', [\App\Erp\Http\Controllers\LibroIvaController::class, 'ventas'])
+            ->name('erp.libro-iva.ventas');
+
         // Facturación (venta)
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])
             ->name('erp.fv.catalogos');
@@ -111,6 +119,8 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.fv.index');
         Route::post('/facturas-venta/emitir', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'emitir'])
             ->name('erp.fv.emitir');
+        Route::post('/facturas-venta/{id}/cobrar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'cobrar'])
+            ->whereNumber('id')->name('erp.fv.cobrar');
         Route::get('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'show'])
             ->whereNumber('id')->name('erp.fv.show');
 

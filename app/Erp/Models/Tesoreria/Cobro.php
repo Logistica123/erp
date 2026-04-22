@@ -11,37 +11,32 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class OrdenPago extends Model
+/**
+ * Cobro de cliente (SPEC 02 §4.1, RN-27 balance multi-medios).
+ * Estados: REGISTRADO → (PARCIAL_ACREDITADO) → ACREDITADO | RECHAZADO_PARCIAL | RECHAZADO | ANULADO.
+ */
+class Cobro extends Model
 {
-    protected $table = 'erp_ordenes_pago';
+    protected $table = 'erp_cobros';
 
-    public const ESTADO_BORRADOR = 'BORRADOR';
-    public const ESTADO_CARGADA_BANCO = 'CARGADA_BANCO';
-    public const ESTADO_LIBERADA = 'LIBERADA';
-    public const ESTADO_PAGADA = 'PAGADA';
-    public const ESTADO_RECHAZADA = 'RECHAZADA';
-    public const ESTADO_ANULADA = 'ANULADA';
+    public const ESTADO_REGISTRADO = 'REGISTRADO';
+    public const ESTADO_PARCIAL_ACREDITADO = 'PARCIAL_ACREDITADO';
+    public const ESTADO_ACREDITADO = 'ACREDITADO';
+    public const ESTADO_RECHAZADO_PARCIAL = 'RECHAZADO_PARCIAL';
+    public const ESTADO_RECHAZADO = 'RECHAZADO';
+    public const ESTADO_ANULADO = 'ANULADO';
 
     protected $fillable = [
-        'empresa_id', 'numero', 'fecha', 'tipo',
-        'auxiliar_id', 'liq_encabezado_id',
-        'moneda_id', 'cotizacion',
-        'importe', 'importe_bruto', 'total_retenciones',
-        'estado',
-        'fecha_carga_banco', 'fecha_liberacion', 'fecha_pago',
-        'concepto', 'observaciones',
-        'creado_por_user_id', 'cargado_por_user_id', 'liberado_por_user_id',
-        'asiento_id', 'motivo_rechazo', 'motivo_anulacion',
+        'empresa_id', 'numero', 'fecha', 'auxiliar_id',
+        'moneda_id', 'cotizacion', 'importe_total', 'total_retenciones',
+        'estado', 'concepto', 'observaciones',
+        'creado_por_user_id', 'asiento_id', 'motivo_anulacion',
     ];
 
     protected $casts = [
         'fecha' => 'date',
-        'fecha_carga_banco' => 'datetime',
-        'fecha_liberacion' => 'datetime',
-        'fecha_pago' => 'datetime',
         'cotizacion' => 'decimal:4',
-        'importe' => 'decimal:2',
-        'importe_bruto' => 'decimal:2',
+        'importe_total' => 'decimal:2',
         'total_retenciones' => 'decimal:2',
     ];
 
@@ -72,11 +67,11 @@ class OrdenPago extends Model
 
     public function items(): HasMany
     {
-        return $this->hasMany(OpItem::class, 'op_id')->orderBy('orden');
+        return $this->hasMany(CobroItem::class);
     }
 
     public function medios(): HasMany
     {
-        return $this->hasMany(OpMedio::class, 'op_id');
+        return $this->hasMany(CobroMedio::class);
     }
 }

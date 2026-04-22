@@ -56,24 +56,28 @@ class AuditLogger
                 ->first();
 
             $hashPrev = $prev?->hash_actual ?? str_repeat('0', 64);
+            // Truncar a segundos para que la columna DATETIME persista el mismo
+            // valor que se firma y la cadena se pueda recomputar en verificación.
+            $ts = now()->startOfSecond();
+            $userId = Auth::id();
 
-            $payload = [
-                'empresa_id' => $empresaId,
-                'modulo' => $modulo,
-                'entidad' => $entidad,
-                'entidad_id' => $model->getKey(),
-                'accion' => $accion,
-                'datos_antes' => $datosAntes,
-                'datos_despues' => $datosDespues,
-                'user_id' => Auth::id(),
-                'ts' => now()->toIso8601String(),
-            ];
+            $payload = self::payloadParaHash(
+                empresaId: $empresaId,
+                modulo: $modulo,
+                entidad: $entidad,
+                entidadId: $model->getKey(),
+                accion: $accion,
+                datosAntes: $datosAntes,
+                datosDespues: $datosDespues,
+                userId: $userId,
+                ts: $ts->toIso8601String(),
+            );
 
             $hashActual = hash('sha256', $hashPrev.json_encode($payload, JSON_THROW_ON_ERROR));
 
             return AuditLog::create([
                 'empresa_id' => $empresaId,
-                'user_id' => Auth::id(),
+                'user_id' => $userId,
                 'modulo' => $modulo,
                 'entidad' => $entidad,
                 'entidad_id' => $model->getKey(),
@@ -85,6 +89,7 @@ class AuditLogger
                 'user_agent' => substr((string) request()?->userAgent(), 0, 300),
                 'hash_prev' => $hashPrev,
                 'hash_actual' => $hashActual,
+                'created_at' => $ts,
             ]);
         });
     }
@@ -92,6 +97,10 @@ class AuditLogger
     /**
      * Reconstruye la cadena de hashes de una empresa y devuelve la primera
      * inconsistencia (o null si toda la cadena es válida).
+     *
+     * Verificación estricta: recomputa hash_actual = SHA-256(hash_prev || json(payload))
+     * usando el created_at persistido como 'ts'. Si alguien modificó un campo
+     * incluido en el payload, el hash recomputado no va a coincidir.
      */
     public function verificarCadena(?int $empresaId): ?array
     {
@@ -113,36 +122,62 @@ class AuditLogger
                 ];
             }
 
-            $payload = [
-                'empresa_id' => $row->empresa_id,
-                'modulo' => $row->modulo,
-                'entidad' => $row->entidad,
-                'entidad_id' => $row->entidad_id,
-                'accion' => $row->accion,
-                'datos_antes' => $row->datos_antes,
-                'datos_despues' => $row->datos_despues,
-                'user_id' => $row->user_id,
-                'ts' => $row->created_at->toIso8601String(),
-            ];
+            $payload = self::payloadParaHash(
+                empresaId: $row->empresa_id,
+                modulo: $row->modulo,
+                entidad: $row->entidad,
+                entidadId: $row->entidad_id,
+                accion: $row->accion,
+                datosAntes: $row->datos_antes,
+                datosDespues: $row->datos_despues,
+                userId: $row->user_id,
+                ts: $row->created_at->toIso8601String(),
+            );
             $calc = hash('sha256', $prevHash.json_encode($payload, JSON_THROW_ON_ERROR));
 
-            // El hash actual puede no coincidir con la recomputación estricta
-            // porque incluimos 'ts' que usa now() en el momento de escritura.
-            // Validación débil: hash_prev es lo único firmemente verificable.
-            // Para una validación estricta hay que persistir el payload ts exacto.
-            if (! is_string($row->hash_actual) || strlen($row->hash_actual) !== 64) {
+            if ($calc !== $row->hash_actual) {
                 return [
                     'ok' => false,
-                    'razon' => 'hash_actual_malformed',
+                    'razon' => 'hash_actual_mismatch',
                     'audit_log_id' => $row->id,
+                    'esperado' => $calc,
+                    'encontrado' => $row->hash_actual,
                 ];
             }
 
-            unset($calc); // evita warning de variable sin usar
             $prevHash = $row->hash_actual;
         }
 
         return null; // ok
+    }
+
+    /**
+     * Estructura canónica del payload que se firma (tanto al escribir como al
+     * verificar). Mantener el orden de las claves estable es crítico porque
+     * json_encode preserva orden y el hash cambia si difiere.
+     */
+    private static function payloadParaHash(
+        ?int $empresaId,
+        string $modulo,
+        string $entidad,
+        mixed $entidadId,
+        string $accion,
+        ?array $datosAntes,
+        ?array $datosDespues,
+        ?int $userId,
+        string $ts,
+    ): array {
+        return [
+            'empresa_id' => $empresaId,
+            'modulo' => $modulo,
+            'entidad' => $entidad,
+            'entidad_id' => $entidadId,
+            'accion' => $accion,
+            'datos_antes' => $datosAntes,
+            'datos_despues' => $datosDespues,
+            'user_id' => $userId,
+            'ts' => $ts,
+        ];
     }
 
     /**

@@ -222,6 +222,150 @@ class DistriAppBridge
     }
 
     /**
+     * Búsqueda live de personas DistriApp (CUIL o nombre) para el autocomplete
+     * del editor de asientos / alta de auxiliares. Reemplaza el bulk sync
+     * cuando se necesita resolver un registro puntual sin sincronizar todo.
+     *
+     * @return Collection<int, object>
+     */
+    public function buscarPersonas(string $termino, int $limite = 20): Collection
+    {
+        $termino = trim($termino);
+        if ($termino === '') {
+            return collect();
+        }
+
+        $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $termino).'%';
+        $soloDigitos = preg_replace('/[^0-9]/', '', $termino);
+
+        return collect(DB::select(
+            'SELECT * FROM erp_v_distribuidores
+             WHERE CONCAT_WS(" ", apellidos, nombres) LIKE ?
+                OR REPLACE(REPLACE(cuil, "-", ""), " ", "") LIKE ?
+             ORDER BY apellidos, nombres
+             LIMIT '.(int) $limite,
+            [$like, $soloDigitos !== '' ? $soloDigitos.'%' : $like]
+        ));
+    }
+
+    /**
+     * Búsqueda live de clientes DistriApp por razón social o CUIT.
+     *
+     * @return Collection<int, object>
+     */
+    public function buscarClientes(string $termino, int $limite = 20): Collection
+    {
+        $termino = trim($termino);
+        if ($termino === '') {
+            return collect();
+        }
+
+        $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $termino).'%';
+        $soloDigitos = preg_replace('/[^0-9]/', '', $termino);
+
+        return collect(DB::select(
+            'SELECT * FROM erp_v_clientes_distriapp
+             WHERE activo = 1
+               AND (razon_social LIKE ?
+                    OR REPLACE(REPLACE(cuit, "-", ""), " ", "") LIKE ?)
+             ORDER BY razon_social
+             LIMIT '.(int) $limite,
+            [$like, $soloDigitos !== '' ? $soloDigitos.'%' : $like]
+        ));
+    }
+
+    /**
+     * Resuelve o crea un `erp_auxiliares` a partir de una persona DistriApp.
+     * Idempotente: si ya existe por (empresa, tipo, codigo), devuelve el existente.
+     *
+     * @return object  Fila de erp_auxiliares
+     */
+    public function crearDesdePersona(int $personaId, int $empresaId = 1): object
+    {
+        $persona = DB::selectOne(
+            'SELECT * FROM erp_v_distribuidores WHERE distriapp_id = ?',
+            [$personaId]
+        );
+        if (! $persona) {
+            throw new \DomainException('PERSONA_NO_ENCONTRADA: '.$personaId);
+        }
+
+        $codigo = 'DA-DIST-'.str_pad((string) $persona->distriapp_id, 5, '0', STR_PAD_LEFT);
+        $cuil = $persona->cuil ? preg_replace('/[^0-9]/', '', $persona->cuil) : null;
+        if ($cuil && strlen($cuil) !== 11) {
+            $cuil = null;
+        }
+
+        return $this->upsertAuxiliar($empresaId, 'Distribuidor', $codigo, [
+            'nombre' => trim($persona->nombre_completo ?? ''),
+            'cuit' => $cuil,
+            'tabla_ref' => 'basepersonal.personas',
+            'id_ref' => $persona->distriapp_id,
+        ]);
+    }
+
+    /**
+     * Resuelve o crea un `erp_auxiliares` a partir de un cliente DistriApp.
+     * Idempotente.
+     *
+     * @return object  Fila de erp_auxiliares
+     */
+    public function crearDesdeCliente(int $clienteId, int $empresaId = 1): object
+    {
+        $cliente = DB::selectOne(
+            'SELECT * FROM erp_v_clientes_distriapp WHERE distriapp_id = ?',
+            [$clienteId]
+        );
+        if (! $cliente) {
+            throw new \DomainException('CLIENTE_NO_ENCONTRADO: '.$clienteId);
+        }
+
+        $codigo = 'DA-CLI-'.str_pad((string) $cliente->distriapp_id, 5, '0', STR_PAD_LEFT);
+        $cuit = $cliente->cuit ? preg_replace('/[^0-9]/', '', $cliente->cuit) : null;
+        if ($cuit && strlen($cuit) !== 11) {
+            $cuit = null;
+        }
+
+        return $this->upsertAuxiliar($empresaId, 'Cliente', $codigo, [
+            'nombre' => $cliente->razon_social,
+            'cuit' => $cuit,
+            'tabla_ref' => 'basepersonal.clientes',
+            'id_ref' => $cliente->distriapp_id,
+        ]);
+    }
+
+    private function upsertAuxiliar(int $empresaId, string $tipo, string $codigo, array $attrs): object
+    {
+        $existing = DB::table('erp_auxiliares')
+            ->where('empresa_id', $empresaId)
+            ->where('tipo', $tipo)
+            ->where('codigo', $codigo)
+            ->first();
+
+        $payload = [
+            ...$attrs,
+            'activo' => 1,
+            'updated_at' => now(),
+        ];
+
+        if ($existing) {
+            DB::table('erp_auxiliares')->where('id', $existing->id)->update($payload);
+
+            return (object) DB::table('erp_auxiliares')->where('id', $existing->id)->first();
+        }
+
+        $id = DB::table('erp_auxiliares')->insertGetId([
+            'empresa_id' => $empresaId,
+            'tipo' => $tipo,
+            'codigo' => $codigo,
+            ...$payload,
+            'created_at' => now(),
+        ]);
+
+        return (object) DB::table('erp_auxiliares')->where('id', $id)->first();
+    }
+
+    /**
      * Sincroniza distribuidores DistriApp → erp_auxiliares (tipo=Distribuidor).
      */
     public function syncDistribuidores(int $empresaId = 1): array

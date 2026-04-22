@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'erp.auth' => \App\Erp\Http\Middleware\ErpAuth::class,
+            'erp.mfa.fresh' => \App\Erp\Http\Middleware\ErpRequireMfaFresh::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

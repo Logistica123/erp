@@ -2,16 +2,24 @@
 
 namespace App\Erp\Http\Middleware;
 
+use App\Erp\Models\Sesion;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Valida que el request tenga un token Sanctum válido, que el usuario tenga
- * perfil ERP activo y que haya completado MFA si su rol lo requiere.
- *
- * Para proteger operaciones sensibles, sumar el middleware `erp.mfa` o
- * verificar el permiso con policies (ver handoff §8.1-8.2).
+ * Autenticación ERP (SPEC_01 §5, §10):
+ *  1) Token Sanctum válido → $request->user()
+ *  2) Perfil ERP existente con acceso_erp=1 y no bloqueado
+ *  3) Si viene X-ERP-Session:
+ *       - existe, no cerrada, no expirada
+ *       - user_id coincide con el autenticado
+ *       - si perfil.mfa_habilitado, mfa_verificado=1
+ *     Deja la sesión en $request->attributes->get('erp_sesion') para middlewares
+ *     subsiguientes (ej. ErpRequireMfaFresh).
+ *  4) Si no viene el header, fallback al flujo legacy (token name *:mfa_ok*).
+ *     Esto mantiene compatibilidad hacia clientes que aún no mandan el header.
+ *  5) Actualiza ultimo_uso de la sesión en cada request.
  */
 class ErpAuth
 {
@@ -20,24 +28,42 @@ class ErpAuth
         $user = $request->user();
 
         if (! $user) {
-            return response()->json(['message' => 'No autenticado.'], 401);
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_AUTH']], 401);
         }
 
         $perfil = $user->erpPerfil;
 
         if (! $perfil || ! $perfil->acceso_erp) {
-            return response()->json(['message' => 'Sin acceso al ERP.'], 403);
+            return response()->json(['ok' => false, 'error' => ['code' => 'SIN_ACCESO_ERP']], 403);
         }
 
         if ($perfil->estaBloqueado()) {
-            return response()->json(['message' => 'Usuario bloqueado temporalmente.'], 423);
+            return response()->json(['ok' => false, 'error' => ['code' => 'USUARIO_BLOQUEADO']], 423);
         }
 
-        if ($perfil->mfa_habilitado) {
+        $sesionId = $request->header('X-ERP-Session');
+        if ($sesionId) {
+            $sesion = Sesion::find($sesionId);
+            if (! $sesion || ! $sesion->estaActiva() || $sesion->user_id !== $user->id) {
+                return response()->json(['ok' => false, 'error' => ['code' => 'SESION_INVALIDA']], 401);
+            }
+
+            if ($perfil->mfa_habilitado && ! $sesion->mfa_verificado) {
+                return response()->json([
+                    'ok' => false,
+                    'error' => ['code' => 'MFA_REQUERIDA'],
+                    'mfa_required' => true,
+                ], 401);
+            }
+
+            $sesion->update(['ultimo_uso' => now()]);
+            $request->attributes->set('erp_sesion', $sesion);
+        } elseif ($perfil->mfa_habilitado) {
             $tokenName = $user->currentAccessToken()?->name ?? '';
             if (! str_contains($tokenName, ':mfa_ok')) {
                 return response()->json([
-                    'message' => 'Requiere verificación MFA.',
+                    'ok' => false,
+                    'error' => ['code' => 'MFA_REQUERIDA'],
                     'mfa_required' => true,
                 ], 401);
             }

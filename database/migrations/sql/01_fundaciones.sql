@@ -310,6 +310,7 @@ CREATE TABLE IF NOT EXISTS erp_sesiones (
     user_id         BIGINT UNSIGNED NOT NULL,
     empresa_id      BIGINT UNSIGNED NOT NULL,
     mfa_verificado  TINYINT(1) NOT NULL DEFAULT 0,
+    mfa_verificado_at DATETIME NULL COMMENT 'Timestamp de la última verificación MFA exitosa (SPEC_01 §10: revalidación cada 15 min en endpoints sensibles).',
     ip              VARCHAR(45) NULL,
     user_agent      VARCHAR(400) NULL,
     inicio          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

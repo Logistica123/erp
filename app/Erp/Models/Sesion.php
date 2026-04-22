@@ -15,18 +15,31 @@ class Sesion extends Model
 
     protected $fillable = [
         'id', 'user_id', 'empresa_id',
-        'mfa_verificado', 'ip', 'user_agent',
+        'mfa_verificado', 'mfa_verificado_at',
+        'ip', 'user_agent',
         'inicio', 'ultimo_uso', 'expira_en',
         'cerrada_en', 'motivo_cierre',
     ];
 
     protected $casts = [
         'mfa_verificado' => 'boolean',
+        'mfa_verificado_at' => 'datetime',
         'inicio' => 'datetime',
         'ultimo_uso' => 'datetime',
         'expira_en' => 'datetime',
         'cerrada_en' => 'datetime',
     ];
+
+    public const MFA_FRESHNESS_MINUTES = 15;
+
+    public function mfaFresco(): bool
+    {
+        if (! $this->mfa_verificado || ! $this->mfa_verificado_at) {
+            return false;
+        }
+
+        return $this->mfa_verificado_at->diffInMinutes(now()) < self::MFA_FRESHNESS_MINUTES;
+    }
 
     public function user(): BelongsTo
     {

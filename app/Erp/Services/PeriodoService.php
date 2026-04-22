@@ -90,6 +90,64 @@ class PeriodoService
         });
     }
 
+    /**
+     * Bloquea un período sin cerrarlo definitivamente. Se usa cuando se presentó
+     * una DDJJ (IVA / IIBB) y no se quieren nuevos asientos sobre el período,
+     * pero todavía se puede desbloquear sin privilegios de super_admin
+     * (a diferencia de CERRADO → ABIERTO).
+     */
+    public function bloquear(Periodo $periodo, User $usuario, string $motivo): Periodo
+    {
+        if ($periodo->estado !== 'ABIERTO') {
+            throw new DomainException('PERIODO_NO_ABIERTO: solo se bloquean períodos ABIERTOS (actual: '.$periodo->estado.')');
+        }
+
+        return DB::transaction(function () use ($periodo, $usuario, $motivo) {
+            $periodo->update(['estado' => 'BLOQUEADO']);
+
+            $this->audit->logEvento(
+                accion: 'PERIODO_BLOQUEADO',
+                modulo: 'ejercicios',
+                descripcion: sprintf(
+                    'Bloqueo período %02d/%d por %s · motivo: %s',
+                    $periodo->mes,
+                    $periodo->anio,
+                    $usuario->name,
+                    $motivo
+                ),
+                empresaId: $periodo->ejercicio->empresa_id,
+            );
+
+            return $periodo->fresh();
+        });
+    }
+
+    public function desbloquear(Periodo $periodo, User $usuario, string $motivo): Periodo
+    {
+        if ($periodo->estado !== 'BLOQUEADO') {
+            throw new DomainException('PERIODO_NO_BLOQUEADO: estado actual '.$periodo->estado);
+        }
+
+        return DB::transaction(function () use ($periodo, $usuario, $motivo) {
+            $periodo->update(['estado' => 'ABIERTO']);
+
+            $this->audit->logEvento(
+                accion: 'PERIODO_DESBLOQUEADO',
+                modulo: 'ejercicios',
+                descripcion: sprintf(
+                    'Desbloqueo período %02d/%d por %s · motivo: %s',
+                    $periodo->mes,
+                    $periodo->anio,
+                    $usuario->name,
+                    $motivo
+                ),
+                empresaId: $periodo->ejercicio->empresa_id,
+            );
+
+            return $periodo->fresh();
+        });
+    }
+
     public function reabrir(Periodo $periodo, User $usuario, string $motivo): Periodo
     {
         if ($periodo->estado !== 'CERRADO') {

@@ -33,6 +33,48 @@ class PeriodosController
     }
 
     /**
+     * POST /api/erp/periodos/{id}/bloquear
+     */
+    public function bloquear(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'motivo' => ['required', 'string', 'min:3', 'max:300'],
+        ]);
+
+        $periodo = Periodo::findOrFail($id);
+        $this->authorize('cerrar', $periodo);
+
+        try {
+            $periodo = $this->service->bloquear($periodo, $request->user(), $data['motivo']);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => $periodo]);
+    }
+
+    /**
+     * POST /api/erp/periodos/{id}/desbloquear
+     */
+    public function desbloquear(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'motivo' => ['required', 'string', 'min:3', 'max:300'],
+        ]);
+
+        $periodo = Periodo::findOrFail($id);
+        $this->authorize('cerrar', $periodo);
+
+        try {
+            $periodo = $this->service->desbloquear($periodo, $request->user(), $data['motivo']);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => $periodo]);
+    }
+
+    /**
      * POST /api/erp/periodos/{id}/reabrir
      */
     public function reabrir(Request $request, int $id): JsonResponse

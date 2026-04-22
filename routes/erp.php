@@ -1,8 +1,16 @@
 <?php
 
 use App\Erp\Http\Controllers\AsientosController;
+use App\Erp\Http\Controllers\AuditoriaController;
 use App\Erp\Http\Controllers\AuthController;
+use App\Erp\Http\Controllers\AuxiliaresController;
 use App\Erp\Http\Controllers\BalanceController;
+use App\Erp\Http\Controllers\ConfigController;
+use App\Erp\Http\Controllers\CotizacionesController;
+use App\Erp\Http\Controllers\LibroDiarioController;
+use App\Erp\Http\Controllers\RevaluacionController;
+use App\Erp\Http\Controllers\RolesPermisosController;
+use App\Erp\Http\Controllers\UsuariosController;
 use App\Erp\Http\Controllers\CatalogosController;
 use App\Erp\Http\Controllers\CuentasContablesController;
 use App\Erp\Http\Controllers\EjerciciosController;
@@ -12,6 +20,7 @@ use App\Erp\Http\Controllers\LibroMayorController;
 use App\Erp\Http\Controllers\MovimientosBancariosController;
 use App\Erp\Http\Controllers\OrdenesPagoController;
 use App\Erp\Http\Controllers\PeriodosController;
+use App\Erp\Http\Controllers\SesionesController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('api/erp')->group(function () {
@@ -23,6 +32,15 @@ Route::prefix('api/erp')->group(function () {
     Route::middleware('auth:sanctum')
         ->post('/auth/mfa/verify', [AuthController::class, 'verifyMfa'])
         ->name('erp.auth.mfa.verify');
+
+    // Sesiones ERP (SPEC_01 §5.1) — independientes del token Sanctum.
+    // El token Sanctum autentica al user; el UUID de sesión lleva el estado
+    // MFA (mfa_verificado_at) y el timeout de 8h propio del ERP.
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/sesiones', [SesionesController::class, 'store'])->name('erp.sesiones.store');
+        Route::post('/sesiones/mfa', [SesionesController::class, 'mfa'])->name('erp.sesiones.mfa');
+        Route::delete('/sesiones', [SesionesController::class, 'destroy'])->name('erp.sesiones.destroy');
+    });
 
     // Endpoints autenticados con Sanctum + ErpAuth
     Route::middleware(['auth:sanctum', 'erp.auth'])->group(function () {
@@ -40,6 +58,10 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/monedas', [CatalogosController::class, 'monedas'])->name('erp.monedas');
         Route::get('/centros-costo', [CatalogosController::class, 'centrosCosto'])->name('erp.centros-costo');
         Route::get('/auxiliares', [CatalogosController::class, 'auxiliares'])->name('erp.auxiliares');
+        Route::get('/auxiliares/buscar', [AuxiliaresController::class, 'buscar'])->name('erp.auxiliares.buscar');
+        Route::post('/auxiliares', [AuxiliaresController::class, 'store'])->name('erp.auxiliares.store');
+        Route::get('/auxiliares/{id}/saldo', [AuxiliaresController::class, 'saldo'])
+            ->whereNumber('id')->name('erp.auxiliares.saldo');
         Route::get('/bancos', [CatalogosController::class, 'bancos'])->name('erp.bancos');
         Route::get('/cuentas-bancarias', [CatalogosController::class, 'cuentasBancarias'])->name('erp.cuentas-bancarias');
         Route::get('/cajas', [CatalogosController::class, 'cajas'])->name('erp.cajas');
@@ -59,9 +81,13 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/asientos/{id}/contabilizar', [AsientosController::class, 'contabilizar'])
             ->whereNumber('id')->name('erp.asientos.contabilizar');
         Route::post('/asientos/{id}/anular', [AsientosController::class, 'anular'])
+            ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.asientos.anular');
         Route::delete('/asientos/{id}', [AsientosController::class, 'destroy'])
             ->whereNumber('id')->name('erp.asientos.destroy');
+
+        // Libro diario (json|csv|html)
+        Route::get('/libro-diario', [LibroDiarioController::class, 'index'])->name('erp.libro-diario');
 
         // Libro mayor
         Route::get('/libro-mayor', [LibroMayorController::class, 'index'])->name('erp.libro-mayor');
@@ -70,16 +96,26 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/balance-sumas-saldos', [BalanceController::class, 'sumasSaldos'])
             ->name('erp.balance-ss');
 
-        // Cierre / apertura de período
+        // Cierre / apertura de período — sensibles: exigen MFA fresco (<15 min)
         Route::post('/periodos/{id}/cerrar', [PeriodosController::class, 'cerrar'])
+            ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.periodos.cerrar');
+        Route::post('/periodos/{id}/bloquear', [PeriodosController::class, 'bloquear'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.periodos.bloquear');
+        Route::post('/periodos/{id}/desbloquear', [PeriodosController::class, 'desbloquear'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.periodos.desbloquear');
         Route::post('/periodos/{id}/reabrir', [PeriodosController::class, 'reabrir'])
+            ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.periodos.reabrir');
 
         // Cierre / apertura de ejercicio (asiento refundición automático al cerrar)
         Route::post('/ejercicios/{id}/cerrar', [EjerciciosController::class, 'cerrar'])
+            ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.ejercicios.cerrar');
         Route::post('/ejercicios/{id}/reabrir', [EjerciciosController::class, 'reabrir'])
+            ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.ejercicios.reabrir');
 
         // Estados contables (FACPCE)
@@ -103,6 +139,39 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.op.pagar');
         Route::post('/ordenes-pago/{id}/anular', [OrdenesPagoController::class, 'anular'])
             ->whereNumber('id')->name('erp.op.anular');
+
+        // Administración — usuarios, roles, permisos, config, cotizaciones
+        Route::get('/usuarios', [UsuariosController::class, 'index'])->name('erp.usuarios.index');
+        Route::post('/usuarios', [UsuariosController::class, 'store'])
+            ->middleware('erp.mfa.fresh')->name('erp.usuarios.store');
+        Route::patch('/usuarios/{id}/roles', [UsuariosController::class, 'updateRoles'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.usuarios.roles');
+
+        Route::get('/roles', [RolesPermisosController::class, 'rolesIndex'])->name('erp.roles.index');
+        Route::get('/permisos', [RolesPermisosController::class, 'permisosIndex'])->name('erp.permisos.index');
+        Route::get('/mi-permisos', [RolesPermisosController::class, 'misPermisos'])->name('erp.mi-permisos');
+
+        Route::get('/config', [ConfigController::class, 'index'])->name('erp.config.index');
+        Route::patch('/config/{clave}', [ConfigController::class, 'update'])
+            ->middleware('erp.mfa.fresh')->name('erp.config.update');
+
+        Route::get('/cotizaciones', [CotizacionesController::class, 'index'])->name('erp.cotizaciones.index');
+        Route::post('/cotizaciones', [CotizacionesController::class, 'store'])->name('erp.cotizaciones.store');
+        Route::post('/cotizaciones/sync-bcra', [CotizacionesController::class, 'syncBcra'])
+            ->name('erp.cotizaciones.sync-bcra');
+
+        // Revaluación USD mensual (RN-11)
+        Route::post('/revaluacion/ejecutar', [RevaluacionController::class, 'ejecutar'])
+            ->middleware('erp.mfa.fresh')
+            ->name('erp.revaluacion.ejecutar');
+
+        // Auditoría (log inmutable con hash-chain)
+        Route::get('/auditoria', [AuditoriaController::class, 'index'])->name('erp.auditoria.index');
+        Route::get('/auditoria/verificar-cadena', [AuditoriaController::class, 'verificarCadena'])
+            ->name('erp.auditoria.verificar-cadena');
+        Route::get('/auditoria/verificar-integridad-asientos', [AuditoriaController::class, 'verificarIntegridadAsientos'])
+            ->name('erp.auditoria.verificar-integridad-asientos');
 
         // Dashboard
         Route::get('/dashboard/stats', [\App\Erp\Http\Controllers\DashboardController::class, 'stats'])

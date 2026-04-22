@@ -195,19 +195,7 @@ class AsientoService
             }
 
             // RN-6: hash de integridad
-            $payload = [
-                'id' => $asiento->id,
-                'fecha' => $asiento->fecha->toDateString(),
-                'diario_id' => $asiento->diario_id,
-                'numero' => $asiento->numero,
-                'movimientos' => $movs->map(fn ($m) => [
-                    'linea' => $m->linea,
-                    'cuenta_id' => $m->cuenta_id,
-                    'debe' => number_format((float) $m->debe, 2, '.', ''),
-                    'haber' => number_format((float) $m->haber, 2, '.', ''),
-                ])->all(),
-            ];
-            $hash = hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
+            $hash = self::calcularHashIntegridad($asiento, $movs);
 
             $asiento->update([
                 'estado' => Asiento::ESTADO_CONTABILIZADO,
@@ -357,6 +345,66 @@ class AsientoService
                 throw new DomainException("AUXILIAR_REQUERIDO: línea {$linea}, cuenta {$cuenta->codigo} requiere auxiliar.");
             }
         }
+    }
+
+    /**
+     * Recomputa el hash_integridad de un asiento usando la misma regla que
+     * aplicó contabilizar(). Si algún movimiento se modificó por fuera del
+     * flujo contable (UPDATE directo a SQL), el hash recomputado diferirá.
+     *
+     * @param  \Illuminate\Support\Collection<int, MovimientoAsiento>|null  $movs
+     */
+    public static function calcularHashIntegridad(Asiento $asiento, $movs = null): string
+    {
+        $movs ??= $asiento->movimientos()->orderBy('linea')->get();
+
+        $payload = [
+            'id' => $asiento->id,
+            'fecha' => $asiento->fecha instanceof Carbon
+                ? $asiento->fecha->toDateString()
+                : Carbon::parse($asiento->fecha)->toDateString(),
+            'diario_id' => $asiento->diario_id,
+            'numero' => $asiento->numero,
+            'movimientos' => $movs->map(fn ($m) => [
+                'linea' => $m->linea,
+                'cuenta_id' => $m->cuenta_id,
+                'debe' => number_format((float) $m->debe, 2, '.', ''),
+                'haber' => number_format((float) $m->haber, 2, '.', ''),
+            ])->all(),
+        ];
+
+        return hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * Itera los asientos CONTABILIZADOS y devuelve los que presentan un
+     * hash_integridad distinto al recomputado (tamper evidente).
+     *
+     * @return array<int, array{asiento_id:int, numero:int, esperado:string, encontrado:?string}>
+     */
+    public function verificarIntegridadAsientos(?int $empresaId = null, ?int $periodoId = null): array
+    {
+        $query = Asiento::query()
+            ->where('estado', Asiento::ESTADO_CONTABILIZADO)
+            ->when($empresaId, fn ($q) => $q->where('empresa_id', $empresaId))
+            ->when($periodoId, fn ($q) => $q->where('periodo_id', $periodoId))
+            ->with(['movimientos' => fn ($q) => $q->orderBy('linea')])
+            ->orderBy('id');
+
+        $fallas = [];
+        foreach ($query->cursor() as $asiento) {
+            $esperado = self::calcularHashIntegridad($asiento, $asiento->movimientos);
+            if ($esperado !== $asiento->hash_integridad) {
+                $fallas[] = [
+                    'asiento_id' => $asiento->id,
+                    'numero' => $asiento->numero,
+                    'esperado' => $esperado,
+                    'encontrado' => $asiento->hash_integridad,
+                ];
+            }
+        }
+
+        return $fallas;
     }
 
     private function resolverCuentaId(int $empresaId, string $codigo): int

@@ -25,5 +25,15 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // API-only app: unauthenticated debe devolver JSON 401, no redirect a
+        // route('login') (no existe). Laravel 13 arroja AuthenticationException
+        // que por default intenta redirect y termina en 500 si no hay login web.
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'ok' => false,
+                    'error' => ['code' => 'NO_AUTH', 'message' => 'No autenticado.'],
+                ], 401);
+            }
+        });
     })->create();

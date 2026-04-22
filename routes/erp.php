@@ -25,6 +25,7 @@ use App\Erp\Http\Controllers\LibroMayorController;
 use App\Erp\Http\Controllers\MovimientosBancariosController;
 use App\Erp\Http\Controllers\OrdenesPagoController;
 use App\Erp\Http\Controllers\PeriodosController;
+use App\Erp\Http\Controllers\ReportesTesoreriaController;
 use App\Erp\Http\Controllers\SesionesController;
 use Illuminate\Support\Facades\Route;
 
@@ -138,13 +139,30 @@ Route::prefix('api/erp')->group(function () {
         Route::delete('/extractos/{id}', [ExtractosController::class, 'destroy'])
             ->whereNumber('id')->name('erp.extractos.destroy');
 
-        // Tesorería — movimientos bancarios
+        // Tesorería — movimientos bancarios + conciliación (SPEC 02 §6.3, RN-14/21/26)
         Route::get('/movimientos-bancarios', [MovimientosBancariosController::class, 'index'])->name('erp.mov-banc.index');
         Route::post('/movimientos-bancarios', [MovimientosBancariosController::class, 'store'])->name('erp.mov-banc.store');
+        Route::post('/movimientos-bancarios/autoconciliar', [MovimientosBancariosController::class, 'autoconciliar'])
+            ->name('erp.mov-banc.autoconciliar');
+        Route::patch('/movimientos-bancarios/{id}/etiquetar', [MovimientosBancariosController::class, 'etiquetar'])
+            ->whereNumber('id')->name('erp.mov-banc.etiquetar');
         Route::post('/movimientos-bancarios/{id}/conciliar', [MovimientosBancariosController::class, 'conciliar'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar');
+        Route::post('/movimientos-bancarios/{id}/desconciliar', [MovimientosBancariosController::class, 'desconciliar'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.mov-banc.desconciliar');
         Route::post('/movimientos-bancarios/{id}/ignorar', [MovimientosBancariosController::class, 'ignorar'])
             ->whereNumber('id')->name('erp.mov-banc.ignorar');
+
+        // Tesorería — reportes (SPEC 02 §6.9)
+        Route::get('/reportes/saldos', [ReportesTesoreriaController::class, 'saldos'])
+            ->name('erp.reportes.saldos');
+        Route::get('/reportes/flujo-caja', [ReportesTesoreriaController::class, 'flujoCaja'])
+            ->name('erp.reportes.flujo-caja');
+        Route::get('/reportes/pendientes-conciliar', [ReportesTesoreriaController::class, 'pendientesConciliar'])
+            ->name('erp.reportes.pendientes');
+        Route::get('/reportes/echeq-en-cartera', [ReportesTesoreriaController::class, 'echeqEnCartera'])
+            ->name('erp.reportes.echeq-cartera');
 
         // Tesorería — caja física (SPEC 02 §6.8, RN-16/22/23)
         Route::get('/caja/movimientos', [CajaController::class, 'movimientos'])->name('erp.caja.movimientos');

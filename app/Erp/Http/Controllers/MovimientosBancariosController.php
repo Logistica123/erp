@@ -3,21 +3,31 @@
 namespace App\Erp\Http\Controllers;
 
 use App\Erp\Models\Tesoreria\MovimientoBancario;
+use App\Erp\Services\ConciliacionService;
 use App\Erp\Services\MovimientoBancarioService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
+/**
+ * Endpoints de movimientos bancarios + conciliación (SPEC 02 §6.3).
+ *
+ *   GET   /movimientos-bancarios                         list
+ *   POST  /movimientos-bancarios                         carga manual
+ *   PATCH /movimientos-bancarios/{id}/etiquetar          asigna cuenta propuesta
+ *   POST  /movimientos-bancarios/{id}/conciliar          polimórfica (RN-14/21)
+ *   POST  /movimientos-bancarios/{id}/desconciliar       RN-21 reverso
+ *   POST  /movimientos-bancarios/{id}/ignorar            RN-26 motivo catálogo
+ *   POST  /movimientos-bancarios/autoconciliar           bulk por etiqueta/OP/cobro
+ */
 class MovimientosBancariosController
 {
-    public function __construct(private readonly MovimientoBancarioService $service) {}
+    public function __construct(
+        private readonly MovimientoBancarioService $service,
+        private readonly ConciliacionService $concilService,
+    ) {}
 
-    /**
-     * GET /api/erp/movimientos-bancarios
-     *   ?cuenta_bancaria_id=
-     *   ?estado=PENDIENTE|ETIQUETADO|CONCILIADO|IGNORADO
-     *   ?desde=&hasta=
-     */
     public function index(Request $request): JsonResponse
     {
         $query = MovimientoBancario::query()
@@ -77,31 +87,78 @@ class MovimientosBancariosController
         return response()->json(['data' => $mov->load('cuentaBancaria.banco')], 201);
     }
 
+    public function etiquetar(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'cuenta_contable_id' => ['required', 'integer', 'exists:erp_cuentas_contables,id'],
+            'etiqueta_sugerida' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $mov = MovimientoBancario::findOrFail($id);
+        if ($mov->estado === MovimientoBancario::ESTADO_CONCILIADO) {
+            return response()->json([
+                'error' => ['code' => 'MOVIMIENTO_CONCILIADO', 'message' => 'RN-21: desconciliá antes de re-etiquetar'],
+            ], 409);
+        }
+
+        $mov->update([
+            'estado' => MovimientoBancario::ESTADO_ETIQUETADO,
+            'cuenta_contable_propuesta_id' => $data['cuenta_contable_id'],
+            'etiqueta_sugerida' => $data['etiqueta_sugerida'] ?? $mov->etiqueta_sugerida,
+        ]);
+
+        return response()->json(['ok' => true, 'data' => $mov->fresh()]);
+    }
+
+    /**
+     * Conciliación polimórfica. Acepta:
+     *  · referencia_tipo=ORDEN_PAGO + referencia_id
+     *  · referencia_tipo=COBRO + referencia_id
+     *  · referencia_tipo=TRANSFERENCIA_INTERNA + referencia_id
+     *  · referencia_tipo=ASIENTO_MANUAL + cuenta_contable_contraparte_id + auxiliar_id (opt)
+     *  · referencia_tipo=ECHEQ + referencia_id (eCheq se acredita por EcheqService; este endpoint solo linkea)
+     */
     public function conciliar(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
-            'cuenta_contable_id' => ['required', 'integer'],
-            'centro_costo_id' => ['nullable', 'integer'],
+            'referencia_tipo' => ['required', Rule::in([
+                'ORDEN_PAGO', 'COBRO', 'TRANSFERENCIA_INTERNA', 'ASIENTO_MANUAL', 'ECHEQ',
+            ])],
+            'referencia_id' => ['required_unless:referencia_tipo,ASIENTO_MANUAL', 'integer'],
+            'cuenta_contable_contraparte_id' => ['required_if:referencia_tipo,ASIENTO_MANUAL', 'integer'],
             'auxiliar_id' => ['nullable', 'integer'],
+            'centro_costo_id' => ['nullable', 'integer'],
+            'importe_conciliado' => ['nullable', 'numeric', 'gt:0'],
             'glosa' => ['nullable', 'string', 'max:500'],
+            'observacion' => ['nullable', 'string', 'max:300'],
         ]);
 
         $mov = MovimientoBancario::findOrFail($id);
 
         try {
-            $mov = $this->service->conciliar(
-                mov: $mov,
-                cuentaContableContraparteId: $data['cuenta_contable_id'],
-                usuarioId: $request->user()->id,
-                centroCostoId: $data['centro_costo_id'] ?? null,
-                auxiliarId: $data['auxiliar_id'] ?? null,
-                glosa: $data['glosa'] ?? null,
-            );
+            $mov = $this->concilService->conciliar($mov, $data, $request->user());
         } catch (DomainException $e) {
             return $this->domainError($e);
         }
 
-        return response()->json(['data' => $mov->load('cuentaBancaria.banco', 'asiento')]);
+        return response()->json(['ok' => true, 'data' => $mov->load('asiento')]);
+    }
+
+    public function desconciliar(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'motivo' => ['required', 'string', 'min:3', 'max:300'],
+        ]);
+
+        $mov = MovimientoBancario::findOrFail($id);
+
+        try {
+            $mov = $this->concilService->desconciliar($mov, $data['motivo'], $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => $mov]);
     }
 
     public function ignorar(Request $request, int $id): JsonResponse
@@ -114,12 +171,32 @@ class MovimientosBancariosController
         $mov = MovimientoBancario::findOrFail($id);
 
         try {
-            $mov = $this->service->ignorar($mov, $data['motivo_ignorado_id'], $data['observacion'] ?? null);
+            $mov = $this->concilService->ignorar($mov, $data['motivo_ignorado_id'], $data['observacion'] ?? null, $request->user());
         } catch (DomainException $e) {
             return $this->domainError($e);
         }
 
-        return response()->json(['data' => $mov]);
+        return response()->json(['ok' => true, 'data' => $mov]);
+    }
+
+    public function autoconciliar(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'cuenta_bancaria_id' => ['required', 'integer', 'exists:erp_cuentas_bancarias,id'],
+            'desde' => ['required', 'date'],
+            'hasta' => ['required', 'date', 'after_or_equal:desde'],
+            'rango_dias' => ['nullable', 'integer', 'min:0', 'max:30'],
+        ]);
+
+        $resumen = $this->concilService->autoconciliar(
+            $data['cuenta_bancaria_id'],
+            $data['desde'],
+            $data['hasta'],
+            (int) ($data['rango_dias'] ?? 5),
+            $request->user(),
+        );
+
+        return response()->json(['ok' => true, 'data' => $resumen]);
     }
 
     private function domainError(DomainException $e): JsonResponse

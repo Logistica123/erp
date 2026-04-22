@@ -5,13 +5,16 @@ use App\Erp\Http\Controllers\AuditoriaController;
 use App\Erp\Http\Controllers\AuthController;
 use App\Erp\Http\Controllers\AuxiliaresController;
 use App\Erp\Http\Controllers\BalanceController;
+use App\Erp\Http\Controllers\CajaController;
 use App\Erp\Http\Controllers\ConfigController;
+use App\Erp\Http\Controllers\CobrosController;
 use App\Erp\Http\Controllers\CotizacionesController;
 use App\Erp\Http\Controllers\EcheqController;
 use App\Erp\Http\Controllers\ExtractosController;
 use App\Erp\Http\Controllers\LibroDiarioController;
 use App\Erp\Http\Controllers\RevaluacionController;
 use App\Erp\Http\Controllers\RolesPermisosController;
+use App\Erp\Http\Controllers\TransferenciasInternasController;
 use App\Erp\Http\Controllers\UsuariosController;
 use App\Erp\Http\Controllers\CatalogosController;
 use App\Erp\Http\Controllers\CuentasContablesController;
@@ -142,6 +145,32 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.mov-banc.conciliar');
         Route::post('/movimientos-bancarios/{id}/ignorar', [MovimientosBancariosController::class, 'ignorar'])
             ->whereNumber('id')->name('erp.mov-banc.ignorar');
+
+        // Tesorería — caja física (SPEC 02 §6.8, RN-16/22/23)
+        Route::get('/caja/movimientos', [CajaController::class, 'movimientos'])->name('erp.caja.movimientos');
+        Route::get('/caja/arqueos', [CajaController::class, 'arqueos'])->name('erp.caja.arqueos');
+        Route::post('/caja/arqueo', [CajaController::class, 'registrarArqueo'])->name('erp.caja.arqueo');
+        Route::get('/caja/fechas-sin-arqueo', [CajaController::class, 'fechasSinArqueo'])
+            ->name('erp.caja.fechas-sin-arqueo');
+
+        // Tesorería — transferencias internas (SPEC 02 §6.7, RN-20)
+        Route::get('/transferencias-internas', [TransferenciasInternasController::class, 'index'])
+            ->name('erp.ti.index');
+        Route::post('/transferencias-internas', [TransferenciasInternasController::class, 'store'])
+            ->name('erp.ti.store');
+        Route::post('/transferencias-internas/{id}/contabilizar', [TransferenciasInternasController::class, 'contabilizar'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.ti.contabilizar');
+        Route::post('/transferencias-internas/{id}/anular', [TransferenciasInternasController::class, 'anular'])
+            ->whereNumber('id')->name('erp.ti.anular');
+
+        // Tesorería — cobros (SPEC 02 §6.6)
+        Route::get('/cobros', [CobrosController::class, 'index'])->name('erp.cobros.index');
+        Route::post('/cobros', [CobrosController::class, 'store'])->name('erp.cobros.store');
+        Route::get('/cobros/{id}', [CobrosController::class, 'show'])
+            ->whereNumber('id')->name('erp.cobros.show');
+        Route::post('/cobros/{id}/anular', [CobrosController::class, 'anular'])
+            ->whereNumber('id')->name('erp.cobros.anular');
 
         // Tesorería — eCheq (SPEC 02 §6.4)
         Route::get('/echeq', [EcheqController::class, 'index'])->name('erp.echeq.index');

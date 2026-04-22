@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS erp_movimientos_bancarios (
     KEY ix_mov_bancarios_estado (estado),
     KEY ix_mov_bancarios_extracto (extracto_id),
     KEY ix_mov_bancarios_asiento (asiento_id),
+    UNIQUE KEY uk_mov_bancarios_hash_linea (cuenta_bancaria_id, hash_linea),
     CONSTRAINT fk_mov_bancarios_extracto FOREIGN KEY (extracto_id) REFERENCES erp_extractos_bancarios(id) ON DELETE CASCADE,
     CONSTRAINT fk_mov_bancarios_cuenta FOREIGN KEY (cuenta_bancaria_id) REFERENCES erp_cuentas_bancarias(id),
     CONSTRAINT fk_mov_bancarios_cta_prop FOREIGN KEY (cuenta_contable_propuesta_id) REFERENCES erp_cuentas_contables(id),

@@ -9,3 +9,7 @@
 /.github export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
+
+# Fixtures bancarios: preservar line endings (los parsers calculan SHA-256
+# sobre el contenido byte-a-byte, cambiar CRLF→LF rompería los tests).
+tests/Fixtures/** binary

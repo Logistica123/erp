@@ -7,6 +7,7 @@ use App\Erp\Http\Controllers\AuxiliaresController;
 use App\Erp\Http\Controllers\BalanceController;
 use App\Erp\Http\Controllers\ConfigController;
 use App\Erp\Http\Controllers\CotizacionesController;
+use App\Erp\Http\Controllers\ExtractosController;
 use App\Erp\Http\Controllers\LibroDiarioController;
 use App\Erp\Http\Controllers\RevaluacionController;
 use App\Erp\Http\Controllers\RolesPermisosController;
@@ -123,6 +124,15 @@ Route::prefix('api/erp')->group(function () {
             [EstadosContablesController::class, 'situacionPatrimonial'])->name('erp.ec.sp');
         Route::get('/estados-contables/resultados',
             [EstadosContablesController::class, 'resultados'])->name('erp.ec.er');
+
+        // Tesorería — extractos bancarios (SPEC 02 §6.2)
+        Route::post('/extractos/importar', [ExtractosController::class, 'importar'])
+            ->name('erp.extractos.importar');
+        Route::get('/extractos', [ExtractosController::class, 'index'])->name('erp.extractos.index');
+        Route::get('/extractos/{id}/movimientos', [ExtractosController::class, 'movimientos'])
+            ->whereNumber('id')->name('erp.extractos.movimientos');
+        Route::delete('/extractos/{id}', [ExtractosController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.extractos.destroy');
 
         // Tesorería — movimientos bancarios
         Route::get('/movimientos-bancarios', [MovimientosBancariosController::class, 'index'])->name('erp.mov-banc.index');

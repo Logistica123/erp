@@ -7,6 +7,7 @@ use App\Erp\Http\Controllers\AuxiliaresController;
 use App\Erp\Http\Controllers\BalanceController;
 use App\Erp\Http\Controllers\ConfigController;
 use App\Erp\Http\Controllers\CotizacionesController;
+use App\Erp\Http\Controllers\EcheqController;
 use App\Erp\Http\Controllers\ExtractosController;
 use App\Erp\Http\Controllers\LibroDiarioController;
 use App\Erp\Http\Controllers\RevaluacionController;
@@ -142,10 +143,36 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/movimientos-bancarios/{id}/ignorar', [MovimientosBancariosController::class, 'ignorar'])
             ->whereNumber('id')->name('erp.mov-banc.ignorar');
 
-        // Tesorería — órdenes de pago
+        // Tesorería — eCheq (SPEC 02 §6.4)
+        Route::get('/echeq', [EcheqController::class, 'index'])->name('erp.echeq.index');
+        Route::get('/echeq/{id}', [EcheqController::class, 'show'])
+            ->whereNumber('id')->name('erp.echeq.show');
+        Route::post('/echeq/{id}/depositar', [EcheqController::class, 'depositar'])
+            ->whereNumber('id')->name('erp.echeq.depositar');
+        Route::post('/echeq/{id}/acreditar', [EcheqController::class, 'acreditar'])
+            ->whereNumber('id')->name('erp.echeq.acreditar');
+        Route::post('/echeq/{id}/rechazar', [EcheqController::class, 'rechazar'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.echeq.rechazar');
+        Route::post('/echeq/{id}/anular', [EcheqController::class, 'anular'])
+            ->whereNumber('id')->name('erp.echeq.anular');
+
+        // Tesorería — órdenes de pago (SPEC 02 §6.5)
         Route::get('/ordenes-pago', [OrdenesPagoController::class, 'index'])->name('erp.op.index');
         Route::post('/ordenes-pago', [OrdenesPagoController::class, 'store'])->name('erp.op.store');
+        Route::get('/ordenes-pago/{id}', [OrdenesPagoController::class, 'show'])
+            ->whereNumber('id')->name('erp.op.show');
+        Route::patch('/ordenes-pago/{id}', [OrdenesPagoController::class, 'update'])
+            ->whereNumber('id')->name('erp.op.update');
+        Route::post('/ordenes-pago/{id}/cargar-banco', [OrdenesPagoController::class, 'cargarBanco'])
+            ->whereNumber('id')->name('erp.op.cargar-banco');
+        Route::post('/ordenes-pago/{id}/liberar', [OrdenesPagoController::class, 'liberar'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.op.liberar');
+        Route::post('/ordenes-pago/{id}/rechazar', [OrdenesPagoController::class, 'rechazar'])
+            ->whereNumber('id')->name('erp.op.rechazar');
         Route::post('/ordenes-pago/{id}/pagar', [OrdenesPagoController::class, 'pagar'])
+            ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.op.pagar');
         Route::post('/ordenes-pago/{id}/anular', [OrdenesPagoController::class, 'anular'])
             ->whereNumber('id')->name('erp.op.anular');

@@ -5,7 +5,10 @@ namespace App\Erp\Services;
 use App\Erp\Models\Asiento;
 use App\Erp\Models\Auxiliar;
 use App\Erp\Models\Tesoreria\CuentaBancaria;
+use App\Erp\Models\Tesoreria\OpItem;
+use App\Erp\Models\Tesoreria\OpMedio;
 use App\Erp\Models\Tesoreria\OrdenPago;
+use App\Erp\Support\AuditLogger;
 use App\Models\User;
 use DomainException;
 use Illuminate\Support\Carbon;
@@ -29,8 +32,13 @@ class OrdenPagoService
     public function __construct(
         private readonly AsientoService $asientoService,
         private readonly MovimientoBancarioService $movService,
+        private readonly AuditLogger $audit,
     ) {}
 
+    /**
+     * Crea una OP en estado BORRADOR. Si se envían items y/o medios, los
+     * persiste y valida que la suma de medios iguale el importe neto.
+     */
     public function crear(array $data): OrdenPago
     {
         return DB::transaction(function () use ($data) {
@@ -44,6 +52,7 @@ class OrdenPagoService
                 'fecha' => $data['fecha'],
                 'tipo' => $data['tipo'] ?? 'PROVEEDOR',
                 'auxiliar_id' => $auxiliar->id,
+                'liq_encabezado_id' => $data['liq_encabezado_id'] ?? null,
                 'moneda_id' => $data['moneda_id'],
                 'cotizacion' => $data['cotizacion'] ?? 1.0,
                 'importe' => $data['importe'],
@@ -54,6 +63,126 @@ class OrdenPagoService
                 'observaciones' => $data['observaciones'] ?? null,
                 'creado_por_user_id' => $data['usuario_id'],
             ]);
+
+            $this->sincronizarItems($op, $data['items'] ?? []);
+            $this->sincronizarMedios($op, $data['medios'] ?? []);
+
+            return $op->fresh(['items', 'medios']);
+        });
+    }
+
+    /**
+     * Actualiza una OP en estado BORRADOR. Cualquier otro estado rechaza
+     * con OP_INMUTABLE (trigger SQL trg_op_inmutable_bu respalda).
+     */
+    public function actualizar(OrdenPago $op, array $data): OrdenPago
+    {
+        if ($op->estado !== OrdenPago::ESTADO_BORRADOR) {
+            throw new DomainException('OP_INMUTABLE: solo se edita en BORRADOR (actual: '.$op->estado.')');
+        }
+
+        return DB::transaction(function () use ($op, $data) {
+            $op->update(array_intersect_key($data, array_flip([
+                'fecha', 'tipo', 'moneda_id', 'cotizacion',
+                'importe', 'importe_bruto', 'total_retenciones',
+                'concepto', 'observaciones', 'liq_encabezado_id',
+            ])));
+
+            if (array_key_exists('items', $data)) {
+                $op->items()->delete();
+                $this->sincronizarItems($op, $data['items'] ?? []);
+            }
+            if (array_key_exists('medios', $data)) {
+                $op->medios()->delete();
+                $this->sincronizarMedios($op, $data['medios'] ?? []);
+            }
+
+            return $op->fresh(['items', 'medios']);
+        });
+    }
+
+    /**
+     * BORRADOR → CARGADA_BANCO. Tesorero marca que ya cargó la OP en el
+     * home banking. A partir de acá el trigger trg_op_inmutable_bu (RN-17)
+     * rechaza cualquier cambio en campos críticos.
+     */
+    public function cargarBanco(OrdenPago $op, User $usuario): OrdenPago
+    {
+        if ($op->estado !== OrdenPago::ESTADO_BORRADOR) {
+            throw new DomainException('OP_ESTADO_INVALIDO: solo se carga desde BORRADOR (actual: '.$op->estado.')');
+        }
+
+        // Validación final pre-carga: medios deben balancear con importe.
+        $this->validarBalanceMedios($op);
+
+        return DB::transaction(function () use ($op, $usuario) {
+            $op->update([
+                'estado' => OrdenPago::ESTADO_CARGADA_BANCO,
+                'fecha_carga_banco' => now(),
+                'cargado_por_user_id' => $usuario->id,
+            ]);
+
+            $this->audit->logEvento(
+                accion: 'OP_CARGADA_BANCO',
+                modulo: 'tesoreria',
+                descripcion: sprintf('OP %s marcada como cargada en home banking por %s', $op->numero, $usuario->name),
+                empresaId: $op->empresa_id,
+            );
+
+            return $op->fresh();
+        });
+    }
+
+    /**
+     * CARGADA_BANCO → LIBERADA. Marca que Dirección liberó la operación en
+     * el home banking (el ERP solo registra el hecho informado por el usuario).
+     */
+    public function liberar(OrdenPago $op, User $usuario): OrdenPago
+    {
+        if ($op->estado !== OrdenPago::ESTADO_CARGADA_BANCO) {
+            throw new DomainException('OP_ESTADO_INVALIDO: solo se libera desde CARGADA_BANCO (actual: '.$op->estado.')');
+        }
+
+        return DB::transaction(function () use ($op, $usuario) {
+            $op->update([
+                'estado' => OrdenPago::ESTADO_LIBERADA,
+                'fecha_liberacion' => now(),
+                'liberado_por_user_id' => $usuario->id,
+            ]);
+
+            $this->audit->logEvento(
+                accion: 'OP_LIBERADA',
+                modulo: 'tesoreria',
+                descripcion: sprintf('OP %s liberada por %s', $op->numero, $usuario->name),
+                empresaId: $op->empresa_id,
+            );
+
+            return $op->fresh();
+        });
+    }
+
+    /**
+     * CARGADA_BANCO | LIBERADA → RECHAZADA. El banco rebotó la operación
+     * (fondos, CBU erróneo, etc.). La OP puede re-crearse desde cero.
+     */
+    public function rechazar(OrdenPago $op, string $motivo, User $usuario): OrdenPago
+    {
+        if (! in_array($op->estado, [OrdenPago::ESTADO_CARGADA_BANCO, OrdenPago::ESTADO_LIBERADA], true)) {
+            throw new DomainException('OP_ESTADO_INVALIDO: solo se rechaza desde CARGADA_BANCO o LIBERADA (actual: '.$op->estado.')');
+        }
+
+        return DB::transaction(function () use ($op, $motivo, $usuario) {
+            $op->update([
+                'estado' => OrdenPago::ESTADO_RECHAZADA,
+                'motivo_rechazo' => $motivo,
+            ]);
+
+            $this->audit->logEvento(
+                accion: 'OP_RECHAZADA',
+                modulo: 'tesoreria',
+                descripcion: sprintf('OP %s rechazada: %s', $op->numero, $motivo),
+                empresaId: $op->empresa_id,
+            );
 
             return $op->fresh();
         });
@@ -71,6 +200,13 @@ class OrdenPagoService
         }
         if (in_array($op->estado, [OrdenPago::ESTADO_ANULADA, OrdenPago::ESTADO_RECHAZADA], true)) {
             throw new DomainException('OP_NO_PAGABLE: estado '.$op->estado);
+        }
+        // Flujo ideal: LIBERADA → PAGADA. Permitimos también desde BORRADOR
+        // para operaciones expeditivas (pago de contado sin pasar por cargar
+        // al banco). CARGADA_BANCO sin liberar no paga (el banco aún no
+        // confirmó que el débito salió).
+        if ($op->estado === OrdenPago::ESTADO_CARGADA_BANCO) {
+            throw new DomainException('OP_FALTA_LIBERAR: la OP está CARGADA_BANCO pero aún no LIBERADA');
         }
 
         return DB::transaction(function () use ($op, $cuentaBancariaId, $usuario, $concepto) {
@@ -132,6 +268,66 @@ class OrdenPagoService
         ]);
 
         return $op->fresh();
+    }
+
+    /**
+     * Crea registros erp_op_items para esta OP. Cada item: tipo_item + concepto
+     * + importe, opcionalmente comprobante_id (si FACTURA_COMPRA) o
+     * cuenta_contable_id (si OTRO/ADELANTO).
+     */
+    private function sincronizarItems(OrdenPago $op, array $items): void
+    {
+        foreach ($items as $idx => $i) {
+            OpItem::create([
+                'op_id' => $op->id,
+                'orden' => $i['orden'] ?? ($idx + 1),
+                'tipo_item' => $i['tipo_item'] ?? OpItem::TIPO_OTRO,
+                'comprobante_id' => $i['comprobante_id'] ?? null,
+                'cuenta_contable_id' => $i['cuenta_contable_id'] ?? null,
+                'concepto' => $i['concepto'],
+                'importe' => $i['importe'],
+            ]);
+        }
+    }
+
+    /**
+     * Crea registros erp_op_medios para esta OP. Cada medio: medio_pago_id +
+     * importe, opcionalmente cuenta_bancaria_id y referencia (nro de transf).
+     */
+    private function sincronizarMedios(OrdenPago $op, array $medios): void
+    {
+        foreach ($medios as $m) {
+            OpMedio::create([
+                'op_id' => $op->id,
+                'medio_pago_id' => $m['medio_pago_id'],
+                'cuenta_bancaria_id' => $m['cuenta_bancaria_id'] ?? null,
+                'importe' => $m['importe'],
+                'referencia' => $m['referencia'] ?? null,
+            ]);
+        }
+    }
+
+    /**
+     * Valida que la suma de medios == importe neto de la OP.
+     * Si no hay medios aún, no valida (la OP puede estar en BORRADOR sin
+     * medios aún y validar al pasar a CARGADA_BANCO).
+     */
+    private function validarBalanceMedios(OrdenPago $op): void
+    {
+        $sumaMedios = (float) $op->medios()->sum('importe');
+        if ($sumaMedios <= 0) {
+            return; // OP sin medios explícitos — el pago se resuelve al pagar().
+        }
+
+        $diferencia = round($sumaMedios - (float) $op->importe, 2);
+        if (abs($diferencia) > 0.01) {
+            throw new DomainException(sprintf(
+                'OP_MEDIOS_DESBALANCEADOS: suma medios %.2f ≠ importe %.2f (dif %.2f)',
+                $sumaMedios,
+                $op->importe,
+                $diferencia
+            ));
+        }
     }
 
     private function proximoNumero(int $empresaId): string

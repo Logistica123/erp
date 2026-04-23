@@ -6,6 +6,7 @@ use App\Erp\Models\VentasCompras\FacturaVenta;
 use App\Erp\Services\CobroFacturaService;
 use App\Erp\Services\EmisorFacturaService;
 use App\Erp\Services\FacturaVentaService;
+use App\Erp\Services\FceService;
 use App\Http\Controllers\Controller;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +23,33 @@ class FacturasVentaController extends Controller
         private EmisorFacturaService $emisor,
         private CobroFacturaService $cobrador,
         private FacturaVentaService $service,
+        private FceService $fce,
     ) {}
+
+    public function fceAceptada(Request $request, int $id): JsonResponse
+    {
+        $factura = FacturaVenta::where('empresa_id', 1)->findOrFail($id);
+        try {
+            $factura = $this->fce->aceptar($factura, $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => $factura]);
+    }
+
+    public function fceRechazada(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate(['motivo' => ['required', 'string', 'min:3', 'max:300']]);
+        $factura = FacturaVenta::where('empresa_id', 1)->findOrFail($id);
+        try {
+            $factura = $this->fce->rechazar($factura, $data['motivo'], $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => $factura]);
+    }
 
     public function controlar(Request $request, int $id): JsonResponse
     {

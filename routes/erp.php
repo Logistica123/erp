@@ -27,6 +27,7 @@ use App\Erp\Http\Controllers\MovimientosBancariosController;
 use App\Erp\Http\Controllers\OrdenesPagoController;
 use App\Erp\Http\Controllers\PeriodosController;
 use App\Erp\Http\Controllers\ReportesTesoreriaController;
+use App\Erp\Http\Controllers\ReportesVentasComprasController;
 use App\Erp\Http\Controllers\SesionesController;
 use Illuminate\Support\Facades\Route;
 
@@ -291,6 +292,22 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/facturas-venta/{id}/anular', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'anular'])
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.fv.anular');
+        Route::post('/facturas-venta/{id}/fce-aceptada', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'fceAceptada'])
+            ->whereNumber('id')->name('erp.fv.fce-aceptada');
+        Route::post('/facturas-venta/{id}/fce-rechazada', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'fceRechazada'])
+            ->whereNumber('id')->name('erp.fv.fce-rechazada');
+
+        // Reportes Ventas/Compras (SPEC 03 §6.5)
+        Route::get('/reportes/libro-iva-compras', [ReportesVentasComprasController::class, 'libroIvaCompras'])
+            ->name('erp.reportes.libro-iva-compras');
+        Route::get('/reportes/pendientes-control', [ReportesVentasComprasController::class, 'pendientesControl'])
+            ->name('erp.reportes.pendientes-control');
+        Route::get('/reportes/antiguedad-saldos', [ReportesVentasComprasController::class, 'antiguedadSaldos'])
+            ->name('erp.reportes.aging-clientes');
+        Route::get('/reportes/antiguedad-proveedores', [ReportesVentasComprasController::class, 'antiguedadProveedores'])
+            ->name('erp.reportes.aging-proveedores');
+        Route::get('/reportes/fce-estados', [ReportesVentasComprasController::class, 'fceEstados'])
+            ->name('erp.reportes.fce-estados');
 
         // ARCA — emisión (fachada sobre factura venta) — SPEC 03 §6.6
         Route::get('/facturas-venta/{id}/emision-status', [ArcaController::class, 'emisionStatus'])

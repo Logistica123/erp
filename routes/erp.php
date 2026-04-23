@@ -262,9 +262,17 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/dashboard/stats', [\App\Erp\Http\Controllers\DashboardController::class, 'stats'])
             ->name('erp.dashboard.stats');
 
-        // Libro IVA
+        // Libro IVA (SPEC 03 §6.1 — consulta + import ARCA RN-29/30)
         Route::get('/libro-iva/ventas', [\App\Erp\Http\Controllers\LibroIvaController::class, 'ventas'])
             ->name('erp.libro-iva.ventas');
+        Route::post('/libro-iva/importar', [\App\Erp\Http\Controllers\LibroIvaController::class, 'importar'])
+            ->name('erp.libro-iva.importar');
+        Route::get('/libro-iva/importaciones', [\App\Erp\Http\Controllers\LibroIvaController::class, 'importaciones'])
+            ->name('erp.libro-iva.importaciones');
+        Route::get('/libro-iva/importaciones/{id}/detalle', [\App\Erp\Http\Controllers\LibroIvaController::class, 'importacionDetalle'])
+            ->whereNumber('id')->name('erp.libro-iva.importacion-detalle');
+        Route::post('/libro-iva/importaciones/{id}/conciliar-masivo', [\App\Erp\Http\Controllers\LibroIvaController::class, 'conciliarMasivo'])
+            ->whereNumber('id')->name('erp.libro-iva.conciliar-masivo');
 
         // Facturación (venta)
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])

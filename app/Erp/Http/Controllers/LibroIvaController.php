@@ -2,18 +2,90 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Models\Arca\LibroIvaDetalle;
+use App\Erp\Models\Arca\LibroIvaImportacion;
+use App\Erp\Services\LibroIva\LibroIvaImportService;
 use App\Http\Controllers\Controller;
+use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Libro IVA Ventas — vista interna por período.
+ * Libro IVA Ventas — vista interna por período + importación desde Excel ARCA.
  * Lee erp_facturas_venta + joins. Totales por alícuota y grandes totales.
  * (Formato F.8001 AFIP para DDJJ queda fuera del alcance v1, ver SPEC 05 §2.1.)
  */
 class LibroIvaController extends Controller
 {
+    public function __construct(private readonly ?LibroIvaImportService $importer = null) {}
+
+    /**
+     * POST /api/erp/libro-iva/importar
+     * multipart: archivo + tipo (COMPRAS|VENTAS) + periodo (YYYY-MM)
+     */
+    public function importar(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'archivo' => ['required', 'file', 'max:30720'], // 30 MB
+            'tipo' => ['required', 'in:COMPRAS,VENTAS'],
+            'periodo' => ['required', 'regex:/^\d{4}-\d{2}$/'],
+        ]);
+
+        $archivo = $request->file('archivo');
+
+        try {
+            $resumen = $this->importer->importar(
+                pathTemporal: $archivo->getRealPath(),
+                tipo: $data['tipo'],
+                periodo: $data['periodo'],
+                nombreArchivo: $archivo->getClientOriginalName(),
+                usuario: $request->user(),
+            );
+        } catch (DomainException $e) {
+            $code = explode(':', $e->getMessage(), 2)[0];
+
+            return response()->json(['error' => ['code' => $code, 'message' => $e->getMessage()]], 409);
+        }
+
+        return response()->json(['ok' => true, 'data' => $resumen], 201);
+    }
+
+    public function importaciones(Request $request): JsonResponse
+    {
+        $query = LibroIvaImportacion::query()
+            ->when($request->query('tipo'), fn ($q, $v) => $q->where('tipo', $v))
+            ->when($request->query('periodo'), fn ($q, $v) => $q->where('periodo', $v))
+            ->orderByDesc('fecha_importacion');
+
+        return response()->json(['ok' => true, 'data' => $query->paginate(50)]);
+    }
+
+    public function importacionDetalle(int $id, Request $request): JsonResponse
+    {
+        $imp = LibroIvaImportacion::findOrFail($id);
+
+        $filas = LibroIvaDetalle::where('importacion_id', $imp->id)
+            ->when($request->query('estado'), fn ($q, $v) => $q->where('estado_matching', $v))
+            ->orderBy('nro_fila')
+            ->paginate(200);
+
+        return response()->json([
+            'ok' => true,
+            'data' => ['importacion' => $imp, 'filas' => $filas],
+        ]);
+    }
+
+    public function conciliarMasivo(Request $request, int $id): JsonResponse
+    {
+        try {
+            $resumen = $this->importer->conciliarMasivo($id, $request->user());
+        } catch (DomainException $e) {
+            return response()->json(['error' => ['code' => 'CONCILIAR_ERROR', 'message' => $e->getMessage()]], 409);
+        }
+
+        return response()->json(['ok' => true, 'data' => $resumen]);
+    }
     public function ventas(Request $request): JsonResponse
     {
         $data = $request->validate([

@@ -279,6 +279,9 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/facturas-venta/{id}/rechazar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'rechazar'])
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.fv.rechazar');
+        Route::post('/facturas-venta/{id}/anular', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'anular'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.fv.anular');
         Route::get('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'show'])
             ->whereNumber('id')->name('erp.fv.show');
 
@@ -298,6 +301,8 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/facturas-compra/{id}/rechazar', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'rechazar'])
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.fc.rechazar');
+        Route::post('/facturas-compra/{id}/nc', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'registrarNc'])
+            ->whereNumber('id')->name('erp.fc.nc');
 
         // Integración DistriApp (SPEC 07)
         Route::prefix('integracion/distriapp')->group(function () {

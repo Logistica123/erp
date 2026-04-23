@@ -134,6 +134,111 @@ class FacturaCompraService
     }
 
     /**
+     * Registra una NOTA DE CRÉDITO recibida del proveedor, asociada a una
+     * factura de compra original (SPEC 03 RN-33).
+     *
+     * A diferencia de las NCs de venta (que el ERP emite), las NCs de compra
+     * vienen del proveedor con número + CAE propio — el ERP solo las REGISTRA.
+     *
+     * @param  array{
+     *   factura_original_id:int,
+     *   tipo_comprobante_id:int,  // tipo NC compra (3=NC A, 8=NC B, 13=NC C)
+     *   punto_venta:int, numero:int, cuit_emisor:string,
+     *   fecha_emision:string, fecha_recepcion?:?string,
+     *   cae?:?string, fecha_vto_cae?:?string,
+     *   imp_neto_gravado:float, imp_no_gravado?:float, imp_exento?:float,
+     *   imp_iva?:float, imp_tributos?:float, imp_total:float,
+     *   observaciones?:?string, motivo?:?string,
+     * }  $data
+     */
+    public function registrarNc(array $data, User $usuario): FacturaCompra
+    {
+        $original = FacturaCompra::findOrFail($data['factura_original_id']);
+
+        if (in_array($original->estado, [self::ESTADO_ANULADA_POR_NC, self::ESTADO_RECHAZADA], true)) {
+            throw new DomainException('FACTURA_NO_ANULABLE: original está '.$original->estado);
+        }
+
+        $ncPrevias = (float) DB::table('erp_factura_compra_asociadas')
+            ->where('factura_original_id', $original->id)
+            ->sum('importe_aplicado');
+        $saldoPendiente = round((float) $original->imp_total - $ncPrevias, 2);
+        $importe = round((float) $data['imp_total'], 2);
+
+        if ($saldoPendiente <= 0.01) {
+            throw new DomainException('FACTURA_SIN_SALDO: ya fue cancelada por NCs previas');
+        }
+        if ($importe > $saldoPendiente + 0.01) {
+            throw new DomainException(sprintf(
+                'RN-33: importe NC ($%.2f) supera saldo pendiente ($%.2f)',
+                $importe,
+                $saldoPendiente
+            ));
+        }
+
+        return DB::transaction(function () use ($data, $original, $importe, $saldoPendiente, $usuario) {
+            DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
+
+            $nc = FacturaCompra::create([
+                'empresa_id' => $original->empresa_id,
+                'tipo_comprobante_id' => $data['tipo_comprobante_id'],
+                'punto_venta' => $data['punto_venta'],
+                'numero' => $data['numero'],
+                'cae' => $data['cae'] ?? null,
+                'fecha_vto_cae' => $data['fecha_vto_cae'] ?? null,
+                'fecha_emision' => $data['fecha_emision'],
+                'fecha_recepcion' => $data['fecha_recepcion'] ?? now()->toDateString(),
+                'auxiliar_id' => $original->auxiliar_id,
+                'cuit_emisor' => $data['cuit_emisor'],
+                'razon_social_emisor' => $original->razon_social_emisor,
+                'condicion_iva_id' => $original->condicion_iva_id,
+                'moneda_id' => $original->moneda_id,
+                'cotizacion' => $original->cotizacion,
+                'imp_neto_gravado' => $data['imp_neto_gravado'],
+                'imp_no_gravado' => $data['imp_no_gravado'] ?? 0,
+                'imp_exento' => $data['imp_exento'] ?? 0,
+                'imp_iva' => $data['imp_iva'] ?? 0,
+                'imp_tributos' => $data['imp_tributos'] ?? 0,
+                'imp_percepciones' => 0,
+                'imp_retenciones' => 0,
+                'imp_total' => $importe,
+                'origen' => 'MANUAL',
+                'estado' => self::ESTADO_RECIBIDA,
+                'constatacion_estado' => $data['cae'] ? 'PENDIENTE' : 'NO_APLICA',
+                'observaciones' => 'NC de FC #'.$original->numero.(! empty($data['motivo']) ? ': '.$data['motivo'] : ''),
+                'centro_costo_id' => $original->centro_costo_id,
+                'created_by_user_id' => $usuario->id,
+            ]);
+
+            $tipoVinculo = abs($importe - $saldoPendiente) < 0.01 ? 'CANCELA' : 'PARCIAL';
+
+            DB::table('erp_factura_compra_asociadas')->insert([
+                'factura_id' => $nc->id,
+                'factura_original_id' => $original->id,
+                'tipo_vinculo' => $tipoVinculo,
+                'importe_aplicado' => $importe,
+            ]);
+
+            if ($tipoVinculo === 'CANCELA') {
+                $original->update(['estado' => self::ESTADO_ANULADA_POR_NC]);
+            }
+
+            $this->audit->logEvento(
+                accion: 'FACTURA_COMPRA_NC_REGISTRADA',
+                modulo: 'compras',
+                descripcion: sprintf(
+                    'NC recibida #%d vinculada a FC #%d · %s · importe $%s',
+                    $nc->id, $original->id, $tipoVinculo,
+                    number_format($importe, 2, ',', '.')
+                ),
+                empresaId: $original->empresa_id,
+            );
+
+            return $nc->fresh();
+        });
+    }
+
+    /**
      * Recalcula estado basado en OPs asociadas.
      * Invocable desde OrdenPagoService al registrar/anular pagos.
      */

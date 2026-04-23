@@ -53,6 +53,34 @@ class FacturasVentaController extends Controller
         return response()->json(['ok' => true, 'data' => $factura]);
     }
 
+    /**
+     * Emite NC que cancela (total o parcial) la factura. RN-33.
+     * Si importe=null, se cancela el saldo remanente (total - NCs previas).
+     */
+    public function anular(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'motivo' => ['required', 'string', 'min:3', 'max:300'],
+            'importe' => ['nullable', 'numeric', 'gt:0'],
+        ]);
+        $factura = FacturaVenta::where('empresa_id', 1)->findOrFail($id);
+
+        try {
+            $nc = $this->service->anular($factura, $data['motivo'], $data['importe'] ?? null, $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'nota_credito' => $nc,
+                'factura_original_id' => $factura->id,
+                'factura_original_estado' => $factura->fresh()->estado,
+            ],
+        ], 201);
+    }
+
     private function domainError(DomainException $e): JsonResponse
     {
         $code = explode(':', $e->getMessage(), 2)[0];

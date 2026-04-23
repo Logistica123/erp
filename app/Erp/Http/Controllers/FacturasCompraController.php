@@ -198,6 +198,45 @@ class FacturasCompraController extends Controller
         return response()->json(['ok' => true, 'data' => $factura]);
     }
 
+    /**
+     * Registra NC recibida del proveedor vinculada a una factura de compra
+     * original (SPEC 03 §6.3 / RN-33). El ID de la factura original viene en la URL.
+     */
+    public function registrarNc(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'tipo_comprobante_id' => ['required', 'integer', 'exists:erp_tipos_comprobante,id'],
+            'punto_venta' => ['required', 'integer'],
+            'numero' => ['required', 'integer'],
+            'cuit_emisor' => ['required', 'string', 'max:13'],
+            'fecha_emision' => ['required', 'date'],
+            'fecha_recepcion' => ['nullable', 'date'],
+            'cae' => ['nullable', 'string', 'max:20'],
+            'fecha_vto_cae' => ['nullable', 'date'],
+            'imp_neto_gravado' => ['required', 'numeric', 'min:0'],
+            'imp_no_gravado' => ['nullable', 'numeric', 'min:0'],
+            'imp_exento' => ['nullable', 'numeric', 'min:0'],
+            'imp_iva' => ['nullable', 'numeric', 'min:0'],
+            'imp_tributos' => ['nullable', 'numeric', 'min:0'],
+            'imp_total' => ['required', 'numeric', 'gt:0'],
+            'motivo' => ['nullable', 'string', 'max:300'],
+        ]);
+
+        try {
+            $nc = $this->service->registrarNc([
+                ...$data,
+                'factura_original_id' => $id,
+            ], $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'data' => ['nota_credito' => $nc, 'factura_original_id' => $id],
+        ], 201);
+    }
+
     private function domainError(DomainException $e): JsonResponse
     {
         $code = explode(':', $e->getMessage(), 2)[0];

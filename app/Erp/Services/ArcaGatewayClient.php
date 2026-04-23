@@ -54,4 +54,44 @@ class ArcaGatewayClient
     {
         return $this->request()->post('/wsfe/emitir', $payload);
     }
+
+    /**
+     * Consulta padrón AFIP (WS_A5 / A13) por CUIT — razón social, condición
+     * IVA, estado, domicilio fiscal, actividades.
+     */
+    public function padron(string $cuit): Response
+    {
+        $cuit = preg_replace('/[^0-9]/', '', $cuit);
+
+        return $this->request()->get("/padron/{$cuit}");
+    }
+
+    /**
+     * Constata CAE de un comprobante recibido (WS COMP_CONSULT) —
+     * devuelve VALIDO / INVALIDO / NO_ENCONTRADO más datos de AFIP.
+     */
+    public function constatar(array $payload): Response
+    {
+        return $this->request()->post('/wsfe/constatar', $payload);
+    }
+
+    /**
+     * Dispara scraper Mis Comprobantes → Recibidos para un rango de fechas.
+     * Timeout extendido (scraper puede tardar).
+     */
+    public function misComprobantesRecibidos(string $desde, string $hasta): Response
+    {
+        return $this->request()->timeout(180)->post('/mis-comprobantes/recibidos', [
+            'desde' => $desde,
+            'hasta' => $hasta,
+        ]);
+    }
+
+    public function misComprobantesEmitidos(string $desde, string $hasta): Response
+    {
+        return $this->request()->timeout(180)->post('/mis-comprobantes/emitidos', [
+            'desde' => $desde,
+            'hasta' => $hasta,
+        ]);
+    }
 }

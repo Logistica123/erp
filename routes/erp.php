@@ -1,5 +1,6 @@
 <?php
 
+use App\Erp\Http\Controllers\ArcaController;
 use App\Erp\Http\Controllers\AsientosController;
 use App\Erp\Http\Controllers\AuditoriaController;
 use App\Erp\Http\Controllers\AuthController;
@@ -282,6 +283,28 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/facturas-venta/{id}/anular', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'anular'])
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.fv.anular');
+
+        // ARCA — emisión (fachada sobre factura venta) — SPEC 03 §6.6
+        Route::get('/facturas-venta/{id}/emision-status', [ArcaController::class, 'emisionStatus'])
+            ->whereNumber('id')->name('erp.fv.emision-status');
+        Route::get('/facturas-venta/{id}/cae', [ArcaController::class, 'cae'])
+            ->whereNumber('id')->name('erp.fv.cae');
+        Route::post('/facturas-venta/{id}/reintentar-emision', [ArcaController::class, 'reintentarEmision'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.fv.reintentar');
+
+        // ARCA — padrones, constatación, Mis Comprobantes, PV AFIP (SPEC 03 §6.6)
+        Route::post('/padrones/consultar', [ArcaController::class, 'padronConsultar'])->name('erp.arca.padron.consultar');
+        Route::post('/padrones/refrescar/{cuit}', [ArcaController::class, 'padronRefrescar'])->name('erp.arca.padron.refrescar');
+        Route::post('/comprobantes/constatar', [ArcaController::class, 'comprobantesConstatar'])->name('erp.arca.comp.constatar');
+        Route::post('/facturas-compra/{id}/constatar', [ArcaController::class, 'constatarFactura'])
+            ->whereNumber('id')->name('erp.arca.fc.constatar');
+        Route::post('/mis-comprobantes/ejecutar', [ArcaController::class, 'misComprobantesEjecutar'])
+            ->name('erp.arca.mc.ejecutar');
+        Route::get('/mis-comprobantes/runs', [ArcaController::class, 'misComprobantesRuns'])
+            ->name('erp.arca.mc.runs');
+        Route::get('/puntos-venta/afip', [ArcaController::class, 'puntosVentaAfip'])
+            ->name('erp.arca.pv.sync');
         Route::get('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'show'])
             ->whereNumber('id')->name('erp.fv.show');
 

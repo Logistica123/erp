@@ -411,6 +411,20 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('periodo_id')->name('erp.imp.iva.descargar');
             Route::post('/iva/{periodo_id}/generar-op', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'generarOp'])
                 ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iva.generar-op');
+
+            // SICORE / SIRE retenciones (§6.4, H3)
+            Route::get('/sicore/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'show'])
+                ->whereNumber('periodo_id')->name('erp.imp.sicore.show');
+            Route::post('/sicore/{periodo_id}/generar', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'generar'])
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.generar');
+            Route::get('/sicore/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'descargar'])
+                ->whereNumber('periodo_id')->name('erp.imp.sicore.descargar');
+            Route::post('/sicore/aplicar/{op_id}', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'aplicarOp'])
+                ->whereNumber('op_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.aplicar');
+            Route::get('/sicore/certificados/{retencion_id}', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'certificadoHtml'])
+                ->whereNumber('retencion_id')->name('erp.imp.sicore.cert.html');
+            Route::post('/sicore/certificados/{retencion_id}/anular', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'anularCertificado'])
+                ->whereNumber('retencion_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.cert.anular');
         });
     });
 });

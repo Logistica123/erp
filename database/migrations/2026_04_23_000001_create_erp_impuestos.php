@@ -30,8 +30,31 @@ return new class extends Migration
         $path = database_path('migrations/sql/');
 
         DB::unprepared(file_get_contents($path.'05_impuestos.sql'));
-        DB::unprepared(file_get_contents($path.'05_impuestos_alters.sql'));
+
+        // ALTERs idempotentes — MySQL 8.0 NO soporta `ADD COLUMN IF NOT EXISTS`
+        // (sólo MariaDB). Hacemos el check en PHP contra information_schema.
+        $this->addColumnIfMissing('erp_ejercicios', 'ajusta_por_inflacion',
+            "TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Si el ejercicio se valúa y presenta con RT 6'");
+        $this->addColumnIfMissing('erp_ejercicios', 'indice_cierre',
+            "DECIMAL(18,6) NULL COMMENT 'Índice IPIM/IPC al cierre del ejercicio'");
+        $this->addColumnIfMissing('erp_factura_venta_items', 'jurisdiccion_iibb',
+            "CHAR(3) NULL COMMENT 'Override jurisdicción IIBB para esta línea (RN-54)'");
+        $this->addColumnIfMissing('erp_facturas_compra', 'retenciones_practicadas_ids',
+            "JSON NULL COMMENT 'IDs de erp_retenciones_practicadas generadas al pagar'");
+
         DB::unprepared(file_get_contents($path.'05_impuestos_seed.sql'));
+    }
+
+    private function addColumnIfMissing(string $table, string $column, string $definition): void
+    {
+        $exists = DB::selectOne(
+            "SELECT 1 AS x FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+            [$table, $column]
+        );
+        if (! $exists) {
+            DB::statement("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
+        }
     }
 
     public function down(): void

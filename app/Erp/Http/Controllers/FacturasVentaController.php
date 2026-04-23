@@ -2,9 +2,12 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Models\VentasCompras\FacturaVenta;
 use App\Erp\Services\CobroFacturaService;
 use App\Erp\Services\EmisorFacturaService;
+use App\Erp\Services\FacturaVentaService;
 use App\Http\Controllers\Controller;
+use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +21,44 @@ class FacturasVentaController extends Controller
     public function __construct(
         private EmisorFacturaService $emisor,
         private CobroFacturaService $cobrador,
+        private FacturaVentaService $service,
     ) {}
+
+    public function controlar(Request $request, int $id): JsonResponse
+    {
+        $factura = FacturaVenta::where('empresa_id', 1)->findOrFail($id);
+
+        try {
+            $factura = $this->service->controlar($factura, $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => $factura->load('asiento')]);
+    }
+
+    public function rechazar(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'motivo' => ['required', 'string', 'min:3', 'max:300'],
+        ]);
+        $factura = FacturaVenta::where('empresa_id', 1)->findOrFail($id);
+
+        try {
+            $factura = $this->service->rechazar($factura, $data['motivo'], $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => $factura]);
+    }
+
+    private function domainError(DomainException $e): JsonResponse
+    {
+        $code = explode(':', $e->getMessage(), 2)[0];
+
+        return response()->json(['error' => ['code' => $code, 'message' => $e->getMessage()]], 409);
+    }
 
     public function cobrar(Request $request, int $id): JsonResponse
     {

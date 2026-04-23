@@ -1,0 +1,34 @@
+<?php
+
+namespace App\Erp\Models\VentasCompras;
+
+use App\Erp\Models\Fiscal\TipoTributo;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class FacturaCompraTributo extends Model
+{
+    protected $table = 'erp_factura_compra_tributos';
+    public $timestamps = false;
+
+    protected $fillable = [
+        'factura_id', 'tributo_id', 'origen', 'base_imponible',
+        'alicuota', 'importe', 'descripcion', 'op_id',
+    ];
+
+    protected $casts = [
+        'base_imponible' => 'decimal:2',
+        'alicuota' => 'decimal:4',
+        'importe' => 'decimal:2',
+    ];
+
+    public function factura(): BelongsTo
+    {
+        return $this->belongsTo(FacturaCompra::class, 'factura_id');
+    }
+
+    public function tributo(): BelongsTo
+    {
+        return $this->belongsTo(TipoTributo::class, 'tributo_id');
+    }
+}

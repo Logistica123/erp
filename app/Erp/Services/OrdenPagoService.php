@@ -41,6 +41,25 @@ class OrdenPagoService
      */
     public function crear(array $data): OrdenPago
     {
+        // RN-31 gate: items tipo FACTURA_COMPRA deben apuntar a facturas CONTROLADAS.
+        foreach ($data['items'] ?? [] as $idx => $i) {
+            if (! empty($i['comprobante_id']) && ($i['tipo_item'] ?? 'FACTURA_COMPRA') === OpItem::TIPO_FACTURA_COMPRA) {
+                $estado = DB::table('erp_facturas_compra')
+                    ->where('id', $i['comprobante_id'])
+                    ->value('estado');
+                if (! $estado) {
+                    throw new DomainException('FACTURA_NO_ENCONTRADA: item #'.($idx + 1).' comprobante_id='.$i['comprobante_id']);
+                }
+                if (! in_array($estado, ['CONTROLADA', 'PAGO_PARCIAL', 'PAGADA'], true)) {
+                    throw new DomainException(sprintf(
+                        'RN-31: factura compra #%d está %s — solo CONTROLADA admite pago',
+                        $i['comprobante_id'],
+                        $estado
+                    ));
+                }
+            }
+        }
+
         return DB::transaction(function () use ($data) {
             $auxiliar = Auxiliar::findOrFail($data['auxiliar_id']);
 

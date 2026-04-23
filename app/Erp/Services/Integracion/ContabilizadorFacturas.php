@@ -37,6 +37,11 @@ class ContabilizadorFacturas
     private const CUENTA_NCE = '4.1.2.01';   // Notas de Crédito Emitidas
     private const CUENTA_DEUDORES = '1.1.4.01';
     private const CUENTA_IVA_DF = '2.1.3.01';
+    // Compras
+    private const CUENTA_PROVEEDORES = '2.1.1.01';
+    private const CUENTA_IVA_CF = '1.1.4.01.02';  // preferido; fallback 1.1.4.01 si no existe
+    private const CUENTA_IVA_CF_FALLBACK = '1.1.4.01';
+    private const CUENTA_GASTO_DEFAULT = '5.1.01';  // Gastos generales; fallback busca prefijo '5.1'
 
     /**
      * Contabiliza todas las facturas sin asiento. Idempotente.
@@ -187,6 +192,211 @@ class ContabilizadorFacturas
             'usuario_id' => $usuarioId,
             'movimientos' => $movs,
         ];
+    }
+
+    /**
+     * Contabiliza UNA factura de venta puntual (usado desde FacturaVentaService::controlar).
+     * Idempotente: si la factura ya tiene asiento_id, devuelve el existente.
+     */
+    public function contabilizarVenta(int $facturaId, int $empresaId = 1, int $usuarioId = 1): \App\Erp\Models\Asiento
+    {
+        $f = DB::table('erp_facturas_venta as f')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+            ->join('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+            ->where('f.empresa_id', $empresaId)
+            ->where('f.id', $facturaId)
+            ->whereNull('f.deleted_at')
+            ->select('f.*', 'tc.clase as cbte_clase', 'tc.signo as cbte_signo', 'a.nombre as cliente_nombre')
+            ->first();
+
+        if (! $f) {
+            throw new \RuntimeException('FACTURA_NO_ENCONTRADA: venta id='.$facturaId);
+        }
+        if ($f->asiento_id) {
+            return \App\Erp\Models\Asiento::findOrFail($f->asiento_id);
+        }
+
+        $diarioVta = DB::table('erp_diarios')
+            ->where('empresa_id', $empresaId)->where('codigo', 'VTA')->value('id');
+        if (! $diarioVta) {
+            throw new \RuntimeException('Diario VTA no existe');
+        }
+        $ccGeneral = DB::table('erp_centros_costo')
+            ->where('empresa_id', $empresaId)->where('codigo', 'GENERAL')->value('id')
+            ?? DB::table('erp_centros_costo')->where('empresa_id', $empresaId)->where('codigo', 'CENTRAL')->value('id');
+
+        $payload = $this->armarPayload($f, $empresaId, (int) $diarioVta, $ccGeneral ? (int) $ccGeneral : null, $usuarioId);
+        $asiento = $this->asientoService->crearBorrador($payload);
+        $asiento = $this->asientoService->contabilizar($asiento);
+
+        DB::table('erp_facturas_venta')->where('id', $f->id)
+            ->update(['asiento_id' => $asiento->id, 'updated_at' => now()]);
+
+        return $asiento;
+    }
+
+    /**
+     * Contabiliza UNA factura de compra (RN-34 rama compra).
+     *   Debe:  Gasto (5.1.xx) + Retenciones sufridas    imp_neto+no_grav+exento + imp_retenciones
+     *   Debe:  IVA Crédito Fiscal (1.1.4.01.02 o 1.1.4.01)   imp_iva + imp_percepciones
+     *   Haber: Proveedores (2.1.1.01)                         imp_total
+     *
+     * Para NOTA_CREDITO recibida (signo=-1): invertido — Debe Proveedores, Haber Gasto/IVA CF.
+     */
+    public function contabilizarCompra(int $facturaId, int $empresaId = 1, int $usuarioId = 1): \App\Erp\Models\Asiento
+    {
+        $f = DB::table('erp_facturas_compra as f')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+            ->join('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+            ->where('f.empresa_id', $empresaId)
+            ->where('f.id', $facturaId)
+            ->whereNull('f.deleted_at')
+            ->select('f.*', 'tc.clase as cbte_clase', 'tc.signo as cbte_signo', 'a.nombre as proveedor_nombre')
+            ->first();
+
+        if (! $f) {
+            throw new \RuntimeException('FACTURA_NO_ENCONTRADA: compra id='.$facturaId);
+        }
+        if ($f->asiento_id) {
+            return \App\Erp\Models\Asiento::findOrFail($f->asiento_id);
+        }
+
+        $diarioCpr = DB::table('erp_diarios')
+            ->where('empresa_id', $empresaId)->where('codigo', 'CPR')->value('id');
+        if (! $diarioCpr) {
+            throw new \RuntimeException('Diario CPR no existe');
+        }
+        $ccGeneral = DB::table('erp_centros_costo')
+            ->where('empresa_id', $empresaId)->where('codigo', 'GENERAL')->value('id')
+            ?? DB::table('erp_centros_costo')->where('empresa_id', $empresaId)->where('codigo', 'CENTRAL')->value('id');
+
+        $cuentaProv = $this->cuentaId($empresaId, self::CUENTA_PROVEEDORES);
+        $cuentaIvaCf = DB::table('erp_cuentas_contables')
+            ->where('empresa_id', $empresaId)
+            ->whereIn('codigo', [self::CUENTA_IVA_CF, self::CUENTA_IVA_CF_FALLBACK])
+            ->orderByRaw("FIELD(codigo, ?, ?)", [self::CUENTA_IVA_CF, self::CUENTA_IVA_CF_FALLBACK])
+            ->value('id');
+        if (! $cuentaIvaCf) {
+            throw new \RuntimeException('Cuenta IVA Crédito Fiscal no existe');
+        }
+        $cuentaGasto = $this->resolverCuentaGasto($empresaId, $f->centro_costo_id);
+
+        $netoSinIva = round(
+            (float) $f->imp_neto_gravado + (float) $f->imp_no_gravado + (float) $f->imp_exento, 2
+        );
+        $impIva = round((float) $f->imp_iva + (float) ($f->imp_percepciones ?? 0), 2);
+        $impRet = (float) ($f->imp_retenciones ?? 0);
+        $impTotal = (float) $f->imp_total;
+        $esNC = ($f->cbte_signo ?? 1) < 0;
+
+        $glosa = ($esNC ? 'NC compra #' : 'Factura compra #').$f->numero.' — '.$f->proveedor_nombre;
+        $movs = [];
+
+        if (! $esNC) {
+            if ($netoSinIva > 0) {
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaGasto,
+                    'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
+                    'debe' => $netoSinIva,
+                    'haber' => 0,
+                    'glosa' => 'Gastos / servicios',
+                ];
+            }
+            if ($impIva > 0) {
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaIvaCf,
+                    'centro_costo_id' => $this->admiteCc($cuentaIvaCf) ? $ccGeneral : null,
+                    'debe' => $impIva,
+                    'haber' => 0,
+                    'glosa' => 'IVA Crédito Fiscal',
+                ];
+            }
+            if ($impRet > 0) {
+                // Retenciones sufridas: impactan activo por cobrar al fisco (1.1.4.xx).
+                // Asiento contra cuenta de retenciones + resta del total a pagar ya refleja en proveedor.
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaIvaCf, // usar IVA CF como fallback
+                    'centro_costo_id' => $ccGeneral,
+                    'debe' => $impRet,
+                    'haber' => 0,
+                    'glosa' => 'Retenciones sufridas',
+                ];
+            }
+            // Contrapartida única: Proveedores (total)
+            $movs[] = [
+                'cuenta_id' => (int) $cuentaProv,
+                'centro_costo_id' => $this->admiteCc($cuentaProv) ? $ccGeneral : null,
+                'auxiliar_id' => $this->admiteAuxiliar($cuentaProv) ? $f->auxiliar_id : null,
+                'debe' => 0,
+                'haber' => $impTotal,
+                'glosa' => 'Deuda con proveedor',
+            ];
+        } else {
+            // NC recibida: invertido.
+            $movs[] = [
+                'cuenta_id' => (int) $cuentaProv,
+                'centro_costo_id' => $this->admiteCc($cuentaProv) ? $ccGeneral : null,
+                'auxiliar_id' => $this->admiteAuxiliar($cuentaProv) ? $f->auxiliar_id : null,
+                'debe' => $impTotal,
+                'haber' => 0,
+                'glosa' => 'Reverso deuda por NC',
+            ];
+            if ($netoSinIva > 0) {
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaGasto,
+                    'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
+                    'debe' => 0,
+                    'haber' => $netoSinIva,
+                    'glosa' => 'Reverso gasto',
+                ];
+            }
+            if ($impIva > 0) {
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaIvaCf,
+                    'centro_costo_id' => $this->admiteCc($cuentaIvaCf) ? $ccGeneral : null,
+                    'debe' => 0,
+                    'haber' => $impIva,
+                    'glosa' => 'Reverso IVA CF',
+                ];
+            }
+        }
+
+        $payload = [
+            'empresa_id' => $empresaId,
+            'diario_id' => (int) $diarioCpr,
+            'fecha' => $f->fecha_emision instanceof \DateTime ? $f->fecha_emision->format('Y-m-d') : (string) $f->fecha_emision,
+            'glosa' => $glosa,
+            'origen' => 'FACTURA_CPR',
+            'origen_id' => $f->id,
+            'origen_tabla' => 'erp_facturas_compra',
+            'usuario_id' => $usuarioId,
+            'movimientos' => $movs,
+        ];
+
+        $asiento = $this->asientoService->crearBorrador($payload);
+        $asiento = $this->asientoService->contabilizar($asiento);
+
+        DB::table('erp_facturas_compra')->where('id', $f->id)
+            ->update(['asiento_id' => $asiento->id, 'updated_at' => now()]);
+
+        return $asiento;
+    }
+
+    private function resolverCuentaGasto(int $empresaId, ?int $ccId): int
+    {
+        // Fallback: buscar primera cuenta '5.1.*' imputable
+        $id = DB::table('erp_cuentas_contables')
+            ->where('empresa_id', $empresaId)
+            ->where('codigo', 'like', '5.1%')
+            ->where('imputable', true)
+            ->orderBy('codigo')
+            ->value('id');
+
+        if (! $id) {
+            throw new \RuntimeException('No se encontró cuenta de gasto 5.1.* imputable');
+        }
+
+        return (int) $id;
     }
 
     private function resolverCuentaVenta(?string $clienteNombre): string

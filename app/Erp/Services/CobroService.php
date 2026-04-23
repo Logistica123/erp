@@ -88,6 +88,25 @@ class CobroService
             ));
         }
 
+        // RN-31 gate: items con factura_id deben apuntar a facturas CONTROLADAS.
+        foreach ($data['items'] as $idx => $i) {
+            if (! empty($i['factura_id']) && ($i['tipo_item'] ?? 'FACTURA_VENTA') === CobroItem::TIPO_FACTURA_VENTA) {
+                $estado = DB::table('erp_facturas_venta')
+                    ->where('id', $i['factura_id'])
+                    ->value('estado');
+                if (! $estado) {
+                    throw new DomainException('FACTURA_NO_ENCONTRADA: item #'.($idx + 1).' factura_id='.$i['factura_id']);
+                }
+                if (! in_array($estado, ['CONTROLADA', 'COBRO_PARCIAL', 'COBRADA'], true)) {
+                    throw new DomainException(sprintf(
+                        'RN-31: factura venta #%d está %s — solo CONTROLADA admite cobro',
+                        $i['factura_id'],
+                        $estado
+                    ));
+                }
+            }
+        }
+
         return DB::transaction(function () use ($data, $auxiliar, $sumaItems) {
             DB::statement('SET @erp_current_user_id = ?', [$data['usuario_id']]);
 

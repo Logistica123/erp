@@ -274,8 +274,30 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.fv.emitir');
         Route::post('/facturas-venta/{id}/cobrar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'cobrar'])
             ->whereNumber('id')->name('erp.fv.cobrar');
+        Route::post('/facturas-venta/{id}/controlar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'controlar'])
+            ->whereNumber('id')->name('erp.fv.controlar');
+        Route::post('/facturas-venta/{id}/rechazar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'rechazar'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.fv.rechazar');
         Route::get('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'show'])
             ->whereNumber('id')->name('erp.fv.show');
+
+        // Facturación (compra) — SPEC 03 §6.3
+        Route::get('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'index'])
+            ->name('erp.fc.index');
+        Route::post('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'store'])
+            ->name('erp.fc.store');
+        Route::get('/facturas-compra/{id}', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'show'])
+            ->whereNumber('id')->name('erp.fc.show');
+        Route::patch('/facturas-compra/{id}', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'update'])
+            ->whereNumber('id')->name('erp.fc.update');
+        Route::post('/facturas-compra/{id}/controlar', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'controlar'])
+            ->whereNumber('id')->name('erp.fc.controlar');
+        Route::post('/facturas-compra/{id}/observar', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'observar'])
+            ->whereNumber('id')->name('erp.fc.observar');
+        Route::post('/facturas-compra/{id}/rechazar', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'rechazar'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.fc.rechazar');
 
         // Integración DistriApp (SPEC 07)
         Route::prefix('integracion/distriapp')->group(function () {

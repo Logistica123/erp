@@ -399,6 +399,18 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.libro-iva.generar');
             Route::get('/libro-iva/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'descargar'])
                 ->whereNumber('periodo_id')->name('erp.imp.libro-iva.descargar');
+
+            // DDJJ IVA F.2002 (§6.3, H2)
+            Route::get('/iva/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'show'])
+                ->whereNumber('periodo_id')->name('erp.imp.iva.show');
+            Route::post('/iva/{periodo_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'calcular'])
+                ->whereNumber('periodo_id')->name('erp.imp.iva.calcular');
+            Route::post('/iva/{periodo_id}/generar-f2002', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'generar'])
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iva.generar');
+            Route::get('/iva/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'descargar'])
+                ->whereNumber('periodo_id')->name('erp.imp.iva.descargar');
+            Route::post('/iva/{periodo_id}/generar-op', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'generarOp'])
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iva.generar-op');
         });
     });
 });

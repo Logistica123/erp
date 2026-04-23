@@ -371,5 +371,34 @@ Route::prefix('api/erp')->group(function () {
             Route::post('/contabilizar-facturas', [\App\Erp\Http\Controllers\Integracion\DistriAppController::class, 'contabilizarFacturas'])
                 ->name('erp.integ.da.contab-facturas');
         });
+
+        // ====================================================================
+        // SPEC 05 H1 — Impuestos: períodos fiscales + Libro IVA Digital F.8001
+        // ====================================================================
+        Route::prefix('impuestos')->group(function () {
+            // Períodos fiscales (§6.1)
+            Route::get('/periodos',  [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'index'])
+                ->name('erp.imp.periodos.index');
+            Route::post('/periodos', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'store'])
+                ->name('erp.imp.periodos.store');
+            Route::get('/periodos/{id}', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'show'])
+                ->whereNumber('id')->name('erp.imp.periodos.show');
+            Route::patch('/periodos/{id}', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'update'])
+                ->whereNumber('id')->name('erp.imp.periodos.update');
+            Route::post('/periodos/{id}/rectificativa', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'rectificar'])
+                ->whereNumber('id')->name('erp.imp.periodos.rectificar');
+
+            // Libro IVA Digital F.8001 (§6.2)
+            Route::get('/libro-iva/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'show'])
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.show');
+            Route::post('/libro-iva/{periodo_id}/armar', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'armar'])
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.armar');
+            Route::post('/libro-iva/{periodo_id}/validar', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'validar'])
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.validar');
+            Route::post('/libro-iva/{periodo_id}/generar-f8001', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'generar'])
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.libro-iva.generar');
+            Route::get('/libro-iva/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'descargar'])
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.descargar');
+        });
     });
 });

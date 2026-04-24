@@ -425,6 +425,49 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('retencion_id')->name('erp.imp.sicore.cert.html');
             Route::post('/sicore/certificados/{retencion_id}/anular', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'anularCertificado'])
                 ->whereNumber('retencion_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.cert.anular');
+
+            // IIBB Convenio Multilateral (§6.5, H4)
+            Route::get('/iibb/cm/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'showCm'])
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm.show');
+            Route::post('/iibb/cm/{periodo_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'calcularCm'])
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm.calcular');
+            Route::post('/iibb/cm/{periodo_id}/generar-sifere', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'generarCm'])
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm.generar');
+
+            // CM05 coeficientes anuales
+            Route::post('/iibb/cm05/{periodo_id}/calcular-coeficientes', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'calcularCoeficientesCm05'])
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm05.calcular');
+            Route::post('/iibb/cm05/coeficientes/{id}/ajustar', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'ajustarCoeficiente'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm05.ajustar');
+            Route::post('/iibb/cm05/{anio}/aprobar', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'aprobarCoeficientesCm05'])
+                ->whereNumber('anio')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm05.aprobar');
+            Route::get('/iibb/cm05/{anio}/coeficientes', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'listarCoeficientes'])
+                ->whereNumber('anio')->name('erp.imp.iibb.cm05.list');
+
+            // ARCIBA (CABA)
+            Route::get('/iibb/caba/{periodo_id}', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
+                app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->showLocal($periodo_id, 'IIBB_CABA', $r))
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.caba.show');
+            Route::post('/iibb/caba/{periodo_id}/calcular', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
+                app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->calcularLocal($periodo_id, 'IIBB_CABA', $r))
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.caba.calcular');
+            Route::post('/iibb/caba/{periodo_id}/generar', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
+                app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->generarLocal($periodo_id, 'IIBB_CABA', $r))
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.caba.generar');
+
+            // ARBA (PBA)
+            Route::get('/iibb/pba/{periodo_id}', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
+                app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->showLocal($periodo_id, 'IIBB_PBA', $r))
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.pba.show');
+            Route::post('/iibb/pba/{periodo_id}/calcular', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
+                app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->calcularLocal($periodo_id, 'IIBB_PBA', $r))
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.pba.calcular');
+            Route::post('/iibb/pba/{periodo_id}/generar', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
+                app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->generarLocal($periodo_id, 'IIBB_PBA', $r))
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.pba.generar');
+
+            Route::get('/iibb/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'descargar'])
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.descargar');
         });
     });
 });

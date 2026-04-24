@@ -468,6 +468,25 @@ Route::prefix('api/erp')->group(function () {
 
             Route::get('/iibb/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'descargar'])
                 ->whereNumber('periodo_id')->name('erp.imp.iibb.descargar');
+
+            // Ganancias F.713 + anticipos (§6.6, H5)
+            Route::get('/ganancias/anticipos', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'listarAnticipos'])
+                ->name('erp.imp.gan.anticipos.list');
+            Route::post('/ganancias/anticipos/{id}/pagar', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'pagarAnticipo'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.anticipos.pagar');
+
+            Route::get('/ganancias/{ejercicio_id}', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'show'])
+                ->whereNumber('ejercicio_id')->name('erp.imp.gan.show');
+            Route::post('/ganancias/{ejercicio_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'calcular'])
+                ->whereNumber('ejercicio_id')->name('erp.imp.gan.calcular');
+            Route::post('/ganancias/{ejercicio_id}/agregar-ajuste', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'agregarAjuste'])
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.ajuste');
+            Route::post('/ganancias/{ejercicio_id}/generar-f713', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'generar'])
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.generar');
+            Route::get('/ganancias/{ejercicio_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'descargar'])
+                ->whereNumber('ejercicio_id')->name('erp.imp.gan.descargar');
+            Route::post('/ganancias/{ejercicio_id}/generar-anticipos', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'generarAnticipos'])
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.generar-anticipos');
         });
     });
 });

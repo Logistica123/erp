@@ -35,6 +35,10 @@ import { GananciasPage } from './pages/GananciasPage';
 import { BpPage } from './pages/BpPage';
 import { AgingPage } from './pages/AgingPage';
 import { ComparativoPage } from './pages/ComparativoPage';
+import { ArcaDashboardPage } from './pages/ArcaDashboardPage';
+import { PadronPage } from './pages/PadronPage';
+import { ConstatacionPage } from './pages/ConstatacionPage';
+import { MisComprobantesPage } from './pages/MisComprobantesPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -71,11 +75,6 @@ const placeholderRoutes: { path: string; title: string; modulo: string; endpoint
   { path: '/erp/presupuestos', title: 'Listado de presupuestos', modulo: 'Presupuestos', endpoint: '/api/erp/presupuestos', bloque: 'F8' },
   { path: '/erp/presupuestos/ejecucion', title: 'Ejecución presupuestaria', modulo: 'Presupuestos', endpoint: '/api/erp/presupuestos/{id}/ejecucion', bloque: 'F8' },
 
-  // ARCA Gateway (SPEC 04) — F6
-  { path: '/erp/arca/dashboard', title: 'Estado del gateway ARCA', modulo: 'ARCA Gateway', endpoint: '/health/ready', bloque: 'F6' },
-  { path: '/erp/arca/padron', title: 'Padrón AFIP', modulo: 'ARCA Gateway', endpoint: '/api/erp/padrones/*', bloque: 'F6' },
-  { path: '/erp/arca/constatacion', title: 'Constatación de CAE', modulo: 'ARCA Gateway', endpoint: '/api/erp/comprobantes/constatar', bloque: 'F6' },
-  { path: '/erp/arca/mis-comprobantes', title: 'Mis Comprobantes (scraper)', modulo: 'ARCA Gateway', endpoint: '/api/erp/mis-comprobantes/runs', bloque: 'F6' },
 ];
 
 export default function App() {
@@ -136,6 +135,12 @@ export default function App() {
               <Route path="/erp/impuestos/bp" element={<BpPage />} handle={{ crumb: 'BP F.2000' }} />
               <Route path="/erp/reportes/aging" element={<AgingPage />} handle={{ crumb: 'Aging' }} />
               <Route path="/erp/reportes/comparativo" element={<ComparativoPage />} handle={{ crumb: 'Comparativo' }} />
+
+              {/* F6 — ARCA Gateway */}
+              <Route path="/erp/arca/dashboard" element={<ArcaDashboardPage />} handle={{ crumb: 'ARCA Gateway' }} />
+              <Route path="/erp/arca/padron" element={<PadronPage />} handle={{ crumb: 'Padrón AFIP' }} />
+              <Route path="/erp/arca/constatacion" element={<ConstatacionPage />} handle={{ crumb: 'Constatación' }} />
+              <Route path="/erp/arca/mis-comprobantes" element={<MisComprobantesPage />} handle={{ crumb: 'Mis Comprobantes' }} />
 
               {/* Placeholders — se reemplazan en bloques F6..F8 */}
               {placeholderRoutes.map((r) => (

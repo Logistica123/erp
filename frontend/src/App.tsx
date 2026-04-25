@@ -31,6 +31,10 @@ import { LibroIvaDigitalPage } from './pages/LibroIvaDigitalPage';
 import { IvaDdjjPage } from './pages/IvaDdjjPage';
 import { SicorePage } from './pages/SicorePage';
 import { IibbPage } from './pages/IibbPage';
+import { GananciasPage } from './pages/GananciasPage';
+import { BpPage } from './pages/BpPage';
+import { AgingPage } from './pages/AgingPage';
+import { ComparativoPage } from './pages/ComparativoPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -56,14 +60,6 @@ const placeholderRoutes: { path: string; title: string; modulo: string; endpoint
 
   // Pendientes Compras (libro IVA import → reusa endpoint existente, baja prioridad)
   { path: '/erp/libro-iva-compras', title: 'Libro IVA Compras (importar)', modulo: 'Compras', endpoint: '/api/erp/libro-iva/importar', bloque: 'F3 (extra)' },
-
-  // F5 pendientes
-  { path: '/erp/impuestos/ganancias', title: 'Ganancias F.713', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/ganancias', bloque: 'F5' },
-  { path: '/erp/impuestos/bp', title: 'BP F.2000', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/bp', bloque: 'F5' },
-
-  // Reportes — F5
-  { path: '/erp/reportes/aging', title: 'Aging clientes/proveedores', modulo: 'Reportes', endpoint: '/api/erp/reportes/aging', bloque: 'F5' },
-  { path: '/erp/reportes/comparativo', title: 'Comparativo períodos', modulo: 'Reportes', endpoint: '/api/erp/reportes/comparativo', bloque: 'F5' },
 
   // Activos Fijos (SPEC 06) — F7
   { path: '/erp/af/bienes', title: 'Bienes', modulo: 'Activos Fijos', endpoint: '/api/erp/af/bienes', bloque: 'F7' },
@@ -135,7 +131,13 @@ export default function App() {
               <Route path="/erp/impuestos/iibb-caba" element={<IibbPage kind="caba" />} handle={{ crumb: 'IIBB CABA' }} />
               <Route path="/erp/impuestos/iibb-pba" element={<IibbPage kind="pba" />} handle={{ crumb: 'IIBB PBA' }} />
 
-              {/* Placeholders — se reemplazan en bloques F5..F8 */}
+              {/* F5 — Ganancias + BP + Aging + Comparativo */}
+              <Route path="/erp/impuestos/ganancias" element={<GananciasPage />} handle={{ crumb: 'Ganancias' }} />
+              <Route path="/erp/impuestos/bp" element={<BpPage />} handle={{ crumb: 'BP F.2000' }} />
+              <Route path="/erp/reportes/aging" element={<AgingPage />} handle={{ crumb: 'Aging' }} />
+              <Route path="/erp/reportes/comparativo" element={<ComparativoPage />} handle={{ crumb: 'Comparativo' }} />
+
+              {/* Placeholders — se reemplazan en bloques F6..F8 */}
               {placeholderRoutes.map((r) => (
                 <Route
                   key={r.path}

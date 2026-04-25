@@ -487,6 +487,25 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('ejercicio_id')->name('erp.imp.gan.descargar');
             Route::post('/ganancias/{ejercicio_id}/generar-anticipos', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'generarAnticipos'])
                 ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.generar-anticipos');
+
+            // BP F.2000 + CRUD socios (§6.7, H6)
+            Route::get('/bp/socios', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'listSocios'])
+                ->name('erp.imp.bp.socios.list');
+            Route::post('/bp/socios', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'storeSocio'])
+                ->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.store');
+            Route::patch('/bp/socios/{id}', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'updateSocio'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.update');
+            Route::delete('/bp/socios/{id}', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'destroySocio'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.destroy');
+
+            Route::get('/bp/{ejercicio_id}', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'show'])
+                ->whereNumber('ejercicio_id')->name('erp.imp.bp.show');
+            Route::post('/bp/{ejercicio_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'calcular'])
+                ->whereNumber('ejercicio_id')->name('erp.imp.bp.calcular');
+            Route::post('/bp/{ejercicio_id}/generar-f2000', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'generar'])
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.generar');
+            Route::get('/bp/{ejercicio_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'descargar'])
+                ->whereNumber('ejercicio_id')->name('erp.imp.bp.descargar');
         });
     });
 });

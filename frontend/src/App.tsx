@@ -23,6 +23,9 @@ import { CobrosPage } from './pages/CobrosPage';
 import { EcheqPage } from './pages/EcheqPage';
 import { TransferenciasPage } from './pages/TransferenciasPage';
 import { ArqueosPage } from './pages/ArqueosPage';
+import { FacturasCompraPage } from './pages/FacturasCompraPage';
+import { CCPage } from './pages/CCPage';
+import { FcePage } from './pages/FcePage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -46,12 +49,8 @@ const placeholderRoutes: { path: string; title: string; modulo: string; endpoint
   { path: '/erp/inicio', title: 'Inicio', modulo: 'General', bloque: 'F2' },
   { path: '/erp/distriapp', title: 'DistriApp', modulo: 'Integración', endpoint: '/api/erp/integracion/distriapp/*', bloque: 'F8 (futuro)' },
 
-  // Ventas/Compras (SPEC 03) — F3
-  { path: '/erp/cc-clientes', title: 'CC Clientes', modulo: 'Ventas', endpoint: '/api/erp/reportes/cc-clientes', bloque: 'F3' },
-  { path: '/erp/cc-proveedores', title: 'CC Proveedores', modulo: 'Compras', endpoint: '/api/erp/reportes/cc-proveedores', bloque: 'F3' },
-  { path: '/erp/fce', title: 'FCE MiPyME', modulo: 'Ventas', endpoint: '/api/erp/facturas-venta/{id}/fce/*', bloque: 'F3' },
-  { path: '/erp/facturas-compra', title: 'Facturas de compra', modulo: 'Compras', endpoint: '/api/erp/facturas-compra', bloque: 'F3' },
-  { path: '/erp/libro-iva-compras', title: 'Libro IVA Compras (importar)', modulo: 'Compras', endpoint: '/api/erp/libro-iva/importar', bloque: 'F3' },
+  // Pendientes Compras (libro IVA import → reusa endpoint existente, baja prioridad)
+  { path: '/erp/libro-iva-compras', title: 'Libro IVA Compras (importar)', modulo: 'Compras', endpoint: '/api/erp/libro-iva/importar', bloque: 'F3 (extra)' },
 
   // Impuestos (SPEC 05) — F4 + F5
   { path: '/erp/impuestos/periodos', title: 'Períodos fiscales', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/periodos', bloque: 'F4' },
@@ -123,7 +122,13 @@ export default function App() {
               <Route path="/erp/transferencias" element={<TransferenciasPage />} handle={{ crumb: 'Transferencias' }} />
               <Route path="/erp/arqueos" element={<ArqueosPage />} handle={{ crumb: 'Arqueos' }} />
 
-              {/* Placeholders — se reemplazan en bloques F3..F8 */}
+              {/* F3 — Compras + CC + FCE */}
+              <Route path="/erp/facturas-compra" element={<FacturasCompraPage />} handle={{ crumb: 'Facturas de compra' }} />
+              <Route path="/erp/cc-clientes" element={<CCPage kind="clientes" />} handle={{ crumb: 'CC Clientes' }} />
+              <Route path="/erp/cc-proveedores" element={<CCPage kind="proveedores" />} handle={{ crumb: 'CC Proveedores' }} />
+              <Route path="/erp/fce" element={<FcePage />} handle={{ crumb: 'FCE MiPyME' }} />
+
+              {/* Placeholders — se reemplazan en bloques F4..F8 */}
               {placeholderRoutes.map((r) => (
                 <Route
                   key={r.path}

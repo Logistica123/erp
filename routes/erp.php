@@ -580,6 +580,24 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.update');
             Route::get('/bienes/{id}/movimientos', [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'movimientos'])
                 ->whereNumber('id')->name('erp.af.bienes.movimientos');
+
+            // I2: Amortizaciones + movimientos contables (mejora/revalúo/baja)
+            Route::post('/amortizaciones/generar', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'generar'])
+                ->middleware('erp.mfa.fresh')->name('erp.af.amort.generar');
+            Route::get('/amortizaciones', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'listar'])
+                ->name('erp.af.amort.listar');
+            Route::get('/bienes/{id}/amortizaciones', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'porBien'])
+                ->whereNumber('id')->name('erp.af.bienes.amort');
+
+            Route::post('/bienes/{id}/mejora', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'mejora'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.mejora');
+            Route::post('/bienes/{id}/revaluo', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'revaluo'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.revaluo');
+            Route::post('/bienes/{id}/baja', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'baja'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.baja');
+
+            Route::post('/movimientos/{id}/vincular-asiento', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'vincularAsiento'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.movs.vincular');
         });
     });
 });

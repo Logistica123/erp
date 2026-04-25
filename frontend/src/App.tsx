@@ -43,6 +43,8 @@ import { CategoriasAfPage } from './pages/CategoriasAfPage';
 import { BienesPage } from './pages/BienesPage';
 import { AmortizacionesPage } from './pages/AmortizacionesPage';
 import { ReportesAfPage } from './pages/ReportesAfPage';
+import { PresupuestosPage } from './pages/PresupuestosPage';
+import { EjecucionPresupuestoPage } from './pages/EjecucionPresupuestoPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -68,10 +70,6 @@ const placeholderRoutes: { path: string; title: string; modulo: string; endpoint
 
   // Pendientes Compras (libro IVA import → reusa endpoint existente, baja prioridad)
   { path: '/erp/libro-iva-compras', title: 'Libro IVA Compras (importar)', modulo: 'Compras', endpoint: '/api/erp/libro-iva/importar', bloque: 'F3 (extra)' },
-
-  // Presupuestos (SPEC 06) — F8
-  { path: '/erp/presupuestos', title: 'Listado de presupuestos', modulo: 'Presupuestos', endpoint: '/api/erp/presupuestos', bloque: 'F8' },
-  { path: '/erp/presupuestos/ejecucion', title: 'Ejecución presupuestaria', modulo: 'Presupuestos', endpoint: '/api/erp/presupuestos/{id}/ejecucion', bloque: 'F8' },
 
 ];
 
@@ -145,6 +143,10 @@ export default function App() {
               <Route path="/erp/af/bienes" element={<BienesPage />} handle={{ crumb: 'Bienes' }} />
               <Route path="/erp/af/amortizaciones" element={<AmortizacionesPage />} handle={{ crumb: 'Amortizaciones' }} />
               <Route path="/erp/af/reportes" element={<ReportesAfPage />} handle={{ crumb: 'Reportes AF' }} />
+
+              {/* F8 — Presupuestos */}
+              <Route path="/erp/presupuestos" element={<PresupuestosPage />} handle={{ crumb: 'Presupuestos' }} />
+              <Route path="/erp/presupuestos/ejecucion" element={<EjecucionPresupuestoPage />} handle={{ crumb: 'Ejecución' }} />
 
               {/* Placeholders — se reemplazan en bloques F6..F8 */}
               {placeholderRoutes.map((r) => (

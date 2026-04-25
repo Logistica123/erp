@@ -756,6 +756,20 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('id')->name('erp.sueldos.liquidaciones.items');
             Route::get('/liquidaciones/{id}/recibo/{empleadoId}', [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'recibo'])
                 ->whereNumber('id')->whereNumber('empleadoId')->name('erp.sueldos.liquidaciones.recibo');
+
+            // ---- 8E: Pagos en 3 modalidades + asientos automáticos -----------
+            Route::post('/liquidaciones/{id}/contabilizar',  [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'contabilizar'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.contabilizar');
+            Route::post('/liquidaciones/{id}/pagar/formal',  [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'pagarFormal'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.pagar.formal');
+            Route::post('/liquidaciones/{id}/pagar/efectivo',[\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'pagarEfectivo'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.pagar.efectivo');
+            Route::post('/liquidaciones/{id}/pagar/mt',      [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'pagarMt'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.pagar.mt');
+            Route::get('/liquidaciones/{id}/pagos',          [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'listarPorLiquidacion'])
+                ->whereNumber('id')->name('erp.sueldos.liq.pagos');
+            Route::get('/pagos/{id}',                        [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'show'])
+                ->whereNumber('id')->name('erp.sueldos.pagos.show');
         });
     });
 });

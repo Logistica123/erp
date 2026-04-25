@@ -18,7 +18,6 @@ import { NuevoAsientoPage } from './pages/NuevoAsientoPage';
 import { OrdenesPagoPage } from './pages/OrdenesPagoPage';
 import { PeriodosPage } from './pages/PeriodosPage';
 import { PlanCuentasPage } from './pages/PlanCuentasPage';
-import { PlaceholderPage } from './pages/PlaceholderPage';
 import { CobrosPage } from './pages/CobrosPage';
 import { EcheqPage } from './pages/EcheqPage';
 import { TransferenciasPage } from './pages/TransferenciasPage';
@@ -45,6 +44,8 @@ import { AmortizacionesPage } from './pages/AmortizacionesPage';
 import { ReportesAfPage } from './pages/ReportesAfPage';
 import { PresupuestosPage } from './pages/PresupuestosPage';
 import { EjecucionPresupuestoPage } from './pages/EjecucionPresupuestoPage';
+import { DistriappPage } from './pages/DistriappPage';
+import { LibroIvaImportarPage } from './pages/LibroIvaImportarPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -63,15 +64,6 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Lista de rutas placeholder agrupadas por bloque planeado. */
-const placeholderRoutes: { path: string; title: string; modulo: string; endpoint?: string; bloque?: string }[] = [
-  { path: '/erp/inicio', title: 'Inicio', modulo: 'General', bloque: 'F2' },
-  { path: '/erp/distriapp', title: 'DistriApp', modulo: 'Integración', endpoint: '/api/erp/integracion/distriapp/*', bloque: 'F8 (futuro)' },
-
-  // Pendientes Compras (libro IVA import → reusa endpoint existente, baja prioridad)
-  { path: '/erp/libro-iva-compras', title: 'Libro IVA Compras (importar)', modulo: 'Compras', endpoint: '/api/erp/libro-iva/importar', bloque: 'F3 (extra)' },
-
-];
 
 export default function App() {
   return (
@@ -148,15 +140,10 @@ export default function App() {
               <Route path="/erp/presupuestos" element={<PresupuestosPage />} handle={{ crumb: 'Presupuestos' }} />
               <Route path="/erp/presupuestos/ejecucion" element={<EjecucionPresupuestoPage />} handle={{ crumb: 'Ejecución' }} />
 
-              {/* Placeholders — se reemplazan en bloques F6..F8 */}
-              {placeholderRoutes.map((r) => (
-                <Route
-                  key={r.path}
-                  path={r.path}
-                  element={<PlaceholderPage title={r.title} modulo={r.modulo} endpoint={r.endpoint} bloque={r.bloque} />}
-                  handle={{ crumb: r.title }}
-                />
-              ))}
+              {/* General — DistriApp + Libro IVA importar (cierran §9) */}
+              <Route path="/erp/inicio" element={<Navigate to="/erp/dashboard" replace />} />
+              <Route path="/erp/distriapp" element={<DistriappPage />} handle={{ crumb: 'DistriApp' }} />
+              <Route path="/erp/libro-iva-compras" element={<LibroIvaImportarPage />} handle={{ crumb: 'Libro IVA — importar' }} />
             </Route>
             <Route path="*" element={<Navigate to="/erp/dashboard" replace />} />
           </Routes>

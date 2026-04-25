@@ -19,7 +19,8 @@ async function request<T>(
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
-  if (opts.body !== undefined) {
+  const isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+  if (opts.body !== undefined && !isFormData) {
     headers['Content-Type'] = 'application/json';
   }
   if (token) {
@@ -29,7 +30,11 @@ async function request<T>(
   const res = await fetch(path, {
     method: opts.method ?? 'GET',
     headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body: opts.body === undefined
+      ? undefined
+      : isFormData
+        ? (opts.body as FormData)
+        : JSON.stringify(opts.body),
     signal: opts.signal,
   });
 

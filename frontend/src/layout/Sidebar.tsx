@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router-dom';
 import {
-  Home,
   LayoutDashboard,
   BookOpen,
   BookText,
@@ -50,7 +49,6 @@ const sections: NavSection[] = [
   {
     label: 'General',
     items: [
-      { to: '/erp/inicio', label: 'Inicio', icon: Home },
       { to: '/erp/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/erp/distriapp', label: 'DistriApp', icon: Box },
     ],

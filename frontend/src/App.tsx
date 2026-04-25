@@ -19,6 +19,10 @@ import { OrdenesPagoPage } from './pages/OrdenesPagoPage';
 import { PeriodosPage } from './pages/PeriodosPage';
 import { PlanCuentasPage } from './pages/PlanCuentasPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { CobrosPage } from './pages/CobrosPage';
+import { EcheqPage } from './pages/EcheqPage';
+import { TransferenciasPage } from './pages/TransferenciasPage';
+import { ArqueosPage } from './pages/ArqueosPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -41,12 +45,6 @@ function RequireAuth({ children }: { children: ReactNode }) {
 const placeholderRoutes: { path: string; title: string; modulo: string; endpoint?: string; bloque?: string }[] = [
   { path: '/erp/inicio', title: 'Inicio', modulo: 'General', bloque: 'F2' },
   { path: '/erp/distriapp', title: 'DistriApp', modulo: 'Integración', endpoint: '/api/erp/integracion/distriapp/*', bloque: 'F8 (futuro)' },
-
-  // Tesorería (SPEC 02) — F2
-  { path: '/erp/cobros', title: 'Cobros', modulo: 'Tesorería', endpoint: '/api/erp/cobros', bloque: 'F2' },
-  { path: '/erp/echeq', title: 'eCheq', modulo: 'Tesorería', endpoint: '/api/erp/echeq', bloque: 'F2' },
-  { path: '/erp/transferencias', title: 'Transferencias internas', modulo: 'Tesorería', endpoint: '/api/erp/transferencias-internas', bloque: 'F2' },
-  { path: '/erp/arqueos', title: 'Arqueos de caja', modulo: 'Tesorería', endpoint: '/api/erp/arqueos', bloque: 'F2' },
 
   // Ventas/Compras (SPEC 03) — F3
   { path: '/erp/cc-clientes', title: 'CC Clientes', modulo: 'Ventas', endpoint: '/api/erp/reportes/cc-clientes', bloque: 'F3' },
@@ -119,7 +117,13 @@ export default function App() {
               <Route path="/erp/conciliacion" element={<ConciliacionPage />} handle={{ crumb: 'Conciliación' }} />
               <Route path="/erp/ordenes-pago" element={<OrdenesPagoPage />} handle={{ crumb: 'Órdenes de pago' }} />
 
-              {/* Placeholders — se reemplazan en bloques F2..F8 */}
+              {/* F2 — Tesorería */}
+              <Route path="/erp/cobros" element={<CobrosPage />} handle={{ crumb: 'Cobros' }} />
+              <Route path="/erp/echeq" element={<EcheqPage />} handle={{ crumb: 'eCheq' }} />
+              <Route path="/erp/transferencias" element={<TransferenciasPage />} handle={{ crumb: 'Transferencias' }} />
+              <Route path="/erp/arqueos" element={<ArqueosPage />} handle={{ crumb: 'Arqueos' }} />
+
+              {/* Placeholders — se reemplazan en bloques F3..F8 */}
               {placeholderRoutes.map((r) => (
                 <Route
                   key={r.path}

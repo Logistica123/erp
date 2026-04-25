@@ -507,5 +507,27 @@ Route::prefix('api/erp')->group(function () {
             Route::get('/bp/{ejercicio_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'descargar'])
                 ->whereNumber('ejercicio_id')->name('erp.imp.bp.descargar');
         });
+
+        // ====================================================================
+        // SPEC 05 H7 — Reportes contables y gerenciales (§6.8)
+        // ====================================================================
+        Route::prefix('reportes')->group(function () {
+            Route::get('/mayor', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'mayor'])
+                ->name('erp.reportes.mayor');
+            Route::get('/diario', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'diario'])
+                ->name('erp.reportes.diario');
+            Route::get('/sumas-y-saldos', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'sumasYSaldos'])
+                ->name('erp.reportes.sumas-y-saldos');
+            Route::get('/libro-iva-interno', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'libroIvaInterno'])
+                ->name('erp.reportes.libro-iva-interno');
+            Route::get('/cc-clientes', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'ccClientes'])
+                ->name('erp.reportes.cc-clientes');
+            Route::get('/cc-proveedores', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'ccProveedores'])
+                ->name('erp.reportes.cc-proveedores');
+            Route::get('/aging', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'aging'])
+                ->name('erp.reportes.aging');
+            Route::get('/comparativo', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'comparativo'])
+                ->name('erp.reportes.comparativo');
+        });
     });
 });

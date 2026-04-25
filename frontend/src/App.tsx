@@ -46,6 +46,13 @@ import { PresupuestosPage } from './pages/PresupuestosPage';
 import { EjecucionPresupuestoPage } from './pages/EjecucionPresupuestoPage';
 import { DistriappPage } from './pages/DistriappPage';
 import { LibroIvaImportarPage } from './pages/LibroIvaImportarPage';
+import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
+import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
+import { AusenciasPage } from './pages/Sueldos/AusenciasPage';
+import { CCPrestamosPage } from './pages/Sueldos/CCPrestamosPage';
+import { LiquidacionesPage as LiquidacionesSueldosPage } from './pages/Sueldos/LiquidacionesPage';
+import { LiberPage } from './pages/Sueldos/LiberPage';
+import { ReportesSueldosPage } from './pages/Sueldos/ReportesSueldosPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -144,6 +151,15 @@ export default function App() {
               <Route path="/erp/inicio" element={<Navigate to="/erp/dashboard" replace />} />
               <Route path="/erp/distriapp" element={<DistriappPage />} handle={{ crumb: 'DistriApp' }} />
               <Route path="/erp/libro-iva-compras" element={<LibroIvaImportarPage />} handle={{ crumb: 'Libro IVA — importar' }} />
+
+              {/* Sueldos (SPEC 08) */}
+              <Route path="/erp/sueldos/empleados" element={<EmpleadosPage />} handle={{ crumb: 'Empleados' }} />
+              <Route path="/erp/sueldos/novedades" element={<NovedadesPage />} handle={{ crumb: 'Novedades' }} />
+              <Route path="/erp/sueldos/ausencias" element={<AusenciasPage />} handle={{ crumb: 'Ausencias' }} />
+              <Route path="/erp/sueldos/cc" element={<CCPrestamosPage />} handle={{ crumb: 'CC + Préstamos' }} />
+              <Route path="/erp/sueldos/liquidaciones" element={<LiquidacionesSueldosPage />} handle={{ crumb: 'Liquidaciones' }} />
+              <Route path="/erp/sueldos/liber" element={<LiberPage />} handle={{ crumb: 'Export LIBER' }} />
+              <Route path="/erp/sueldos/reportes" element={<ReportesSueldosPage />} handle={{ crumb: 'Reportes Sueldos' }} />
             </Route>
             <Route path="*" element={<Navigate to="/erp/dashboard" replace />} />
           </Routes>

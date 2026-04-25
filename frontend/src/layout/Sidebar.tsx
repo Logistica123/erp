@@ -140,6 +140,18 @@ const sections: NavSection[] = [
       { to: '/erp/arca/mis-comprobantes', label: 'Mis Comprobantes (scraper)', icon: Truck },
     ],
   },
+  {
+    label: 'Sueldos',
+    items: [
+      { to: '/erp/sueldos/empleados', label: 'Empleados', icon: Users },
+      { to: '/erp/sueldos/novedades', label: 'Novedades del mes', icon: ClipboardList },
+      { to: '/erp/sueldos/ausencias', label: 'Ausencias', icon: CalendarCheck },
+      { to: '/erp/sueldos/cc', label: 'CC + Préstamos', icon: Wallet },
+      { to: '/erp/sueldos/liquidaciones', label: 'Liquidaciones', icon: Calculator },
+      { to: '/erp/sueldos/liber', label: 'Export LIBER', icon: FileBarChart },
+      { to: '/erp/sueldos/reportes', label: 'Reportes', icon: PieChart },
+    ],
+  },
 ];
 
 export function Sidebar() {

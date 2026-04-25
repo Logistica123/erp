@@ -598,6 +598,21 @@ Route::prefix('api/erp')->group(function () {
 
             Route::post('/movimientos/{id}/vincular-asiento', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'vincularAsiento'])
                 ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.movs.vincular');
+
+            // I3: Reportes + reexpresión RT 6
+            Route::get('/reportes/listado',          [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'listado'])
+                ->name('erp.af.rep.listado');
+            Route::get('/reportes/anexo-bienes-uso', [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'anexoBienesUso'])
+                ->name('erp.af.rep.anexo');
+            Route::get('/reportes/altas-bajas',      [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'altasBajas'])
+                ->name('erp.af.rep.altasbajas');
+            Route::get('/reportes/amortizaciones',   [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'amortContVsFiscal'])
+                ->name('erp.af.rep.amort');
+
+            Route::post('/reexpresiones/generar',    [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'generarReexpresion'])
+                ->middleware('erp.mfa.fresh')->name('erp.af.reexp.generar');
+            Route::get('/reexpresiones',             [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'listarReexpresiones'])
+                ->name('erp.af.reexp.list');
         });
     });
 });

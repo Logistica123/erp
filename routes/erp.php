@@ -697,6 +697,45 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('id')->name('erp.sueldos.empleados.coms.index');
             Route::post('/empleados/{id}/comisiones', [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'comisionStore'])
                 ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.coms.store');
+
+            // ---- 8C: Novedades / Ausencias / CC / Préstamos -----------------
+            // Novedades del mes
+            Route::get('/novedades',          [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'index'])
+                ->name('erp.sueldos.novedades.index');
+            Route::post('/novedades',         [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.novedades.store');
+            Route::post('/novedades/bulk',    [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'bulk'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.novedades.bulk');
+            Route::delete('/novedades/{id}',  [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'destroy'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.novedades.destroy');
+
+            // Ausencias
+            Route::get('/ausencias',          [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'index'])
+                ->name('erp.sueldos.ausencias.index');
+            Route::post('/ausencias',         [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.ausencias.store');
+            Route::put('/ausencias/{id}',     [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'update'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.ausencias.update');
+            Route::delete('/ausencias/{id}',  [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'destroy'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.ausencias.destroy');
+
+            // CC empleado + movimientos
+            Route::get('/cc',                       [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'index'])
+                ->name('erp.sueldos.cc.index');
+            Route::post('/cc',                      [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.cc.store');
+            Route::get('/cc/{id}/movimientos',      [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'movimientos'])
+                ->whereNumber('id')->name('erp.sueldos.cc.movs.index');
+            Route::post('/cc/{id}/movimientos',     [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'movimientoStore'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.cc.movs.store');
+
+            // Préstamos
+            Route::get('/prestamos',          [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'index'])
+                ->name('erp.sueldos.prestamos.index');
+            Route::post('/prestamos',         [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.prestamos.store');
+            Route::get('/prestamos/{id}',     [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'show'])
+                ->whereNumber('id')->name('erp.sueldos.prestamos.show');
         });
     });
 });

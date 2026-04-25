@@ -614,5 +614,41 @@ Route::prefix('api/erp')->group(function () {
             Route::get('/reexpresiones',             [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'listarReexpresiones'])
                 ->name('erp.af.reexp.list');
         });
+
+        // ====================================================================
+        // SPEC 06 I4 — Presupuestos: CRUD + reforecast + variaciones (§6.5/§6.6)
+        // ====================================================================
+        Route::prefix('presupuestos')->group(function () {
+            Route::get('/',         [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'index'])
+                ->name('erp.presup.index');
+            Route::post('/',        [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.presup.store');
+            Route::get('/{id}',     [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'show'])
+                ->whereNumber('id')->name('erp.presup.show');
+            Route::put('/{id}',     [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'update'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.update');
+            Route::post('/{id}/aprobar',    [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'aprobar'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.aprobar');
+            Route::post('/{id}/vigente',    [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'vigente'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.vigente');
+            Route::post('/{id}/descartar',  [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'descartar'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.descartar');
+            Route::post('/{id}/reforecast', [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'reforecast'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.reforecast');
+
+            Route::post('/{id}/items',         [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'bulkItems'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.items.bulk');
+            Route::get('/{id}/items',          [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'listItems'])
+                ->whereNumber('id')->name('erp.presup.items.list');
+            Route::delete('/{id}/items/{itemId}', [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'deleteItem'])
+                ->whereNumber('id')->whereNumber('itemId')->middleware('erp.mfa.fresh')->name('erp.presup.items.del');
+
+            Route::get('/{id}/variaciones',          [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'variaciones'])
+                ->whereNumber('id')->name('erp.presup.variaciones');
+            Route::get('/{id}/variaciones/resumen',  [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'variacionesResumen'])
+                ->whereNumber('id')->name('erp.presup.variaciones.resumen');
+            Route::get('/{id}/ejecucion',            [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'ejecucion'])
+                ->whereNumber('id')->name('erp.presup.ejecucion');
+        });
     });
 });

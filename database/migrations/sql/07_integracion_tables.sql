@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS erp_distriapp_ref (
     UNIQUE KEY uq_distriapp_ref (tipo, distriapp_tabla, distriapp_id),
     KEY idx_ref_erp (erp_entidad, erp_entidad_id),
     KEY idx_ref_fecha (fecha_conciliacion)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Puente registros DistriApp ↔ entidades ERP. UK garantiza idempotencia.';
 
 -- ----------------------------------------------------------------------------
@@ -43,5 +43,5 @@ CREATE TABLE IF NOT EXISTS erp_integracion_log (
     KEY idx_log_timestamp (timestamp),
     KEY idx_log_flujo_estado (flujo, estado),
     KEY idx_log_distriapp (distriapp_tabla, distriapp_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Auditoría de corridas de integración — feeds dashboard bloque C.';

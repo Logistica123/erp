@@ -548,5 +548,38 @@ Route::prefix('api/erp')->group(function () {
             Route::get('/{ejercicio_id}/emisiones', [\App\Erp\Http\Controllers\Eecc\EecCController::class, 'emisiones'])
                 ->whereNumber('ejercicio_id')->name('erp.eecc.emisiones');
         });
+
+        // ====================================================================
+        // SPEC 06 I1 — Activos Fijos: categorías + bienes (alta + activar
+        //   desde factura). Amortizaciones, mejoras, bajas y reportes vienen
+        //   en bloques siguientes (I2 + I3).
+        // ====================================================================
+        Route::prefix('af')->group(function () {
+            // Categorías
+            Route::get('/categorias',       [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'index'])
+                ->name('erp.af.cats.index');
+            Route::post('/categorias',      [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.af.cats.store');
+            Route::get('/categorias/{id}',  [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'show'])
+                ->whereNumber('id')->name('erp.af.cats.show');
+            Route::put('/categorias/{id}',  [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'update'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.cats.update');
+            Route::delete('/categorias/{id}', [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'destroy'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.cats.destroy');
+
+            // Bienes
+            Route::get('/bienes',           [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'index'])
+                ->name('erp.af.bienes.index');
+            Route::post('/bienes',          [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.af.bienes.store');
+            Route::post('/bienes/activar-desde-factura', [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'activarDesdeFactura'])
+                ->middleware('erp.mfa.fresh')->name('erp.af.bienes.activar');
+            Route::get('/bienes/{id}',      [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'show'])
+                ->whereNumber('id')->name('erp.af.bienes.show');
+            Route::put('/bienes/{id}',      [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'update'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.update');
+            Route::get('/bienes/{id}/movimientos', [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'movimientos'])
+                ->whereNumber('id')->name('erp.af.bienes.movimientos');
+        });
     });
 });

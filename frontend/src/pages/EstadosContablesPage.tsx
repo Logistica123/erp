@@ -90,7 +90,7 @@ function RubroBloque({ rubro }: { rubro: Rubro }) {
   );
 }
 
-function SituacionPatrimonial({ desde, hasta }: { desde: string; hasta: string }) {
+function SituacionPatrimonial({ hasta }: { desde: string; hasta: string }) {
   const { data, isLoading } = useQuery<SPResp>({
     queryKey: ['ec-sp', hasta],
     queryFn: () => api.get<SPResp>(`/api/erp/estados-contables/situacion-patrimonial?al=${hasta}`),

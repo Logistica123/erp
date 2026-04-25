@@ -14,20 +14,24 @@ export function CardHeader({
   title,
   actions,
   className,
+  children,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   actions?: ReactNode;
   className?: string;
+  children?: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        'px-4 py-3 border-b border-line flex items-center justify-between bg-[#FAFBFC]',
+        'px-4 py-3 border-b border-line bg-[#FAFBFC]',
+        title || actions ? 'flex items-center justify-between' : '',
         className
       )}
     >
-      <div className="text-[13px] font-semibold text-navy-800">{title}</div>
+      {title && <div className="text-[13px] font-semibold text-navy-800">{title}</div>}
       {actions && <div className="flex gap-[6px]">{actions}</div>}
+      {children}
     </div>
   );
 }

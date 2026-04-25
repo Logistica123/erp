@@ -1,7 +1,7 @@
 import { cn } from '@/lib/cn';
 import type { ButtonHTMLAttributes } from 'react';
 
-type Variant = 'primary' | 'secondary' | 'success' | 'danger';
+type Variant = 'primary' | 'secondary' | 'success' | 'danger' | 'outline' | 'ghost';
 type Size = 'sm' | 'md';
 
 const variants: Record<Variant, string> = {
@@ -9,6 +9,8 @@ const variants: Record<Variant, string> = {
   secondary: 'bg-white text-ink-2 border-line-strong hover:bg-surface-hover',
   success: 'bg-success text-white border-success hover:opacity-90',
   danger: 'bg-danger text-white border-danger hover:opacity-90',
+  outline: 'bg-transparent text-ink-2 border-line-strong hover:bg-surface-hover',
+  ghost: 'bg-transparent text-ink-2 border-transparent hover:bg-surface-hover',
 };
 
 const sizes: Record<Size, string> = {

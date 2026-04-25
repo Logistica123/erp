@@ -1,4 +1,4 @@
-import { ArrowUp, FileText, BookText, Plus, Users, Truck, Loader2 } from 'lucide-react';
+import { Plus, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';

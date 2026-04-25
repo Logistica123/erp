@@ -770,6 +770,27 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('id')->name('erp.sueldos.liq.pagos');
             Route::get('/pagos/{id}',                        [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'show'])
                 ->whereNumber('id')->name('erp.sueldos.pagos.show');
+
+            // ---- 8F: Export LIBER + reportes -------------------------------
+            Route::post('/liquidaciones/{id}/export-liber',  [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'generarLiber'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liber.generar');
+            Route::get('/exports-liber',                     [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'listarLiber'])
+                ->name('erp.sueldos.liber.index');
+            Route::get('/exports-liber/{id}',                [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'showLiber'])
+                ->whereNumber('id')->name('erp.sueldos.liber.show');
+            Route::get('/exports-liber/{id}/descargar',      [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'descargarLiber'])
+                ->whereNumber('id')->name('erp.sueldos.liber.descargar');
+            Route::post('/exports-liber/{id}/marcar-enviado', [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'marcarEnviadoLiber'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liber.enviado');
+
+            Route::get('/reportes/liquidacion/{id}',          [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'liquidacionResumen'])
+                ->whereNumber('id')->name('erp.sueldos.rep.liquidacion');
+            Route::get('/reportes/empleado/{id}/historico',   [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'empleadoHistorico'])
+                ->whereNumber('id')->name('erp.sueldos.rep.historico');
+            Route::get('/reportes/costo-laboral',             [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'costoLaboral'])
+                ->name('erp.sueldos.rep.costo');
+            Route::get('/reportes/empleado/{id}/cc',          [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'ccEmpleado'])
+                ->whereNumber('id')->name('erp.sueldos.rep.cc');
         });
     });
 });

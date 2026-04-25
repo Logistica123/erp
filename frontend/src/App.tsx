@@ -39,6 +39,10 @@ import { ArcaDashboardPage } from './pages/ArcaDashboardPage';
 import { PadronPage } from './pages/PadronPage';
 import { ConstatacionPage } from './pages/ConstatacionPage';
 import { MisComprobantesPage } from './pages/MisComprobantesPage';
+import { CategoriasAfPage } from './pages/CategoriasAfPage';
+import { BienesPage } from './pages/BienesPage';
+import { AmortizacionesPage } from './pages/AmortizacionesPage';
+import { ReportesAfPage } from './pages/ReportesAfPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -64,12 +68,6 @@ const placeholderRoutes: { path: string; title: string; modulo: string; endpoint
 
   // Pendientes Compras (libro IVA import → reusa endpoint existente, baja prioridad)
   { path: '/erp/libro-iva-compras', title: 'Libro IVA Compras (importar)', modulo: 'Compras', endpoint: '/api/erp/libro-iva/importar', bloque: 'F3 (extra)' },
-
-  // Activos Fijos (SPEC 06) — F7
-  { path: '/erp/af/bienes', title: 'Bienes', modulo: 'Activos Fijos', endpoint: '/api/erp/af/bienes', bloque: 'F7' },
-  { path: '/erp/af/categorias', title: 'Categorías AF', modulo: 'Activos Fijos', endpoint: '/api/erp/af/categorias', bloque: 'F7' },
-  { path: '/erp/af/amortizaciones', title: 'Amortizaciones', modulo: 'Activos Fijos', endpoint: '/api/erp/af/amortizaciones', bloque: 'F7' },
-  { path: '/erp/af/reportes', title: 'Anexo BdU + Reportes AF', modulo: 'Activos Fijos', endpoint: '/api/erp/af/reportes/*', bloque: 'F7' },
 
   // Presupuestos (SPEC 06) — F8
   { path: '/erp/presupuestos', title: 'Listado de presupuestos', modulo: 'Presupuestos', endpoint: '/api/erp/presupuestos', bloque: 'F8' },
@@ -141,6 +139,12 @@ export default function App() {
               <Route path="/erp/arca/padron" element={<PadronPage />} handle={{ crumb: 'Padrón AFIP' }} />
               <Route path="/erp/arca/constatacion" element={<ConstatacionPage />} handle={{ crumb: 'Constatación' }} />
               <Route path="/erp/arca/mis-comprobantes" element={<MisComprobantesPage />} handle={{ crumb: 'Mis Comprobantes' }} />
+
+              {/* F7 — Activos Fijos */}
+              <Route path="/erp/af/categorias" element={<CategoriasAfPage />} handle={{ crumb: 'Categorías AF' }} />
+              <Route path="/erp/af/bienes" element={<BienesPage />} handle={{ crumb: 'Bienes' }} />
+              <Route path="/erp/af/amortizaciones" element={<AmortizacionesPage />} handle={{ crumb: 'Amortizaciones' }} />
+              <Route path="/erp/af/reportes" element={<ReportesAfPage />} handle={{ crumb: 'Reportes AF' }} />
 
               {/* Placeholders — se reemplazan en bloques F6..F8 */}
               {placeholderRoutes.map((r) => (

@@ -529,5 +529,24 @@ Route::prefix('api/erp')->group(function () {
             Route::get('/comparativo', [\App\Erp\Http\Controllers\ReportesContablesController::class, 'comparativo'])
                 ->name('erp.reportes.comparativo');
         });
+
+        // ====================================================================
+        // SPEC 05 H8 — Estados Contables profesionales (§6.9)
+        // ====================================================================
+        Route::prefix('eecc')->group(function () {
+            Route::get('/{ejercicio_id}/preview', [\App\Erp\Http\Controllers\Eecc\EecCController::class, 'preview'])
+                ->whereNumber('ejercicio_id')->name('erp.eecc.preview');
+            Route::post('/{ejercicio_id}/generar', [\App\Erp\Http\Controllers\Eecc\EecCController::class, 'generar'])
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.eecc.generar');
+            Route::get('/{ejercicio_id}/descargar', [\App\Erp\Http\Controllers\Eecc\EecCController::class, 'descargar'])
+                ->whereNumber('ejercicio_id')->name('erp.eecc.descargar');
+            Route::get('/{ejercicio_id}/notas', [\App\Erp\Http\Controllers\Eecc\EecCController::class, 'notas'])
+                ->whereNumber('ejercicio_id')->name('erp.eecc.notas');
+            Route::patch('/{ejercicio_id}/notas/{numero}', [\App\Erp\Http\Controllers\Eecc\EecCController::class, 'editarNota'])
+                ->whereNumber('ejercicio_id')->whereNumber('numero')
+                ->middleware('erp.mfa.fresh')->name('erp.eecc.notas.editar');
+            Route::get('/{ejercicio_id}/emisiones', [\App\Erp\Http\Controllers\Eecc\EecCController::class, 'emisiones'])
+                ->whereNumber('ejercicio_id')->name('erp.eecc.emisiones');
+        });
     });
 });

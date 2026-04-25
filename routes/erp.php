@@ -736,6 +736,26 @@ Route::prefix('api/erp')->group(function () {
                 ->middleware('erp.mfa.fresh')->name('erp.sueldos.prestamos.store');
             Route::get('/prestamos/{id}',     [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'show'])
                 ->whereNumber('id')->name('erp.sueldos.prestamos.show');
+
+            // ---- 8D: Liquidaciones (cabecera + máquina de estados) -----------
+            Route::get('/liquidaciones',                          [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'index'])
+                ->name('erp.sueldos.liquidaciones.index');
+            Route::post('/liquidaciones',                         [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.store');
+            Route::get('/liquidaciones/{id}',                     [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'show'])
+                ->whereNumber('id')->name('erp.sueldos.liquidaciones.show');
+            Route::post('/liquidaciones/{id}/calcular',           [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'calcular'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.calcular');
+            Route::post('/liquidaciones/{id}/aprobar',            [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'aprobar'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.aprobar');
+            Route::post('/liquidaciones/{id}/anular',             [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'anular'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.anular');
+            Route::post('/liquidaciones/{id}/rectificar',         [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'rectificar'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.rectificar');
+            Route::get('/liquidaciones/{id}/items',               [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'items'])
+                ->whereNumber('id')->name('erp.sueldos.liquidaciones.items');
+            Route::get('/liquidaciones/{id}/recibo/{empleadoId}', [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'recibo'])
+                ->whereNumber('id')->whereNumber('empleadoId')->name('erp.sueldos.liquidaciones.recibo');
         });
     });
 });

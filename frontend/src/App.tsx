@@ -26,6 +26,11 @@ import { ArqueosPage } from './pages/ArqueosPage';
 import { FacturasCompraPage } from './pages/FacturasCompraPage';
 import { CCPage } from './pages/CCPage';
 import { FcePage } from './pages/FcePage';
+import { PeriodosFiscalesPage } from './pages/PeriodosFiscalesPage';
+import { LibroIvaDigitalPage } from './pages/LibroIvaDigitalPage';
+import { IvaDdjjPage } from './pages/IvaDdjjPage';
+import { SicorePage } from './pages/SicorePage';
+import { IibbPage } from './pages/IibbPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -52,14 +57,7 @@ const placeholderRoutes: { path: string; title: string; modulo: string; endpoint
   // Pendientes Compras (libro IVA import → reusa endpoint existente, baja prioridad)
   { path: '/erp/libro-iva-compras', title: 'Libro IVA Compras (importar)', modulo: 'Compras', endpoint: '/api/erp/libro-iva/importar', bloque: 'F3 (extra)' },
 
-  // Impuestos (SPEC 05) — F4 + F5
-  { path: '/erp/impuestos/periodos', title: 'Períodos fiscales', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/periodos', bloque: 'F4' },
-  { path: '/erp/impuestos/iva', title: 'IVA F.2002', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/iva/{periodo_id}', bloque: 'F4' },
-  { path: '/erp/impuestos/libro-iva-digital', title: 'Libro IVA Digital F.8001', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/libro-iva/{periodo_id}', bloque: 'F4' },
-  { path: '/erp/impuestos/sicore', title: 'SICORE / SIRE retenciones', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/sicore', bloque: 'F4' },
-  { path: '/erp/impuestos/iibb-cm', title: 'IIBB Convenio Multilateral', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/iibb/cm', bloque: 'F4' },
-  { path: '/erp/impuestos/iibb-caba', title: 'IIBB CABA (ARCiBA)', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/iibb/caba', bloque: 'F4' },
-  { path: '/erp/impuestos/iibb-pba', title: 'IIBB PBA (ARBA)', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/iibb/pba', bloque: 'F4' },
+  // F5 pendientes
   { path: '/erp/impuestos/ganancias', title: 'Ganancias F.713', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/ganancias', bloque: 'F5' },
   { path: '/erp/impuestos/bp', title: 'BP F.2000', modulo: 'Impuestos', endpoint: '/api/erp/impuestos/bp', bloque: 'F5' },
 
@@ -128,7 +126,16 @@ export default function App() {
               <Route path="/erp/cc-proveedores" element={<CCPage kind="proveedores" />} handle={{ crumb: 'CC Proveedores' }} />
               <Route path="/erp/fce" element={<FcePage />} handle={{ crumb: 'FCE MiPyME' }} />
 
-              {/* Placeholders — se reemplazan en bloques F4..F8 */}
+              {/* F4 — Impuestos H1-H4 */}
+              <Route path="/erp/impuestos/periodos" element={<PeriodosFiscalesPage />} handle={{ crumb: 'Períodos fiscales' }} />
+              <Route path="/erp/impuestos/libro-iva-digital" element={<LibroIvaDigitalPage />} handle={{ crumb: 'Libro IVA Digital' }} />
+              <Route path="/erp/impuestos/iva" element={<IvaDdjjPage />} handle={{ crumb: 'IVA F.2002' }} />
+              <Route path="/erp/impuestos/sicore" element={<SicorePage />} handle={{ crumb: 'SICORE/SIRE' }} />
+              <Route path="/erp/impuestos/iibb-cm" element={<IibbPage kind="cm" />} handle={{ crumb: 'IIBB CM' }} />
+              <Route path="/erp/impuestos/iibb-caba" element={<IibbPage kind="caba" />} handle={{ crumb: 'IIBB CABA' }} />
+              <Route path="/erp/impuestos/iibb-pba" element={<IibbPage kind="pba" />} handle={{ crumb: 'IIBB PBA' }} />
+
+              {/* Placeholders — se reemplazan en bloques F5..F8 */}
               {placeholderRoutes.map((r) => (
                 <Route
                   key={r.path}

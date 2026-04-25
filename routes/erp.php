@@ -650,5 +650,53 @@ Route::prefix('api/erp')->group(function () {
             Route::get('/{id}/ejecucion',            [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'ejecucion'])
                 ->whereNumber('id')->name('erp.presup.ejecucion');
         });
+
+        // ====================================================================
+        // SPEC 08 8B — Sueldos: catálogos + padrón empleados + básicos +
+        //   composición + comisiones (CRUD).
+        // ====================================================================
+        Route::prefix('sueldos')->group(function () {
+            // Catálogos
+            Route::get('/convenios',          [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'convenios'])
+                ->name('erp.sueldos.convenios');
+            Route::get('/categorias',         [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'categorias'])
+                ->name('erp.sueldos.categorias.index');
+            Route::post('/categorias',        [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'categoriaStore'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.categorias.store');
+            Route::put('/categorias/{id}',    [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'categoriaUpdate'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.categorias.update');
+            Route::get('/conceptos',          [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'conceptos'])
+                ->name('erp.sueldos.conceptos.index');
+            Route::put('/conceptos/{id}',     [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'conceptoUpdate'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.conceptos.update');
+
+            // Empleados (padrón)
+            Route::get('/empleados',          [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'index'])
+                ->name('erp.sueldos.empleados.index');
+            Route::post('/empleados',         [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.store');
+            Route::get('/empleados/{id}',     [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'show'])
+                ->whereNumber('id')->name('erp.sueldos.empleados.show');
+            Route::put('/empleados/{id}',     [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'update'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.update');
+
+            // Básicos historizados (RN-103: sin overlap)
+            Route::get('/empleados/{id}/basicos',  [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'basicosListar'])
+                ->whereNumber('id')->name('erp.sueldos.empleados.basicos.index');
+            Route::post('/empleados/{id}/basicos', [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'basicoStore'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.basicos.store');
+
+            // Composición porcentual (RN-102: suma 100)
+            Route::get('/empleados/{id}/composiciones',  [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'composicionesListar'])
+                ->whereNumber('id')->name('erp.sueldos.empleados.compos.index');
+            Route::post('/empleados/{id}/composiciones', [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'composicionStore'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.compos.store');
+
+            // Esquemas de comisión
+            Route::get('/empleados/{id}/comisiones',  [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'comisionesListar'])
+                ->whereNumber('id')->name('erp.sueldos.empleados.coms.index');
+            Route::post('/empleados/{id}/comisiones', [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'comisionStore'])
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.coms.store');
+        });
     });
 });

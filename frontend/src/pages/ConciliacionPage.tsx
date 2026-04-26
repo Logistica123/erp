@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertCircle, Check, Loader2, Plus, X } from 'lucide-react';
+import { AlertCircle, Check, Loader2, Plus, Upload, X } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -37,6 +37,7 @@ export function ConciliacionPage() {
   const [conciliar, setConciliar] = useState<MovimientoBancario | null>(null);
   const [ignorar, setIgnorar] = useState<MovimientoBancario | null>(null);
   const [nuevoMov, setNuevoMov] = useState(false);
+  const [importExtracto, setImportExtracto] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkAccion, setBulkAccion] = useState<'CONCILIAR_CONTRA_CUENTA' | 'IGNORAR' | null>(null);
@@ -65,8 +66,11 @@ export function ConciliacionPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="primary" onClick={() => setNuevoMov(true)}>
+          <Button variant="secondary" onClick={() => setNuevoMov(true)}>
             <Plus className="w-3 h-3" /> Cargar movimiento manual
+          </Button>
+          <Button variant="primary" onClick={() => setImportExtracto(true)}>
+            <Upload className="w-3 h-3" /> Subir extracto bancario
           </Button>
         </div>
       </div>
@@ -273,6 +277,16 @@ export function ConciliacionPage() {
           qc.invalidateQueries({ queryKey: ['mov-banc'] });
         }}
         onError={setErr}
+      />
+
+      <ImportExtractoWizard
+        open={importExtracto}
+        cuentas={cuentasBanc?.data ?? []}
+        onClose={() => setImportExtracto(false)}
+        onSuccess={() => {
+          qc.invalidateQueries({ queryKey: ['mov-banc'] });
+          qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
+        }}
       />
     </>
   );
@@ -758,5 +772,205 @@ function NuevoMovModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+function ImportExtractoWizard({
+  open,
+  cuentas,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  cuentas: CuentaBancaria[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  type Resultado = {
+    extracto_id: number;
+    movimientos_importados: number;
+    movimientos_duplicados: number;
+    etiquetados_auto: number;
+    pendientes: number;
+    pasantes_mp: number;
+    warnings: string[];
+  };
+
+  const [paso, setPaso] = useState<1 | 2 | 3>(1);
+  const [cuentaId, setCuentaId] = useState<number | ''>('');
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [resultado, setResultado] = useState<Resultado | null>(null);
+
+  const reset = () => {
+    setPaso(1);
+    setCuentaId('');
+    setArchivo(null);
+    setError(null);
+    setResultado(null);
+  };
+  const cerrar = () => {
+    reset();
+    onClose();
+  };
+
+  const cuentaSel = cuentas.find((c) => c.id === cuentaId);
+
+  const subir = useMutation<{ data: Resultado }>({
+    mutationFn: async () => {
+      const fd = new FormData();
+      fd.append('cuenta_id', String(cuentaId));
+      fd.append('archivo', archivo!);
+      return api.post('/api/erp/extractos/importar', fd) as Promise<{ data: Resultado }>;
+    },
+    onSuccess: (resp) => {
+      setResultado(resp.data);
+      setPaso(3);
+      onSuccess();
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : 'Error'),
+  });
+
+  if (!open) return null;
+
+  return (
+    <Modal
+      open={open}
+      onClose={cerrar}
+      title={`Subir extracto bancario · paso ${paso} de 3`}
+      size="md"
+      footer={
+        paso === 1 ? (
+          <>
+            <Button variant="secondary" onClick={cerrar}>Cancelar</Button>
+            <Button
+              variant="primary"
+              disabled={!cuentaId || !archivo}
+              onClick={() => setPaso(2)}
+            >
+              Continuar
+            </Button>
+          </>
+        ) : paso === 2 ? (
+          <>
+            <Button variant="secondary" onClick={() => setPaso(1)}>Atrás</Button>
+            <Button
+              variant="primary"
+              disabled={subir.isPending}
+              onClick={() => subir.mutate()}
+            >
+              {subir.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+              Procesar e importar
+            </Button>
+          </>
+        ) : (
+          <Button variant="primary" onClick={cerrar}>Cerrar</Button>
+        )
+      }
+    >
+      {error && (
+        <div className="mb-3 p-3 bg-danger-bg text-danger border border-danger/30 rounded-md text-[12px]">{error}</div>
+      )}
+
+      {paso === 1 && (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[11px] font-semibold text-ink-muted uppercase tracking-wider mb-1">
+              Cuenta bancaria destino
+            </label>
+            <select
+              value={cuentaId}
+              onChange={(e) => setCuentaId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full px-[9px] py-[6px] text-[13px] border border-line-strong rounded-md bg-white"
+            >
+              <option value="">Seleccionar cuenta…</option>
+              {cuentas.map((c) => (
+                <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>
+              ))}
+            </select>
+            <div className="text-[10px] text-ink-muted mt-1">
+              El parser se autodetecta a partir del banco de la cuenta seleccionada.
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-ink-muted uppercase tracking-wider mb-1">
+              Archivo del extracto
+            </label>
+            <input
+              type="file"
+              accept=".csv,.txt,.xls,.xlsx"
+              onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
+              className="w-full text-[12px] file:mr-3 file:px-3 file:py-1 file:border-0 file:bg-navy-700 file:text-white file:rounded file:cursor-pointer file:text-[11px]"
+            />
+            {archivo && (
+              <div className="text-[11px] text-ink-2 mt-2">
+                {archivo.name} · {(archivo.size / 1024).toFixed(1)} KB
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {paso === 2 && cuentaSel && archivo && (
+        <div className="space-y-3 text-[12px]">
+          <div className="p-3 bg-surface-row rounded-md border border-line">
+            <div className="text-[11px] font-semibold text-navy-800 uppercase mb-2">Resumen pre-procesamiento</div>
+            <dl className="grid grid-cols-2 gap-y-2">
+              <dt className="text-ink-muted">Cuenta destino</dt>
+              <dd className="font-mono">{cuentaSel.codigo} — {cuentaSel.nombre}</dd>
+              <dt className="text-ink-muted">Archivo</dt>
+              <dd>{archivo.name}</dd>
+              <dt className="text-ink-muted">Tamaño</dt>
+              <dd>{(archivo.size / 1024).toFixed(1)} KB</dd>
+            </dl>
+          </div>
+          <div className="text-[11px] text-ink-muted">
+            Idempotencia: si ya existe un extracto con el mismo hash SHA-256 para esta cuenta,
+            la importación se rechaza con error <code>EXTRACTO_DUPLICADO</code>. El parser detecta automáticamente
+            balance, contraparte (CUIT/nombre), y movimientos relacionados (operaciones pasantes MP).
+          </div>
+        </div>
+      )}
+
+      {paso === 3 && resultado && (
+        <div className="space-y-3 text-[12px]">
+          <div className="p-3 bg-success-bg rounded-md border border-success/30">
+            <div className="text-success font-semibold mb-1">✓ Importación exitosa</div>
+            <div className="text-[11px] text-ink-2">Extracto #{resultado.extracto_id}</div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Stat label="Importados" value={resultado.movimientos_importados} />
+            <Stat label="Duplicados (skip)" value={resultado.movimientos_duplicados} />
+            <Stat label="Auto-etiquetados" value={resultado.etiquetados_auto} accent="success" />
+            <Stat label="Pendientes" value={resultado.pendientes} accent="warning" />
+            {resultado.pasantes_mp > 0 && (
+              <Stat label="Pasantes MP detectados" value={resultado.pasantes_mp} accent="info" />
+            )}
+          </div>
+          {resultado.warnings.length > 0 && (
+            <div className="p-2 bg-amber-50 border border-amber-200 rounded text-[11px]">
+              <div className="font-semibold text-amber-800 mb-1">Warnings:</div>
+              <ul className="list-disc pl-4 text-amber-900">
+                {resultado.warnings.map((w, i) => (<li key={i}>{w}</li>))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function Stat({ label, value, accent }: { label: string; value: number; accent?: 'success' | 'warning' | 'info' }) {
+  const cls =
+    accent === 'success' ? 'text-success'
+    : accent === 'warning' ? 'text-amber-700'
+    : accent === 'info' ? 'text-navy-700'
+    : 'text-ink-2';
+  return (
+    <div className="p-2 border border-line rounded">
+      <div className="text-[10px] uppercase text-ink-muted">{label}</div>
+      <div className={`text-lg tabular font-semibold ${cls}`}>{value}</div>
+    </div>
   );
 }

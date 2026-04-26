@@ -64,10 +64,22 @@ function formatNro(t: string, l: string | null, pv: number, nro: number) {
   return `${lbl} ${String(pv).padStart(4, '0')}-${String(nro).padStart(8, '0')}`;
 }
 
+type PendientesResp = {
+  data: { resumen: { total: number; pendientes: number; etiquetados: number } };
+};
+
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
 export function DashboardPage() {
   const { data, isLoading } = useQuery<Stats>({
     queryKey: ['dashboard-stats'],
     queryFn: () => api.get<Stats>('/api/erp/dashboard/stats'),
+  });
+  const { data: pend } = useQuery<PendientesResp>({
+    queryKey: ['pendientes-conciliar'],
+    queryFn: () => api.get('/api/erp/reportes/pendientes-conciliar'),
+    staleTime: 60_000,
   });
 
   if (isLoading || !data) {
@@ -80,8 +92,9 @@ export function DashboardPage() {
 
   const maxTotal = Math.max(1, ...data.evolucion_6m.map((m) => m.total));
   const periodoTxt = data.periodo_actual
-    ? `Abril ${data.periodo_actual.anio}`
+    ? `${MESES[data.periodo_actual.mes - 1]} ${data.periodo_actual.anio}`
     : 'Sin período abierto';
+  const pendientes = pend?.data.resumen;
 
   return (
     <>
@@ -144,9 +157,11 @@ export function DashboardPage() {
           accent="warning"
         />
         <Kpi
-          label="Asientos contabilizados"
-          value={String(data.contadores.asientos_contabilizados)}
-          sub="Histórico completo"
+          label="Mov. pendientes de conciliar"
+          value={pendientes ? String(pendientes.pendientes + pendientes.etiquetados) : '—'}
+          sub={pendientes
+            ? `${pendientes.pendientes} pendientes · ${pendientes.etiquetados} etiquetados`
+            : 'Cargando…'}
           accent="danger"
         />
       </div>
@@ -158,21 +173,34 @@ export function DashboardPage() {
           <CardBody className="h-[200px] p-[14px] bg-gradient-to-b from-surface-row to-white">
             <div className="flex items-end gap-[4%] h-full pb-6">
               {data.evolucion_6m.map((m) => {
-                const h = maxTotal > 0 ? Math.max(2, (m.total / maxTotal) * 100) : 2;
+                const vacio = m.cant === 0;
+                const h = vacio
+                  ? 8                                                  // barra "fantasma" mínima
+                  : Math.max(15, (m.total / maxTotal) * 100);          // mínimo 15% si hay datos
+                const tooltip = vacio
+                  ? `${m.label} ${m.anio}: sin facturas`
+                  : `${m.label} ${m.anio}: ${fmtMoney(m.total)} (${m.cant} cbte${m.cant === 1 ? '' : 's'})`;
                 return (
                   <div key={`${m.anio}-${m.mes}`} className="flex-1 relative group">
                     <div
-                      className={`${
-                        m.actual
-                          ? 'bg-gradient-to-t from-[#0A5A0A] to-success'
-                          : 'bg-gradient-to-t from-navy-600 to-azure'
-                      } rounded-t-[3px] transition-all`}
+                      className={
+                        vacio
+                          ? 'bg-line border border-dashed border-line-strong rounded-t-[3px]'
+                          : m.actual
+                            ? 'bg-gradient-to-t from-[#0A5A0A] to-success rounded-t-[3px] transition-all'
+                            : 'bg-gradient-to-t from-navy-600 to-azure rounded-t-[3px] transition-all'
+                      }
                       style={{ height: `${h}%` }}
-                      title={`${m.label} ${m.anio}: ${fmtMoney(m.total)} (${m.cant} cbtes)`}
+                      title={tooltip}
                     />
-                    <div className="absolute -bottom-[18px] left-1/2 -translate-x-1/2 text-[10px] text-ink-muted">
+                    <div className="absolute -bottom-[18px] left-1/2 -translate-x-1/2 text-[10px] text-ink-muted whitespace-nowrap">
                       {m.label}
                     </div>
+                    {vacio && (
+                      <div className="absolute top-[35%] left-1/2 -translate-x-1/2 text-[9px] text-ink-muted opacity-70 italic whitespace-nowrap">
+                        sin fact.
+                      </div>
+                    )}
                   </div>
                 );
               })}

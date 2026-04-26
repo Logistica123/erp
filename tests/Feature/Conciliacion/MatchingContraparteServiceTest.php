@@ -3,6 +3,7 @@
 namespace Tests\Feature\Conciliacion;
 
 use App\Erp\Models\Tesoreria\AliasContraparte;
+use App\Erp\Models\Tesoreria\ConciliacionPrefijo;
 use App\Erp\Models\Tesoreria\ConciliacionRegla;
 use App\Erp\Models\Tesoreria\CuentaBancaria;
 use App\Erp\Models\Tesoreria\ExtractoBancario;
@@ -139,5 +140,55 @@ class MatchingContraparteServiceTest extends TestCase
         $mov = $this->mov('COBRANZA cliente xyz', debito: 100);
         $r = $this->svc->matchear($mov);
         $this->assertNotSame('REGLA', $r['estrategia']);
+    }
+
+    public function test_regla_cod_concepto_filtra(): void
+    {
+        $cuentaContableId = (int) DB::table('erp_cuentas_contables')
+            ->where('empresa_id', 1)->where('imputable', 1)->value('id');
+
+        // Regla que solo aplica a cod_concepto=DBT.
+        ConciliacionRegla::create([
+            'empresa_id' => 1, 'codigo' => 'TEST-COD',
+            'descripcion' => 'Solo DBT', 'tipo' => 'CONCEPTO_REGEX',
+            'patron_concepto' => 'DEBITO', 'cuenta_contable_id' => $cuentaContableId,
+            'orden_prioridad' => 5, 'activa' => 1,
+            'banco_id' => $this->cuenta->banco_id,
+            'signo' => 'AMBOS', 'confianza' => 90, 'cod_concepto' => 'DBT',
+        ]);
+
+        // Sin (DBT) en el concepto → no matchea.
+        $movSinCod = $this->mov('DEBITO INMEDIATO', debito: 100);
+        $r1 = $this->svc->matchear($movSinCod);
+        $this->assertNotSame('REGLA', $r1['estrategia']);
+
+        // Con (DBT) en el concepto → matchea.
+        $movConCod = $this->mov('DEBITO INMEDIATO (DBT)', debito: 100);
+        $r2 = $this->svc->matchear($movConCod);
+        $this->assertSame('REGLA', $r2['estrategia']);
+    }
+
+    public function test_extrae_cuit_via_prefijo_y_devuelve_referencia(): void
+    {
+        // Asume que prefijo "DEBITO INMEDIATO CUIT" está seedado para el
+        // banco_id del seed CM-1 ICBC. Si la cuenta no es ICBC el test crea
+        // un prefijo ad-hoc para el banco que tenga.
+        ConciliacionPrefijo::firstOrCreate(
+            ['banco_id' => $this->cuenta->banco_id, 'prefijo' => 'XCUIT'],
+            [
+                'tipo_numero' => 'CUIT', 'longitud_min' => 11, 'longitud_max' => 11,
+                'activo' => 1,
+            ],
+        );
+
+        // CUIT 30708123451 (OCA dev seed) — válido, en erp_auxiliares.
+        $mov = $this->mov('Pago a XCUIT 30708123451 OCA SA', debito: 1000);
+        $r = $this->svc->matchear($mov);
+
+        // Debe extraer la referencia y al menos exponer el CUIT.
+        $this->assertSame('30708123451', $r['referencia_externa']);
+        $this->assertSame('30708123451', $r['cuit_contraparte']);
+        // Confianza 90 si encuentra el auxiliar, 50 si no.
+        $this->assertGreaterThanOrEqual(50, $r['confianza_match']);
     }
 }

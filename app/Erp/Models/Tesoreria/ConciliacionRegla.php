@@ -23,11 +23,16 @@ class ConciliacionRegla extends Model
     public const TIPO_IMPORTE_EXACTO = 'IMPORTE_EXACTO';
     public const TIPO_COMBINADA = 'COMBINADA';
 
+    public const SIGNO_DEBITO  = 'DEBITO';
+    public const SIGNO_CREDITO = 'CREDITO';
+    public const SIGNO_AMBOS   = 'AMBOS';
+
     protected $fillable = [
         'empresa_id', 'codigo', 'descripcion', 'tipo',
         'patron_concepto', 'patron_importe_desde', 'patron_importe_hasta',
         'cuenta_contable_id', 'auxiliar_id', 'centro_costo_id', 'diario_id',
         'orden_prioridad', 'activa',
+        'banco_id', 'cod_concepto', 'signo', 'confianza', 'observacion',
     ];
 
     protected $casts = [
@@ -35,6 +40,7 @@ class ConciliacionRegla extends Model
         'patron_importe_hasta' => 'decimal:2',
         'orden_prioridad' => 'integer',
         'activa' => 'boolean',
+        'confianza' => 'integer',
     ];
 
     public function empresa(): BelongsTo
@@ -60,5 +66,10 @@ class ConciliacionRegla extends Model
     public function diario(): BelongsTo
     {
         return $this->belongsTo(Diario::class);
+    }
+
+    public function banco(): BelongsTo
+    {
+        return $this->belongsTo(Banco::class);
     }
 }

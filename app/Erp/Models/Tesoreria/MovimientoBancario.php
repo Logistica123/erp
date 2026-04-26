@@ -23,6 +23,9 @@ class MovimientoBancario extends Model
         'estado', 'etiqueta_sugerida',
         'cuenta_contable_propuesta_id', 'asiento_id',
         'motivo_ignorado_id', 'observacion', 'hash_linea',
+        'cuit_contraparte', 'nombre_contraparte', 'persona_id', 'cliente_id',
+        'cuenta_propia_id', 'referencia_externa', 'regla_aplicada_id',
+        'confianza_match', 'dia_contable_id',
     ];
 
     protected $casts = [
@@ -31,6 +34,7 @@ class MovimientoBancario extends Model
         'debito' => 'decimal:2',
         'credito' => 'decimal:2',
         'saldo' => 'decimal:2',
+        'confianza_match' => 'integer',
     ];
 
     public function cuentaBancaria(): BelongsTo
@@ -51,5 +55,31 @@ class MovimientoBancario extends Model
     public function cuentaContablePropuesta(): BelongsTo
     {
         return $this->belongsTo(CuentaContable::class, 'cuenta_contable_propuesta_id');
+    }
+
+    public function cuentaPropia(): BelongsTo
+    {
+        return $this->belongsTo(CuentaBancaria::class, 'cuenta_propia_id');
+    }
+
+    public function reglaAplicada(): BelongsTo
+    {
+        return $this->belongsTo(ConciliacionRegla::class, 'regla_aplicada_id');
+    }
+
+    /** Importe firmado: positivo crédito, negativo débito. */
+    public function importeFirmado(): float
+    {
+        return (float) $this->credito - (float) $this->debito;
+    }
+
+    public function esCredito(): bool
+    {
+        return (float) $this->credito > 0;
+    }
+
+    public function esDebito(): bool
+    {
+        return (float) $this->debito > 0;
     }
 }

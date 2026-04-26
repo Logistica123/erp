@@ -58,11 +58,13 @@ class ExtractoImporterService
 
         $hashArchivo = \App\Erp\Services\Tesoreria\Parsers\AbstractParser::hashArchivo($pathTemporal);
 
-        // RN-12 idempotencia
-        $existente = ExtractoBancario::where('hash_archivo', $hashArchivo)->first();
+        // RN-12 idempotencia (UK por cuenta + hash desde CB-2: Brubank
+        // exporta 2 cuentas en el mismo CSV, cada una se importa por separado).
+        $existente = ExtractoBancario::where('cuenta_bancaria_id', $cuenta->id)
+            ->where('hash_archivo', $hashArchivo)->first();
         if ($existente) {
             throw new DomainException(sprintf(
-                'EXTRACTO_DUPLICADO: ya fue importado el %s (id=%d)',
+                'EXTRACTO_DUPLICADO: ya fue importado el %s para esta cuenta (id=%d)',
                 $existente->importado_at?->format('d/m/Y H:i') ?? '?',
                 $existente->id
             ));

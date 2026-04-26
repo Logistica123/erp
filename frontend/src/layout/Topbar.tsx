@@ -1,4 +1,4 @@
-import { Bell, ChevronDown, Menu } from 'lucide-react';
+import { Bell, Building2, Menu } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -8,6 +8,7 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 type Periodo = { id: number; anio: number; mes: number; estado: string };
+type Empresa = { id: number; razon_social: string };
 
 export function Topbar({ onMenuClick }: { onMenuClick?: () => void } = {}) {
   const { pathname } = useLocation();
@@ -18,6 +19,11 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void } = {}) {
     queryKey: ['periodo', 'abierto'],
     queryFn: () => api.get('/api/erp/periodos/abierto'),
     staleTime: 5 * 60 * 1000,
+  });
+  const { data: empresaResp } = useQuery<{ data: Empresa }>({
+    queryKey: ['empresa', 'actual'],
+    queryFn: () => api.get('/api/erp/empresas/actual'),
+    staleTime: 30 * 60 * 1000,
   });
 
   const periodo = periodoResp?.data;
@@ -62,10 +68,15 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void } = {}) {
       <button className="p-[6px] bg-white border border-line-strong rounded-md text-ink-2 hover:bg-surface-hover">
         <Bell className="w-4 h-4" strokeWidth={1.7} />
       </button>
-      <button className="hidden sm:flex px-3 py-[6px] bg-white border border-line-strong rounded-md text-[12px] text-ink-2 hover:bg-surface-hover items-center gap-1">
-        Logística Argentina SRL
-        <ChevronDown className="w-3 h-3" />
-      </button>
+      {empresaResp?.data && (
+        <div
+          className="hidden sm:flex px-3 py-[6px] bg-surface-row border border-line rounded-md text-[12px] text-ink-2 items-center gap-1 select-none"
+          title={`Empresa actual · CUIT carga via /empresas/actual`}
+        >
+          <Building2 className="w-3 h-3 text-ink-muted" />
+          {empresaResp.data.razon_social}
+        </div>
+      )}
     </div>
   );
 }

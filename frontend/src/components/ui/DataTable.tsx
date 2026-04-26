@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export type Column<T> = {
@@ -38,6 +38,12 @@ type Props<T> = {
   onPageChange?: (page: number) => void;
   /** Clase CSS extra del contenedor. */
   className?: string;
+  /**
+   * Tamaño de página para paginación client-side. Solo se aplica cuando se
+   * pasan `rows` directos (no `paginator`) y `rows.length` supera el valor.
+   * Default 50. Usar `null` para desactivar.
+   */
+  clientPageSize?: number | null;
 };
 
 /**
@@ -54,8 +60,17 @@ export function DataTable<T extends Record<string, unknown>>({
   search,
   onPageChange,
   className,
+  clientPageSize = 50,
 }: Props<T>) {
-  const data = rows ?? paginator?.data ?? [];
+  const all = rows ?? paginator?.data ?? [];
+  const useClientPaging = !paginator && clientPageSize !== null && all.length > clientPageSize;
+  const [clientPage, setClientPage] = useState(1);
+  // Reset a página 1 si cambia la lista de rows.
+  useEffect(() => { setClientPage(1); }, [all.length]);
+  const clientLastPage = useClientPaging ? Math.ceil(all.length / (clientPageSize ?? 50)) : 1;
+  const data = useClientPaging
+    ? all.slice((clientPage - 1) * (clientPageSize ?? 50), clientPage * (clientPageSize ?? 50))
+    : all;
 
   return (
     <div className={cn('flex flex-col gap-3', className)}>
@@ -134,6 +149,32 @@ export function DataTable<T extends Record<string, unknown>>({
           </tbody>
         </table>
       </div>
+
+      {useClientPaging && (
+        <div className="flex items-center justify-between text-[11.5px] text-ink-muted px-1">
+          <div>
+            {all.length.toLocaleString('es-AR')} resultados · página {clientPage} de {clientLastPage}
+          </div>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setClientPage((p) => Math.max(1, p - 1))}
+              disabled={clientPage <= 1}
+              className="p-1.5 rounded border border-line hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Anterior"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setClientPage((p) => Math.min(clientLastPage, p + 1))}
+              disabled={clientPage >= clientLastPage}
+              className="p-1.5 rounded border border-line hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Siguiente"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {paginator && paginator.last_page > 1 && onPageChange && (
         <div className="flex items-center justify-between text-[11.5px] text-ink-muted px-1">

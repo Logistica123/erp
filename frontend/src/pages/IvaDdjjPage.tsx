@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Field, SelectField, TextareaField, FormError } from '@/components/ui/Field';
 import { fmtMoney, fmtDate } from '@/components/ui/DataTable';
+import { PeriodosFiscalesCard } from '@/components/impuestos/PeriodosFiscalesCard';
 import { auth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { useApi, useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
@@ -77,14 +78,22 @@ export function IvaDdjjPage() {
 
   return (
     <div className="p-6 space-y-4">
+      <PeriodosFiscalesCard
+        impuesto="IVA"
+        selectedId={periodoId}
+        onSelect={(id) => setPeriodoId(String(id))}
+        titulo="Períodos IVA F.2002 — click para seleccionar"
+      />
+
       <Card>
         <CardHeader title={
           <div className="flex items-center gap-2"><Receipt className="w-4 h-4 text-azure" /> DDJJ IVA F.2002</div>
         } />
         <CardBody className="p-4 space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
-            <Field label="ID Período fiscal IVA" required type="number" value={periodoId}
-              onChange={(e) => setPeriodoId(e.target.value)} placeholder="ej: 12"
+            <Field label="ID Período seleccionado" required type="number" value={periodoId}
+              readOnly
+              hint="Elegí un período de la tabla de arriba"
               containerClassName="w-[180px]" />
             <Field label="Pagos a cuenta" type="number" step="0.01" value={pagosACuenta}
               onChange={(e) => setPagosACuenta(e.target.value)}

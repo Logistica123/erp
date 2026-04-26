@@ -9,6 +9,7 @@ import { auth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { useApi, useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
+import { PeriodosFiscalesCard } from '@/components/impuestos/PeriodosFiscalesCard';
 
 type LibroDetalle = {
   periodo: { id: number; anio: number; mes: number; estado: string };
@@ -90,14 +91,22 @@ export function LibroIvaDigitalPage() {
 
   return (
     <div className="p-6 space-y-4">
+      <PeriodosFiscalesCard
+        impuesto="IVA"
+        selectedId={periodoId}
+        onSelect={(id) => setPeriodoId(String(id))}
+        titulo="Períodos IVA — click para seleccionar"
+      />
+
       <Card>
         <CardHeader title={
           <div className="flex items-center gap-2"><ScrollText className="w-4 h-4 text-azure" /> Libro IVA Digital F.8001</div>
         } />
         <CardBody className="p-4 space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
-            <Field label="ID Período fiscal IVA" required type="number" value={periodoId}
-              onChange={(e) => setPeriodoId(e.target.value)} placeholder="ej: 12"
+            <Field label="ID Período seleccionado" required type="number" value={periodoId}
+              readOnly
+              hint="Elegí un período de la tabla de arriba"
               containerClassName="w-[180px]" />
             <Button variant="secondary" onClick={() => armar.mutate(undefined as unknown as void)}
               disabled={!periodoId || armar.isPending}>

@@ -1,10 +1,12 @@
 <?php
 
 use App\Erp\Http\Controllers\ArcaController;
+use App\Erp\Http\Controllers\AliasContraparteController;
 use App\Erp\Http\Controllers\AsientosController;
 use App\Erp\Http\Controllers\AuditoriaController;
 use App\Erp\Http\Controllers\AuthController;
 use App\Erp\Http\Controllers\AuxiliaresController;
+use App\Erp\Http\Controllers\ConciliacionReglasController;
 use App\Erp\Http\Controllers\BalanceController;
 use App\Erp\Http\Controllers\CajaController;
 use App\Erp\Http\Controllers\ConfigController;
@@ -155,6 +157,30 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.mov-banc.desconciliar');
         Route::post('/movimientos-bancarios/{id}/ignorar', [MovimientosBancariosController::class, 'ignorar'])
             ->whereNumber('id')->name('erp.mov-banc.ignorar');
+
+        // SPEC Conciliación CM-4 — batch + preview matching + reglas + aliases
+        Route::post('/movimientos-bancarios/batch', [MovimientosBancariosController::class, 'batch'])
+            ->name('erp.mov-banc.batch');
+        Route::get('/movimientos-bancarios/{id}/match-preview', [MovimientosBancariosController::class, 'matchPreview'])
+            ->whereNumber('id')->name('erp.mov-banc.match-preview');
+
+        Route::get('/conciliacion-reglas', [ConciliacionReglasController::class, 'index'])->name('erp.conc-reglas.index');
+        Route::post('/conciliacion-reglas', [ConciliacionReglasController::class, 'store'])->name('erp.conc-reglas.store');
+        Route::get('/conciliacion-reglas/{id}', [ConciliacionReglasController::class, 'show'])
+            ->whereNumber('id')->name('erp.conc-reglas.show');
+        Route::patch('/conciliacion-reglas/{id}', [ConciliacionReglasController::class, 'update'])
+            ->whereNumber('id')->name('erp.conc-reglas.update');
+        Route::delete('/conciliacion-reglas/{id}', [ConciliacionReglasController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.conc-reglas.destroy');
+        Route::post('/conciliacion-reglas/{id}/probar', [ConciliacionReglasController::class, 'probar'])
+            ->whereNumber('id')->name('erp.conc-reglas.probar');
+
+        Route::get('/alias-contraparte', [AliasContraparteController::class, 'index'])->name('erp.alias.index');
+        Route::post('/alias-contraparte', [AliasContraparteController::class, 'store'])->name('erp.alias.store');
+        Route::patch('/alias-contraparte/{id}', [AliasContraparteController::class, 'update'])
+            ->whereNumber('id')->name('erp.alias.update');
+        Route::delete('/alias-contraparte/{id}', [AliasContraparteController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.alias.destroy');
 
         // Tesorería — reportes (SPEC 02 §6.9)
         Route::get('/reportes/saldos', [ReportesTesoreriaController::class, 'saldos'])

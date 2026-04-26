@@ -5,6 +5,7 @@ namespace App\Erp\Http\Controllers;
 use App\Erp\Models\Tesoreria\MovimientoBancario;
 use App\Erp\Services\ConciliacionService;
 use App\Erp\Services\MovimientoBancarioService;
+use App\Erp\Services\Tesoreria\MatchingContraparteService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +27,7 @@ class MovimientosBancariosController
     public function __construct(
         private readonly MovimientoBancarioService $service,
         private readonly ConciliacionService $concilService,
+        private readonly MatchingContraparteService $matcher,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -197,6 +199,88 @@ class MovimientosBancariosController
         );
 
         return response()->json(['ok' => true, 'data' => $resumen]);
+    }
+
+    /**
+     * Batch: aplica una acción (conciliar contra cuenta contable / ignorar) a
+     * un conjunto de movimientos PENDIENTES o ETIQUETADOS. Devuelve resumen
+     * con éxitos y errores por id (no aborta toda la lista si uno falla).
+     *
+     * Body:
+     *   accion: 'CONCILIAR_CONTRA_CUENTA' | 'IGNORAR'
+     *   ids: int[]
+     *   payload: depende de la acción.
+     */
+    public function batch(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'accion' => ['required', Rule::in(['CONCILIAR_CONTRA_CUENTA', 'IGNORAR'])],
+            'ids' => ['required', 'array', 'min:1', 'max:500'],
+            'ids.*' => ['integer'],
+            'payload' => ['required', 'array'],
+            'payload.cuenta_contable_contraparte_id' => ['required_if:accion,CONCILIAR_CONTRA_CUENTA', 'integer'],
+            'payload.motivo_ignorado_id' => ['required_if:accion,IGNORAR', 'integer'],
+            'payload.observacion' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $exitos = [];
+        $errores = [];
+        $movs = MovimientoBancario::whereIn('id', $data['ids'])->get();
+
+        foreach ($movs as $mov) {
+            try {
+                if ($data['accion'] === 'CONCILIAR_CONTRA_CUENTA') {
+                    $this->concilService->conciliar($mov, [
+                        'referencia_tipo' => 'ASIENTO_MANUAL',
+                        'cuenta_contable_contraparte_id' => $data['payload']['cuenta_contable_contraparte_id'],
+                        'observacion' => $data['payload']['observacion'] ?? null,
+                    ], $request->user());
+                } else {
+                    $this->concilService->ignorar(
+                        $mov,
+                        $data['payload']['motivo_ignorado_id'],
+                        $data['payload']['observacion'] ?? null,
+                        $request->user()
+                    );
+                }
+                $exitos[] = $mov->id;
+            } catch (DomainException $e) {
+                $errores[] = ['id' => $mov->id, 'message' => $e->getMessage()];
+            }
+        }
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'pedidos' => count($data['ids']),
+                'exitos' => count($exitos),
+                'errores' => count($errores),
+                'ids_exitos' => $exitos,
+                'detalle_errores' => $errores,
+            ],
+        ]);
+    }
+
+    /**
+     * Preview: re-corre el MatchingContraparteService sobre un mov sin
+     * persistir. Útil para que el frontend muestre "qué propondría el sistema
+     * si re-procesara este movimiento ahora" tras configurar reglas/aliases.
+     */
+    public function matchPreview(Request $request, int $id): JsonResponse
+    {
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        $r = $this->matcher->matchear($mov);
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'movimiento_id' => $mov->id,
+                'concepto' => $mov->concepto,
+                'importe' => $mov->importeFirmado(),
+                'estado_actual' => $mov->estado,
+                'sugerencia' => $r,
+            ],
+        ]);
     }
 
     private function domainError(DomainException $e): JsonResponse

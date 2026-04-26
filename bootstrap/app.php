@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withCommands([
         \App\Erp\Console\Commands\RebuildSaldos::class,
+        \App\Erp\Console\Commands\OpenapiExport::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([

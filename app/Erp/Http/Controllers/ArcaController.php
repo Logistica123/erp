@@ -131,6 +131,31 @@ class ArcaController extends Controller
         return response()->json(['ok' => true, 'data' => $query->paginate(50)]);
     }
 
+    /**
+     * GET /arca/estado — health del microservicio arca-gateway. Proxy a
+     * /health/ready del gateway Python. Útil para que el frontend muestre si
+     * AFIP está alcanzable antes de habilitar la emisión.
+     */
+    public function estado(): JsonResponse
+    {
+        try {
+            $resp = $this->gateway->healthReady();
+            return response()->json([
+                'ok' => $resp->ok(),
+                'data' => [
+                    'gateway_status' => $resp->status(),
+                    'gateway_body' => $resp->json() ?? $resp->body(),
+                    'gateway_url' => config('services.arca.gateway_url'),
+                ],
+            ], $resp->ok() ? 200 : 502);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'GATEWAY_UNREACHABLE', 'message' => $e->getMessage()],
+            ], 502);
+        }
+    }
+
     public function puntosVentaAfip(): JsonResponse
     {
         $response = $this->gateway->puntosVenta();

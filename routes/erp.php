@@ -352,6 +352,9 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.arca.fc.constatar');
         Route::post('/mis-comprobantes/ejecutar', [ArcaController::class, 'misComprobantesEjecutar'])
             ->name('erp.arca.mc.ejecutar');
+        Route::get('/arca/estado', [ArcaController::class, 'estado'])->name('erp.arca.estado');
+        Route::post('/arca/puntos-venta/sincronizar', [ArcaController::class, 'puntosVentaAfip'])
+            ->name('erp.arca.puntos-venta.sincronizar');
         Route::get('/mis-comprobantes/runs', [ArcaController::class, 'misComprobantesRuns'])
             ->name('erp.arca.mc.runs');
         Route::get('/puntos-venta/afip', [ArcaController::class, 'puntosVentaAfip'])

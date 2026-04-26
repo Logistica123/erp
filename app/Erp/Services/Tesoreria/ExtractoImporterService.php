@@ -3,9 +3,9 @@
 namespace App\Erp\Services\Tesoreria;
 
 use App\Erp\Models\Cotizacion;
-use App\Erp\Models\Tesoreria\ConciliacionRegla;
 use App\Erp\Models\Tesoreria\CuentaBancaria;
 use App\Erp\Models\Tesoreria\ExtractoBancario;
+use App\Erp\Models\Tesoreria\MovimientoBancario;
 use App\Erp\Services\Tesoreria\Parsers\ExtractoParseado;
 use App\Erp\Services\Tesoreria\Parsers\ParserFactory;
 use App\Erp\Services\Tesoreria\Parsers\MovimientoParseado;
@@ -37,6 +37,7 @@ class ExtractoImporterService
     public function __construct(
         private readonly ParserFactory $factory,
         private readonly AuditLogger $audit,
+        private readonly MatchingContraparteService $matcher,
     ) {}
 
     /**
@@ -46,6 +47,7 @@ class ExtractoImporterService
      *   movimientos_duplicados:int,
      *   etiquetados_auto:int,
      *   pendientes:int,
+     *   pasantes_mp:int,
      *   warnings:array<int,string>,
      * }
      */
@@ -108,10 +110,18 @@ class ExtractoImporterService
 
             $counts = $this->persistirMovimientos($extracto->id, $cuenta, $parseado->movimientos);
 
+            // CM-3: Pasada de matching contraparte + detección de pasante MP.
+            $matching = $this->aplicarMatching($extracto->id, $cuenta);
+            $pasantes = $this->detectarPasanteMp($extracto->id, $cuenta);
+
             return [
                 'extracto_id' => $extracto->id,
                 'cant_total' => count($parseado->movimientos),
-                ...$counts,
+                'movimientos_importados' => $counts['movimientos_importados'],
+                'movimientos_duplicados' => $counts['movimientos_duplicados'],
+                'etiquetados_auto' => $matching['etiquetados'],
+                'pendientes' => $counts['movimientos_importados'] - $matching['etiquetados'],
+                'pasantes_mp' => $pasantes,
             ];
         });
 
@@ -136,36 +146,30 @@ class ExtractoImporterService
             'movimientos_duplicados' => $resumen['movimientos_duplicados'],
             'etiquetados_auto' => $resumen['etiquetados_auto'],
             'pendientes' => $resumen['pendientes'],
+            'pasantes_mp' => $resumen['pasantes_mp'],
             'warnings' => $warnings,
         ];
     }
 
     /**
      * Persiste movimientos con dedup por (cuenta_bancaria_id, hash_linea).
-     * ON DUPLICATE KEY UPDATE actualiza extracto_id para trazabilidad de
-     * cuál import trajo la última copia.
+     * Insertados todos como PENDIENTE — el matching ocurre en una segunda
+     * pasada via aplicarMatching() para que use MatchingContraparteService.
      *
      * @param  array<int, MovimientoParseado>  $movs
-     * @return array{movimientos_importados:int, movimientos_duplicados:int, etiquetados_auto:int, pendientes:int}
+     * @return array{movimientos_importados:int, movimientos_duplicados:int}
      */
     private function persistirMovimientos(int $extractoId, CuentaBancaria $cuenta, array $movs): array
     {
         if (empty($movs)) {
-            return ['movimientos_importados' => 0, 'movimientos_duplicados' => 0, 'etiquetados_auto' => 0, 'pendientes' => 0];
+            return ['movimientos_importados' => 0, 'movimientos_duplicados' => 0];
         }
 
-        $reglas = $this->reglasActivas($cuenta->empresa_id);
         $now = now();
-
         $importados = 0;
         $duplicados = 0;
-        $etiquetados = 0;
-        $pendientes = 0;
 
         foreach ($movs as $m) {
-            $match = $this->aplicarReglas($m, $reglas);
-            $estado = $match ? 'ETIQUETADO' : 'PENDIENTE';
-
             $affected = DB::table('erp_movimientos_bancarios')->upsert(
                 [[
                     'extracto_id' => $extractoId,
@@ -176,9 +180,10 @@ class ExtractoImporterService
                     'debito' => $m->debito ?? 0,
                     'credito' => $m->credito ?? 0,
                     'saldo' => $m->saldo,
-                    'estado' => $estado,
-                    'etiqueta_sugerida' => $match['etiqueta'] ?? null,
-                    'cuenta_contable_propuesta_id' => $match['cuenta_contable_id'] ?? null,
+                    'estado' => 'PENDIENTE',
+                    'cuit_contraparte' => $m->cuitContraparte,
+                    'nombre_contraparte' => $m->nombreContraparte,
+                    'referencia_externa' => $m->referencia,
                     'hash_linea' => $m->hashLinea,
                     'created_at' => $now,
                     'updated_at' => $now,
@@ -187,72 +192,131 @@ class ExtractoImporterService
                 ['extracto_id', 'updated_at']
             );
 
-            // upsert() en Laravel devuelve cantidad de filas afectadas: 1 insert, 2 update (MySQL).
+            // upsert() en Laravel devuelve 1 insert, 2 update (MySQL).
             if ($affected === 2) {
                 $duplicados++;
             } else {
                 $importados++;
-                if ($match) {
-                    $etiquetados++;
-                } else {
-                    $pendientes++;
-                }
             }
         }
 
         return [
             'movimientos_importados' => $importados,
             'movimientos_duplicados' => $duplicados,
-            'etiquetados_auto' => $etiquetados,
-            'pendientes' => $pendientes,
         ];
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, ConciliacionRegla>
+     * Pasada de matching: por cada movimiento PENDIENTE del extracto, llama a
+     * MatchingContraparteService y, si la confianza es >= 50, escribe los
+     * resultados en la fila. Confianza >= 80 promueve a CONCILIADO; entre 50
+     * y 79 queda ETIQUETADO (espera revisión); < 50 queda PENDIENTE.
+     *
+     * @return array{etiquetados:int, conciliados:int}
      */
-    private function reglasActivas(int $empresaId)
+    private function aplicarMatching(int $extractoId, CuentaBancaria $cuenta): array
     {
-        return ConciliacionRegla::where('empresa_id', $empresaId)
-            ->where('activa', true)
-            ->orderBy('orden_prioridad')
+        $movs = MovimientoBancario::where('extracto_id', $extractoId)
+            ->where('cuenta_bancaria_id', $cuenta->id)
+            ->where('estado', 'PENDIENTE')
+            ->with('cuentaBancaria')
             ->get();
+
+        $etiquetados = 0;
+        $conciliados = 0;
+
+        foreach ($movs as $mov) {
+            $r = $this->matcher->matchear($mov);
+            if (($r['confianza_match'] ?? 0) < 50) {
+                continue;
+            }
+
+            $estado = $r['confianza_match'] >= 80 ? 'ETIQUETADO' : 'ETIQUETADO';
+            // Nota: dejamos ETIQUETADO en ambos casos. La promoción a
+            // CONCILIADO se hace cuando se genera el asiento (no por confianza
+            // sola). Distinguimos por confianza_match para la UI.
+
+            $mov->update([
+                'cuit_contraparte'   => $r['cuit_contraparte']   ?? $mov->cuit_contraparte,
+                'nombre_contraparte' => $r['nombre_contraparte'] ?? $mov->nombre_contraparte,
+                'persona_id'         => $r['persona_id'],
+                'cliente_id'         => $r['cliente_id'],
+                'cuenta_propia_id'   => $r['cuenta_propia_id'],
+                'referencia_externa' => $r['referencia_externa'] ?? $mov->referencia_externa,
+                'regla_aplicada_id'  => $r['regla_aplicada_id'],
+                'cuenta_contable_propuesta_id' => $r['cuenta_contable_propuesta_id']
+                    ?? $mov->cuenta_contable_propuesta_id,
+                'confianza_match'    => $r['confianza_match'],
+                'estado'             => $estado,
+                'etiqueta_sugerida'  => $r['estrategia'] ?? null,
+            ]);
+
+            $etiquetados++;
+            if ($r['confianza_match'] >= 80) {
+                $conciliados++;
+            }
+        }
+
+        return ['etiquetados' => $etiquetados, 'conciliados' => $conciliados];
     }
 
     /**
-     * Devuelve {etiqueta, cuenta_contable_id} del primer match o null.
+     * Detecta operaciones pasantes MP: pares "Ingreso de dinero" + "Pago de
+     * servicio" con misma `referencia_externa` (REFERENCE_ID en MP) e importes
+     * opuestos exactos. Marca ambos como ETIQUETADO con etiqueta_sugerida =
+     * "PASANTE_MP" y nombre_contraparte agrupado para que el operador los
+     * concilie como un solo asiento agente de cobro.
      *
-     * @param  \Illuminate\Support\Collection<int, ConciliacionRegla>  $reglas
-     * @return array{etiqueta:string, cuenta_contable_id:?int}|null
+     * Sólo se aplica si el banco tiene codigo_parser="MP".
+     *
+     * @return int cantidad de pares detectados
      */
-    private function aplicarReglas(MovimientoParseado $m, $reglas): ?array
+    private function detectarPasanteMp(int $extractoId, CuentaBancaria $cuenta): int
     {
-        foreach ($reglas as $r) {
-            if ($r->tipo === ConciliacionRegla::TIPO_CONCEPTO_REGEX || $r->tipo === ConciliacionRegla::TIPO_COMBINADA) {
-                if (! $r->patron_concepto) {
-                    continue;
-                }
-                if (! @preg_match('/'.$r->patron_concepto.'/u', $m->concepto)) {
-                    continue;
-                }
-            }
-            if ($r->tipo === ConciliacionRegla::TIPO_IMPORTE_EXACTO || $r->tipo === ConciliacionRegla::TIPO_COMBINADA) {
-                $importe = $m->debito ?? $m->credito ?? 0;
-                if ($r->patron_importe_desde !== null && $importe < (float) $r->patron_importe_desde) {
-                    continue;
-                }
-                if ($r->patron_importe_hasta !== null && $importe > (float) $r->patron_importe_hasta) {
-                    continue;
-                }
-            }
-
-            return [
-                'etiqueta' => $r->codigo,
-                'cuenta_contable_id' => $r->cuenta_contable_id,
-            ];
+        $codigo = mb_strtoupper((string) $cuenta->banco?->codigo_parser);
+        if ($codigo !== 'MP' && $codigo !== 'MERCADO_PAGO') {
+            return 0;
         }
 
-        return null;
+        $movs = MovimientoBancario::where('extracto_id', $extractoId)
+            ->whereNotNull('referencia_externa')
+            ->orderBy('referencia_externa')
+            ->get()
+            ->groupBy('referencia_externa');
+
+        $pares = 0;
+        foreach ($movs as $refId => $grupo) {
+            if ($grupo->count() < 2) continue;
+
+            $credito = $grupo->firstWhere(fn ($m) => (float) $m->credito > 0);
+            $debito  = $grupo->firstWhere(fn ($m) => (float) $m->debito  > 0);
+            if (! $credito || ! $debito) continue;
+
+            $impC = (float) $credito->credito;
+            $impD = (float) $debito->debito;
+            if (abs($impC - $impD) > 0.01) continue;
+
+            $conceptoC = mb_strtoupper((string) $credito->concepto);
+            $conceptoD = mb_strtoupper((string) $debito->concepto);
+            $esIngreso = str_contains($conceptoC, 'INGRESO DE DINERO');
+            $esServicio = str_contains($conceptoD, 'PAGO DE SERVICIO');
+            if (! $esIngreso || ! $esServicio) continue;
+
+            // Identifica el servicio (ej. "Pago de servicio Aguas de Corrientes" → "Aguas de Corrientes").
+            $servicio = trim((string) preg_replace('/^pago\s+de\s+servicio\s*/iu', '', $debito->concepto));
+
+            foreach ([$credito, $debito] as $m) {
+                $m->update([
+                    'estado' => 'ETIQUETADO',
+                    'etiqueta_sugerida' => 'PASANTE_MP',
+                    'nombre_contraparte' => $servicio !== '' ? $servicio : 'Pasante MP',
+                    'confianza_match' => max((int) $m->confianza_match, 75),
+                ]);
+            }
+            $pares++;
+        }
+
+        return $pares;
     }
 
     /**

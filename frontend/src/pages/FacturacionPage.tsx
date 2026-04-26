@@ -115,11 +115,6 @@ export function FacturacionPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 text-[13px] text-gray-500">
-        <span>ERP</span> <span>›</span> <span>Fiscal</span> <span>›</span>
-        <span className="text-gray-800 font-medium">Facturación</span>
-      </div>
-
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Facturación (ARCA)</h1>

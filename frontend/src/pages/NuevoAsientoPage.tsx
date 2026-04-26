@@ -167,8 +167,8 @@ export function NuevoAsientoPage() {
           <p className="text-[12px] text-ink-muted mt-[2px]">
             {periodo ? (
               <>
-                Período {String(periodo.mes).padStart(2, '0')}/{periodo.anio} · estado {periodo.estado} · N° se asigna
-                al contabilizar
+                {new Date(periodo.anio, periodo.mes - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}
+                {' · estado '}{periodo.estado}{' · N° se asigna al contabilizar'}
               </>
             ) : (
               'Cargando período…'

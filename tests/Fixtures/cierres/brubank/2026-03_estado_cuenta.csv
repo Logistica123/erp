@@ -1,0 +1,187 @@
+Fecha;Referencia;Descripcion;Moneda;Creditos;Debitos;Saldo;Cuenta
+02-03-26;0;Depósito de Cheques;ARS;$ 4.000.000,00;-;$ 4.000.834,03;Cuenta corriente
+02-03-26;1625191404;Retiro de tu cuenta remunerada;ARS;$ 40.872.000,00;-;$ 44.872.834,03;Cuenta corriente
+02-03-26;1625193412;A una cuenta tuya - ICBC;ARS;-;$ 40.872.000,00;$ 4.000.834,03;Cuenta corriente
+02-03-26;1625563059;Retiro de tu cuenta remunerada;ARS;$ 1.386.000,00;-;$ 5.386.834,03;Cuenta corriente
+02-03-26;1625563461;A una cuenta tuya - ICBC;ARS;-;$ 1.386.000,00;$ 4.000.834,03;Cuenta corriente
+02-03-26;1626030909;Impuesto Ley 25413 s/de;ARS;-;$ 24.000,00;$ 3.976.834,03;Cuenta corriente
+02-03-26;1626031946;Fondeo de tu cuenta remunerada;ARS;-;$ 3.000.000,00;$ 976.834,03;Cuenta corriente
+02-03-26;1626111380;Impuesto SIRCREB;ARS;-;$ 48.000,00;$ 928.834,03;Cuenta corriente
+03-03-26;1626920816;Retiro de tu cuenta remunerada;ARS;$ 25.538.000,00;-;$ 26.466.834,03;Cuenta corriente
+03-03-26;1626921392;A una cuenta tuya - ICBC;ARS;-;$ 25.538.000,00;$ 928.834,03;Cuenta corriente
+04-03-26;1629224229;Retiro de tu cuenta remunerada;ARS;$ 10.088.000,00;-;$ 11.016.834,03;Cuenta corriente
+04-03-26;1629225120;A una cuenta tuya - ICBC;ARS;-;$ 10.088.000,00;$ 928.834,03;Cuenta corriente
+05-03-26;1631034472;Acreditación E-Checks;ARS;$ 109.705.875,88;-;$ 110.634.709,91;Cuenta corriente
+05-03-26;1631107404;Impuesto Ley 25413 s/de;ARS;-;$ 658.235,26;$ 109.976.474,65;Cuenta corriente
+05-03-26;1631184269;Impuesto SIRCREB;ARS;-;$ 1.316.470,51;$ 108.660.004,14;Cuenta corriente
+05-03-26;1631233887;Fondeo de tu cuenta remunerada;ARS;-;$ 108.000.000,00;$ 660.004,14;Cuenta corriente
+06-03-26;1631838515;Retiro de tu cuenta remunerada;ARS;$ 30.251.000,00;-;$ 30.911.004,14;Cuenta corriente
+06-03-26;1631839071;A una cuenta tuya - ICBC;ARS;-;$ 30.251.000,00;$ 660.004,14;Cuenta corriente
+06-03-26;1632787627;De una cuenta tuya - ICBC;ARS;$ 34.000.000,00;-;$ 34.660.004,14;Cuenta corriente
+06-03-26;1633290274;Fondeo de tu cuenta remunerada;ARS;-;$ 34.000.000,00;$ 660.004,14;Cuenta corriente
+09-03-26;1637393912;A una cuenta tuya - ICBC;ARS;-;$ 243.000,00;$ 417.004,14;Cuenta corriente
+09-03-26;1637395609;Retiro de tu cuenta remunerada;ARS;$ 4.500.000,00;-;$ 4.917.004,14;Cuenta corriente
+09-03-26;1637396063;A una cuenta tuya - ICBC;ARS;-;$ 4.500.000,00;$ 417.004,14;Cuenta corriente
+09-03-26;1637914228;Acreditación E-Checks;ARS;$ 16.164.545,13;-;$ 16.581.549,27;Cuenta corriente
+09-03-26;1637916060;Fondeo de tu cuenta remunerada;ARS;-;$ 14.000.000,00;$ 2.581.549,27;Cuenta corriente
+09-03-26;1638046892;Impuesto Ley 25413 s/de;ARS;-;$ 96.987,27;$ 2.484.562,00;Cuenta corriente
+09-03-26;1638124770;Impuesto SIRCREB;ARS;-;$ 193.974,54;$ 2.290.587,46;Cuenta corriente
+10-03-26;1638599608;Fondeo de tu cuenta remunerada;ARS;-;$ 2.290.587,00;$ 0,46;Cuenta corriente
+10-03-26;1638615896;Retiro de tu cuenta remunerada;ARS;$ 26.573.782,20;-;$ 26.573.782,66;Cuenta corriente
+10-03-26;1638616871;A una cuenta tuya - ICBC;ARS;-;$ 26.573.782,20;$ 0,46;Cuenta corriente
+10-03-26;1639354009;Retiro de tu cuenta remunerada;ARS;$ 325.000,00;-;$ 325.000,46;Cuenta corriente
+10-03-26;1639355367;Impuesto Ley 25413 s/de;ARS;-;$ 1.920,00;$ 323.080,46;Cuenta corriente
+10-03-26;1639355367;MERCADOLIBRE S.R.L.;ARS;-;$ 320.000,00;$ 3.080,46;Cuenta corriente
+10-03-26;1639426348;Retiro de tu cuenta remunerada;ARS;$ 18.731.000,00;-;$ 18.734.080,46;Cuenta corriente
+10-03-26;1639427617;A una cuenta tuya - ICBC;ARS;-;$ 18.731.000,00;$ 3.080,46;Cuenta corriente
+12-03-26;1642279467;Retiro de tu cuenta remunerada;ARS;$ 200.000,00;-;$ 203.080,46;Cuenta corriente
+12-03-26;1642328428;Impuesto Ley 25413 s/de;ARS;-;$ 180,00;$ 202.900,46;Cuenta corriente
+12-03-26;1642328428;MERCADOLIBRE S.R.L.;ARS;-;$ 30.000,00;$ 172.900,46;Cuenta corriente
+12-03-26;1642935390;Retiro de tu cuenta remunerada;ARS;$ 7.322.000,00;-;$ 7.494.900,46;Cuenta corriente
+12-03-26;1642936419;A una cuenta tuya - ICBC;ARS;-;$ 7.322.000,00;$ 172.900,46;Cuenta corriente
+13-03-26;1645010082;Acreditación E-Checks;ARS;$ 1.662.330,49;-;$ 1.835.230,95;Cuenta corriente
+13-03-26;1645138203;Impuesto Ley 25413 s/de;ARS;-;$ 9.973,98;$ 1.825.256,97;Cuenta corriente
+13-03-26;1645201129;Impuesto SIRCREB;ARS;-;$ 19.947,97;$ 1.805.309,00;Cuenta corriente
+13-03-26;1645210903;Fondeo de tu cuenta remunerada;ARS;-;$ 1.000.000,00;$ 805.309,00;Cuenta corriente
+16-03-26;1648748532;Impuesto Ley 25413 s/de;ARS;-;$ 357,00;$ 804.952,00;Cuenta corriente
+16-03-26;1648748532;MERCADOLIBRE S.R.L.;ARS;-;$ 59.500,00;$ 745.452,00;Cuenta corriente
+16-03-26;1648749363;Impuesto Ley 25413 s/de;ARS;-;$ 221,72;$ 745.230,28;Cuenta corriente
+16-03-26;1648749363;MERCADOLIBRE S.R.L.;ARS;-;$ 36.952,79;$ 708.277,49;Cuenta corriente
+16-03-26;1648750049;Impuesto Ley 25413 s/de;ARS;-;$ 698,35;$ 707.579,14;Cuenta corriente
+16-03-26;1648750049;MERCADOLIBRE S.R.L.;ARS;-;$ 116.391,59;$ 591.187,55;Cuenta corriente
+16-03-26;1648753412;Impuesto Ley 25413 s/de;ARS;-;$ 138,25;$ 591.049,30;Cuenta corriente
+16-03-26;1648753412;MERCADOLIBRE S.R.L.;ARS;-;$ 23.041,78;$ 568.007,52;Cuenta corriente
+16-03-26;1648760064;Retiro de tu cuenta remunerada;ARS;$ 26.878.550,00;-;$ 27.446.557,52;Cuenta corriente
+16-03-26;1648761293;A una cuenta tuya - ICBC;ARS;-;$ 26.878.550,00;$ 568.007,52;Cuenta corriente
+16-03-26;1649335972;Retiro de tu cuenta remunerada;ARS;$ 7.616.331,00;-;$ 8.184.338,52;Cuenta corriente
+16-03-26;1649336459;A una cuenta tuya - ICBC;ARS;-;$ 7.616.331,00;$ 568.007,52;Cuenta corriente
+16-03-26;1649485832;Fondeo de tu cuenta remunerada;ARS;-;$ 500.000,00;$ 68.007,52;Cuenta corriente
+16-03-26;1649591912;Retiro de tu cuenta remunerada;ARS;$ 45.700.000,00;-;$ 45.768.007,52;Cuenta corriente
+16-03-26;1649594798;A una cuenta tuya - ICBC;ARS;-;$ 45.700.000,00;$ 68.007,52;Cuenta corriente
+17-03-26;0;Depósito de Cheques;ARS;$ 37.160.442,19;-;$ 37.228.449,71;Cuenta corriente
+17-03-26;1651406609;Impuesto Ley 25413 s/de;ARS;-;$ 222.962,65;$ 37.005.487,06;Cuenta corriente
+17-03-26;1651420041;Fondeo de tu cuenta remunerada;ARS;-;$ 35.000.000,00;$ 2.005.487,06;Cuenta corriente
+17-03-26;1651453789;Impuesto SIRCREB;ARS;-;$ 445.925,31;$ 1.559.561,75;Cuenta corriente
+18-03-26;1652083838;Retiro de tu cuenta remunerada;ARS;$ 15.600.000,00;-;$ 17.159.561,75;Cuenta corriente
+18-03-26;1652084441;A una cuenta tuya - ICBC;ARS;-;$ 15.600.000,00;$ 1.559.561,75;Cuenta corriente
+18-03-26;1652667544;Retiro de tu cuenta remunerada;ARS;$ 22.000.000,00;-;$ 23.559.561,75;Cuenta corriente
+18-03-26;1652668025;A una cuenta tuya - ICBC;ARS;-;$ 22.000.000,00;$ 1.559.561,75;Cuenta corriente
+19-03-26;0;Depósito de Cheques;ARS;$ 21.349.268,90;-;$ 22.908.830,65;Cuenta corriente
+19-03-26;0;Depósito de Cheques;ARS;$ 6.143.473,14;-;$ 29.052.303,79;Cuenta corriente
+19-03-26;0;Depósito de Cheques;ARS;$ 5.090.181,73;-;$ 34.142.485,52;Cuenta corriente
+19-03-26;0;Depósito de Cheques;ARS;$ 32.391.214,56;-;$ 66.533.700,08;Cuenta corriente
+19-03-26;0;Depósito de Cheques;ARS;$ 440.000,00;-;$ 66.973.700,08;Cuenta corriente
+19-03-26;1653630825;A una cuenta tuya - MercadoPago;ARS;-;$ 20.000,00;$ 66.953.700,08;Cuenta corriente
+19-03-26;1653827741;A una cuenta tuya - ICBC;ARS;-;$ 1.500.000,00;$ 65.453.700,08;Cuenta corriente
+19-03-26;1654704448;Impuesto Ley 25413 s/de;ARS;-;$ 36.860,84;$ 65.416.839,24;Cuenta corriente
+19-03-26;1654704448;Impuesto Ley 25413 s/de;ARS;-;$ 194.347,29;$ 65.222.491,95;Cuenta corriente
+19-03-26;1654704448;Impuesto Ley 25413 s/de;ARS;-;$ 128.095,61;$ 65.094.396,34;Cuenta corriente
+19-03-26;1654704448;Impuesto Ley 25413 s/de;ARS;-;$ 30.541,09;$ 65.063.855,25;Cuenta corriente
+19-03-26;1654704448;Impuesto Ley 25413 s/de;ARS;-;$ 2.640,00;$ 65.061.215,25;Cuenta corriente
+19-03-26;1654752590;Impuesto SIRCREB;ARS;-;$ 256.191,23;$ 64.805.024,02;Cuenta corriente
+19-03-26;1654752590;Impuesto SIRCREB;ARS;-;$ 388.694,57;$ 64.416.329,45;Cuenta corriente
+19-03-26;1654752590;Impuesto SIRCREB;ARS;-;$ 61.082,18;$ 64.355.247,27;Cuenta corriente
+19-03-26;1654752590;Impuesto SIRCREB;ARS;-;$ 73.721,68;$ 64.281.525,59;Cuenta corriente
+19-03-26;1654752590;Impuesto SIRCREB;ARS;-;$ 5.280,00;$ 64.276.245,59;Cuenta corriente
+20-03-26;1655255784;Fondeo de tu cuenta remunerada;ARS;-;$ 64.000.000,00;$ 276.245,59;Cuenta corriente
+20-03-26;1655318913;Retiro de tu cuenta remunerada;ARS;$ 35.200.000,00;-;$ 35.476.245,59;Cuenta corriente
+20-03-26;1655319866;A una cuenta tuya - ICBC;ARS;-;$ 35.200.000,00;$ 276.245,59;Cuenta corriente
+25-03-26;1662479262;Retiro de tu cuenta remunerada;ARS;$ 27.765.000,00;-;$ 28.041.245,59;Cuenta corriente
+25-03-26;1662481115;A una cuenta tuya - ICBC;ARS;-;$ 27.765.000,00;$ 276.245,59;Cuenta corriente
+25-03-26;1663324082;Acreditación E-Checks;ARS;$ 56.768.779,22;-;$ 57.045.024,81;Cuenta corriente
+25-03-26;1663377892;Impuesto Ley 25413 s/de;ARS;-;$ 340.612,68;$ 56.704.412,13;Cuenta corriente
+25-03-26;1663418460;Impuesto SIRCREB;ARS;-;$ 681.225,35;$ 56.023.186,78;Cuenta corriente
+25-03-26;1663420627;A una cuenta tuya - ICBC;ARS;-;$ 15.300.000,00;$ 40.723.186,78;Cuenta corriente
+25-03-26;1663421513;Fondeo de tu cuenta remunerada;ARS;-;$ 35.000.000,00;$ 5.723.186,78;Cuenta corriente
+26-03-26;1663903231;Retiro de tu cuenta remunerada;ARS;$ 1.200.000,00;-;$ 6.923.186,78;Cuenta corriente
+26-03-26;1663903480;A una cuenta tuya - ICBC;ARS;-;$ 1.400.000,00;$ 5.523.186,78;Cuenta corriente
+26-03-26;1663905545;Fondeo de tu cuenta remunerada;ARS;-;$ 5.523.000,00;$ 186,78;Cuenta corriente
+26-03-26;1664787870;De una cuenta tuya - ICBC;ARS;$ 14.000.000,00;-;$ 14.000.186,78;Cuenta corriente
+27-03-26;0;Depósito de Cheques;ARS;$ 8.771.560,49;-;$ 22.771.747,27;Cuenta corriente
+27-03-26;1665532398;Fondeo de tu cuenta remunerada;ARS;-;$ 1.400.000,00;$ 21.371.747,27;Cuenta corriente
+27-03-26;1665532533;Fondeo de tu cuenta remunerada;ARS;-;$ 12.000.000,00;$ 9.371.747,27;Cuenta corriente
+27-03-26;1665575444;Retiro de tu cuenta remunerada;ARS;$ 26.135.000,00;-;$ 35.506.747,27;Cuenta corriente
+27-03-26;1665576296;A una cuenta tuya - ICBC;ARS;-;$ 26.135.000,00;$ 9.371.747,27;Cuenta corriente
+27-03-26;1665576741;Fondeo de tu cuenta remunerada;ARS;-;$ 600.000,00;$ 8.771.747,27;Cuenta corriente
+27-03-26;1666468149;Impuesto Ley 25413 s/de;ARS;-;$ 52.629,36;$ 8.719.117,91;Cuenta corriente
+27-03-26;1666547376;Impuesto SIRCREB;ARS;-;$ 105.258,73;$ 8.613.859,18;Cuenta corriente
+30-03-26;1667229557;Fondeo de tu cuenta remunerada;ARS;-;$ 8.600.000,00;$ 13.859,18;Cuenta corriente
+30-03-26;1669724954;A una cuenta tuya - MercadoPago;ARS;-;$ 13.000,00;$ 859,18;Cuenta corriente
+30-03-26;1669889252;Retiro de tu cuenta remunerada;ARS;$ 33.800.000,00;-;$ 33.800.859,18;Cuenta corriente
+30-03-26;1669889938;A una cuenta tuya - ICBC;ARS;-;$ 33.800.000,00;$ 859,18;Cuenta corriente
+30-03-26;1670354096;Retiro de tu cuenta remunerada;ARS;$ 3.447.000,00;-;$ 3.447.859,18;Cuenta corriente
+30-03-26;1670354891;A una cuenta tuya - ICBC;ARS;-;$ 3.447.000,00;$ 859,18;Cuenta corriente
+31-03-26;0;Depósito de Cheques;ARS;$ 24.294.143,75;-;$ 24.295.002,93;Cuenta corriente
+31-03-26;0;Depósito de Cheques;ARS;$ 2.600.000,00;-;$ 26.895.002,93;Cuenta corriente
+31-03-26;0;Depósito de Cheques;ARS;$ 2.676.942,92;-;$ 29.571.945,85;Cuenta corriente
+31-03-26;0;Depósito de Cheques;ARS;$ 95.243.557,49;-;$ 124.815.503,34;Cuenta corriente
+31-03-26;1672302264;Impuesto Ley 25413 s/de;ARS;-;$ 15.600,00;$ 124.799.903,34;Cuenta corriente
+31-03-26;1672302264;Impuesto Ley 25413 s/de;ARS;-;$ 145.764,86;$ 124.654.138,48;Cuenta corriente
+31-03-26;1672302264;Impuesto Ley 25413 s/de;ARS;-;$ 571.461,34;$ 124.082.677,14;Cuenta corriente
+31-03-26;1672302264;Impuesto Ley 25413 s/de;ARS;-;$ 16.061,66;$ 124.066.615,48;Cuenta corriente
+31-03-26;1672343383;Impuesto SIRCREB;ARS;-;$ 31.200,00;$ 124.035.415,48;Cuenta corriente
+31-03-26;1672343383;Impuesto SIRCREB;ARS;-;$ 291.529,73;$ 123.743.885,75;Cuenta corriente
+31-03-26;1672343383;Impuesto SIRCREB;ARS;-;$ 1.142.922,69;$ 122.600.963,06;Cuenta corriente
+31-03-26;1672343383;Impuesto SIRCREB;ARS;-;$ 32.123,32;$ 122.568.839,74;Cuenta corriente
+31-03-26;1672346767;A una cuenta tuya - ICBC;ARS;-;$ 13.000.000,00;$ 109.568.839,74;Cuenta corriente
+31-03-26;1672347254;Fondeo de tu cuenta remunerada;ARS;-;$ 107.000.000,00;$ 2.568.839,74;Cuenta corriente
+31-03-26;1672433693;Fondeo de tu cuenta remunerada;ARS;-;$ 2.500.000,00;$ 68.839,74;Cuenta corriente
+02-03-26;1625191404;Retiro de cuenta remunerada;ARS;-;$ 40.872.000,00;$ 44.443.123,69;Cuenta remunerada
+02-03-26;1625563059;Retiro de cuenta remunerada;ARS;-;$ 1.386.000,00;$ 43.057.123,69;Cuenta remunerada
+02-03-26;1626031946;Depósito en cuenta remunerada;ARS;$ 3.000.000,00;-;$ 46.057.123,69;Cuenta remunerada
+02-03-26;1626525659;Intereses pagados;ARS;$ 55.520,92;-;$ 46.112.644,61;Cuenta remunerada
+03-03-26;1626920816;Retiro de cuenta remunerada;ARS;-;$ 25.538.000,00;$ 20.574.644,61;Cuenta remunerada
+03-03-26;1628110139;Intereses pagados;ARS;$ 11.837,47;-;$ 20.586.482,08;Cuenta remunerada
+04-03-26;1629224229;Retiro de cuenta remunerada;ARS;-;$ 10.088.000,00;$ 10.498.482,08;Cuenta remunerada
+04-03-26;1629883136;Intereses pagados;ARS;$ 6.040,22;-;$ 10.504.522,30;Cuenta remunerada
+05-03-26;1631233887;Depósito en cuenta remunerada;ARS;$ 108.000.000,00;-;$ 118.504.522,30;Cuenta remunerada
+05-03-26;1631674148;Intereses pagados;ARS;$ 66.557,33;-;$ 118.571.079,63;Cuenta remunerada
+06-03-26;1631838515;Retiro de cuenta remunerada;ARS;-;$ 30.251.000,00;$ 88.320.079,63;Cuenta remunerada
+06-03-26;1633290274;Depósito en cuenta remunerada;ARS;$ 34.000.000,00;-;$ 122.320.079,63;Cuenta remunerada
+09-03-26;1637395609;Retiro de cuenta remunerada;ARS;-;$ 4.500.000,00;$ 117.820.079,63;Cuenta remunerada
+09-03-26;1637916060;Depósito en cuenta remunerada;ARS;$ 14.000.000,00;-;$ 131.820.079,63;Cuenta remunerada
+09-03-26;1638767279;Intereses pagados;ARS;$ 74.151,69;-;$ 131.894.231,32;Cuenta remunerada
+09-03-26;1638873508;Intereses pagados;ARS;$ 206.100,96;-;$ 132.100.332,28;Cuenta remunerada
+10-03-26;1638599608;Depósito en cuenta remunerada;ARS;$ 2.290.587,00;-;$ 134.390.919,28;Cuenta remunerada
+10-03-26;1638615896;Retiro de cuenta remunerada;ARS;-;$ 26.573.782,20;$ 107.817.137,08;Cuenta remunerada
+10-03-26;1639354009;Retiro de cuenta remunerada;ARS;-;$ 325.000,00;$ 107.492.137,08;Cuenta remunerada
+10-03-26;1639426348;Retiro de cuenta remunerada;ARS;-;$ 18.731.000,00;$ 88.761.137,08;Cuenta remunerada
+10-03-26;1640372889;Intereses pagados;ARS;$ 49.852,15;-;$ 88.810.989,23;Cuenta remunerada
+11-03-26;1642061845;Intereses pagados;ARS;$ 49.880,14;-;$ 88.860.869,37;Cuenta remunerada
+12-03-26;1642279467;Retiro de cuenta remunerada;ARS;-;$ 200.000,00;$ 88.660.869,37;Cuenta remunerada
+12-03-26;1642935390;Retiro de cuenta remunerada;ARS;-;$ 7.322.000,00;$ 81.338.869,37;Cuenta remunerada
+12-03-26;1643806905;Intereses pagados;ARS;$ 45.683,47;-;$ 81.384.552,84;Cuenta remunerada
+13-03-26;1645210903;Depósito en cuenta remunerada;ARS;$ 1.000.000,00;-;$ 82.384.552,84;Cuenta remunerada
+13-03-26;1645705854;Intereses pagados;ARS;$ 138.812,33;-;$ 82.523.365,17;Cuenta remunerada
+16-03-26;1648760064;Retiro de cuenta remunerada;ARS;-;$ 26.878.550,00;$ 55.644.815,17;Cuenta remunerada
+16-03-26;1649335972;Retiro de cuenta remunerada;ARS;-;$ 7.616.331,00;$ 48.028.484,17;Cuenta remunerada
+16-03-26;1649485832;Depósito en cuenta remunerada;ARS;$ 500.000,00;-;$ 48.528.484,17;Cuenta remunerada
+16-03-26;1649591912;Retiro de cuenta remunerada;ARS;-;$ 45.700.000,00;$ 2.828.484,17;Cuenta remunerada
+16-03-26;1650276521;Intereses pagados;ARS;$ 1.588,60;-;$ 2.830.072,77;Cuenta remunerada
+17-03-26;1651420041;Depósito en cuenta remunerada;ARS;$ 35.000.000,00;-;$ 37.830.072,77;Cuenta remunerada
+17-03-26;1651859844;Intereses pagados;ARS;$ 21.247,03;-;$ 37.851.319,80;Cuenta remunerada
+18-03-26;1652083838;Retiro de cuenta remunerada;ARS;-;$ 15.600.000,00;$ 22.251.319,80;Cuenta remunerada
+18-03-26;1652667544;Retiro de cuenta remunerada;ARS;-;$ 22.000.000,00;$ 251.319,80;Cuenta remunerada
+18-03-26;1653487417;Intereses pagados;ARS;$ 141,15;-;$ 251.460,95;Cuenta remunerada
+19-03-26;1655157496;Intereses pagados;ARS;$ 141,23;-;$ 251.602,18;Cuenta remunerada
+20-03-26;1655255784;Depósito en cuenta remunerada;ARS;$ 64.000.000,00;-;$ 64.251.602,18;Cuenta remunerada
+20-03-26;1655318913;Retiro de cuenta remunerada;ARS;-;$ 35.200.000,00;$ 29.051.602,18;Cuenta remunerada
+20-03-26;1657015548;Intereses pagados;ARS;$ 81.583,27;-;$ 29.133.185,45;Cuenta remunerada
+25-03-26;1662479262;Retiro de cuenta remunerada;ARS;-;$ 27.765.000,00;$ 1.368.185,45;Cuenta remunerada
+25-03-26;1663421513;Depósito en cuenta remunerada;ARS;$ 35.000.000,00;-;$ 36.368.185,45;Cuenta remunerada
+25-03-26;1663826831;Intereses pagados;ARS;$ 20.425,97;-;$ 36.388.611,42;Cuenta remunerada
+26-03-26;1663903231;Retiro de cuenta remunerada;ARS;-;$ 1.200.000,00;$ 35.188.611,42;Cuenta remunerada
+26-03-26;1663905545;Depósito en cuenta remunerada;ARS;$ 5.523.000,00;-;$ 40.711.611,42;Cuenta remunerada
+26-03-26;1665345781;Intereses pagados;ARS;$ 22.865,43;-;$ 40.734.476,85;Cuenta remunerada
+27-03-26;1665532398;Depósito en cuenta remunerada;ARS;$ 1.400.000,00;-;$ 42.134.476,85;Cuenta remunerada
+27-03-26;1665532533;Depósito en cuenta remunerada;ARS;$ 12.000.000,00;-;$ 54.134.476,85;Cuenta remunerada
+27-03-26;1665575444;Retiro de cuenta remunerada;ARS;-;$ 26.135.000,00;$ 27.999.476,85;Cuenta remunerada
+27-03-26;1665576741;Depósito en cuenta remunerada;ARS;$ 600.000,00;-;$ 28.599.476,85;Cuenta remunerada
+27-03-26;1666982267;Intereses pagados;ARS;$ 48.188,16;-;$ 28.647.665,01;Cuenta remunerada
+30-03-26;1667229557;Depósito en cuenta remunerada;ARS;$ 8.600.000,00;-;$ 37.247.665,01;Cuenta remunerada
+30-03-26;1669889252;Retiro de cuenta remunerada;ARS;-;$ 33.800.000,00;$ 3.447.665,01;Cuenta remunerada
+30-03-26;1670354096;Retiro de cuenta remunerada;ARS;-;$ 3.447.000,00;$ 665,01;Cuenta remunerada
+30-03-26;1671056984;Intereses pagados;ARS;$ 0,37;-;$ 665,38;Cuenta remunerada
+31-03-26;1672347254;Depósito en cuenta remunerada;ARS;$ 107.000.000,00;-;$ 107.000.665,38;Cuenta remunerada
+31-03-26;1672433693;Depósito en cuenta remunerada;ARS;$ 2.500.000,00;-;$ 109.500.665,38;Cuenta remunerada
+31-03-26;1673957633;Intereses pagados;ARS;$ 61.500,37;-;$ 109.562.165,75;Cuenta remunerada

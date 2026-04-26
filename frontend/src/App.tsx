@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './layout/AppShell';
 import { ToastProvider } from './hooks/useToast';
 import { AsientosPage } from './pages/AsientosPage';
+import { AuditoriaPage } from './pages/AuditoriaPage';
+import { PlaceholderPage } from './pages/PlaceholderPage';
 import { BalanceSSPage } from './pages/BalanceSSPage';
 import { BancosPage } from './pages/BancosPage';
 import { ConciliacionPage } from './pages/ConciliacionPage';
@@ -166,6 +168,16 @@ export default function App() {
 
               {/* Cierres Diarios — anexo SPEC Conciliación Multibanco */}
               <Route path="/erp/cierres-diarios" element={<CierresDiariosPage />} handle={{ crumb: 'Cierres diarios' }} />
+
+              {/* Administración — addendum v1.7 §3.2 */}
+              <Route path="/erp/admin/auditoria" element={<AuditoriaPage />} handle={{ crumb: 'Auditoría' }} />
+              <Route path="/erp/admin/empresas" element={<PlaceholderPage title="Empresas" modulo="Administración" endpoint="GET /api/erp/empresas/actual" />} handle={{ crumb: 'Empresas' }} />
+              <Route path="/erp/admin/usuarios" element={<PlaceholderPage title="Usuarios" modulo="Administración" endpoint="GET /api/erp/usuarios" />} handle={{ crumb: 'Usuarios' }} />
+              <Route path="/erp/admin/roles-permisos" element={<PlaceholderPage title="Roles y permisos" modulo="Administración" endpoint="GET /api/erp/roles" />} handle={{ crumb: 'Roles' }} />
+              <Route path="/erp/admin/diarios" element={<PlaceholderPage title="Diarios contables" modulo="Administración" endpoint="GET /api/erp/diarios" />} handle={{ crumb: 'Diarios' }} />
+              <Route path="/erp/admin/centros-costo" element={<PlaceholderPage title="Centros de Costo" modulo="Administración" endpoint="GET /api/erp/centros-costo" />} handle={{ crumb: 'CC' }} />
+              <Route path="/erp/admin/auxiliares" element={<PlaceholderPage title="Auxiliares" modulo="Administración" endpoint="GET /api/erp/auxiliares" />} handle={{ crumb: 'Auxiliares' }} />
+              <Route path="/erp/admin/configuracion" element={<PlaceholderPage title="Configuración" modulo="Administración" endpoint="GET /api/erp/config" />} handle={{ crumb: 'Configuración' }} />
             </Route>
             <Route path="*" element={<Navigate to="/erp/dashboard" replace />} />
           </Routes>

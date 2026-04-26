@@ -280,6 +280,8 @@ Route::prefix('api/erp')->group(function () {
 
         // Auditoría (log inmutable con hash-chain)
         Route::get('/auditoria', [AuditoriaController::class, 'index'])->name('erp.auditoria.index');
+        Route::get('/auditoria/{id}', [AuditoriaController::class, 'show'])
+            ->whereNumber('id')->name('erp.auditoria.show');
         Route::get('/auditoria/verificar-cadena', [AuditoriaController::class, 'verificarCadena'])
             ->name('erp.auditoria.verificar-cadena');
         Route::get('/auditoria/verificar-integridad-asientos', [AuditoriaController::class, 'verificarIntegridadAsientos'])

@@ -1,4 +1,4 @@
-import { Bell, ChevronDown } from 'lucide-react';
+import { Bell, ChevronDown, Menu } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -9,7 +9,7 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 
 type Periodo = { id: number; anio: number; mes: number; estado: string };
 
-export function Topbar() {
+export function Topbar({ onMenuClick }: { onMenuClick?: () => void } = {}) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const active = findActive(pathname);
@@ -25,19 +25,27 @@ export function Topbar() {
   const cierreCercano = diasRestantes !== null && diasRestantes <= 5;
 
   return (
-    <div className="h-[52px] bg-white border-b border-line flex items-center px-6 gap-[18px]">
-      <div className="flex items-center gap-[6px] text-[13px] text-ink-muted">
-        <span>ERP</span>
-        <span>›</span>
-        <span>{active?.section.label ?? 'General'}</span>
-        <span>›</span>
-        <strong className="text-ink font-semibold">{active?.entry.label ?? 'ERP'}</strong>
+    <div className="h-[52px] bg-white border-b border-line flex items-center px-3 sm:px-6 gap-2 sm:gap-[18px]">
+      {/* Hamburger — solo mobile */}
+      <button
+        onClick={onMenuClick}
+        className="md:hidden p-[6px] -ml-1 text-ink-2 hover:bg-surface-hover rounded-md"
+        aria-label="Abrir menú"
+      >
+        <Menu className="w-5 h-5" strokeWidth={1.7} />
+      </button>
+      <div className="flex items-center gap-[6px] text-[13px] text-ink-muted min-w-0">
+        <span className="hidden sm:inline">ERP</span>
+        <span className="hidden sm:inline">›</span>
+        <span className="hidden sm:inline truncate">{active?.section.label ?? 'General'}</span>
+        <span className="hidden sm:inline">›</span>
+        <strong className="text-ink font-semibold truncate">{active?.entry.label ?? 'ERP'}</strong>
       </div>
       <div className="flex-1" />
       {periodo && (
         <button
           onClick={() => navigate('/erp/periodos')}
-          className={`flex items-center gap-2 px-3 py-[5px] rounded-md text-[12px] font-medium transition-colors ${
+          className={`hidden sm:flex items-center gap-2 px-3 py-[5px] rounded-md text-[12px] font-medium transition-colors ${
             cierreCercano
               ? 'bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100'
               : 'bg-[#EEF3F8] border border-[#D1DCE8] text-navy-700 hover:bg-[#E5EDF5]'
@@ -54,7 +62,7 @@ export function Topbar() {
       <button className="p-[6px] bg-white border border-line-strong rounded-md text-ink-2 hover:bg-surface-hover">
         <Bell className="w-4 h-4" strokeWidth={1.7} />
       </button>
-      <button className="px-3 py-[6px] bg-white border border-line-strong rounded-md text-[12px] text-ink-2 hover:bg-surface-hover flex items-center gap-1">
+      <button className="hidden sm:flex px-3 py-[6px] bg-white border border-line-strong rounded-md text-[12px] text-ink-2 hover:bg-surface-hover items-center gap-1">
         Logística Argentina SRL
         <ChevronDown className="w-3 h-3" />
       </button>

@@ -50,6 +50,12 @@ class AuditoriaController
         return response()->json($query->paginate($perPage));
     }
 
+    public function show(int $id): JsonResponse
+    {
+        $row = AuditLog::findOrFail($id);
+        return response()->json(['data' => $row]);
+    }
+
     public function verificarCadena(Request $request): JsonResponse
     {
         $empresaId = $request->query('empresa_id')

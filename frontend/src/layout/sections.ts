@@ -1,9 +1,9 @@
 import {
   ArrowLeftRight, Banknote, BookOpen, BookText, Box, Building2,
-  Calculator, CalendarCheck, ClipboardList, CloudCog, Coins,
-  FileBarChart, FileText, Landmark, LayoutDashboard, ListTree, Lock,
+  Calculator, CalendarCheck, ClipboardList, CloudCog, Coins, Cog,
+  FileBarChart, FileText, History, Landmark, LayoutDashboard, ListTree, Lock,
   PieChart, Receipt, Scale, ScrollText, ShieldCheck, ShoppingCart,
-  Split, Tag, TrendingUp, Truck, Users, Wallet, Wrench,
+  Split, Tag, TrendingUp, Truck, UserCog, Users, Wallet, Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -117,6 +117,19 @@ export const sections: NavSection[] = [
       { to: '/erp/arca/padron', label: 'Padrón AFIP', icon: ShieldCheck },
       { to: '/erp/arca/constatacion', label: 'Constatación CAE', icon: ShieldCheck },
       { to: '/erp/arca/mis-comprobantes', label: 'Mis Comprobantes (scraper)', icon: Truck },
+    ],
+  },
+  {
+    label: 'Administración',
+    items: [
+      { to: '/erp/admin/empresas', label: 'Empresas', icon: Building2 },
+      { to: '/erp/admin/usuarios', label: 'Usuarios', icon: UserCog },
+      { to: '/erp/admin/roles-permisos', label: 'Roles y permisos', icon: ShieldCheck },
+      { to: '/erp/admin/diarios', label: 'Diarios contables', icon: BookText },
+      { to: '/erp/admin/centros-costo', label: 'Centros de Costo', icon: Tag },
+      { to: '/erp/admin/auxiliares', label: 'Auxiliares', icon: Users },
+      { to: '/erp/admin/configuracion', label: 'Configuración', icon: Cog },
+      { to: '/erp/admin/auditoria', label: 'Auditoría (log)', icon: History },
     ],
   },
   {

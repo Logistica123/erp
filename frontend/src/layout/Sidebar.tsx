@@ -29,6 +29,7 @@ import {
   ShieldCheck,
   Tag,
   CloudCog,
+  Lock,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { auth } from '@/lib/auth';
@@ -75,6 +76,7 @@ const sections: NavSection[] = [
       { to: '/erp/transferencias', label: 'Transferencias int.', icon: Split },
       { to: '/erp/arqueos', label: 'Arqueos de caja', icon: Calculator },
       { to: '/erp/conciliacion', label: 'Conciliación', icon: Split },
+      { to: '/erp/cierres-diarios', label: 'Cierres diarios', icon: Lock },
     ],
   },
   {

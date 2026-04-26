@@ -53,6 +53,7 @@ import { CCPrestamosPage } from './pages/Sueldos/CCPrestamosPage';
 import { LiquidacionesPage as LiquidacionesSueldosPage } from './pages/Sueldos/LiquidacionesPage';
 import { LiberPage } from './pages/Sueldos/LiberPage';
 import { ReportesSueldosPage } from './pages/Sueldos/ReportesSueldosPage';
+import { CierresDiariosPage } from './pages/CierresDiariosPage';
 import { auth } from './lib/auth';
 import type { ReactNode } from 'react';
 
@@ -160,6 +161,9 @@ export default function App() {
               <Route path="/erp/sueldos/liquidaciones" element={<LiquidacionesSueldosPage />} handle={{ crumb: 'Liquidaciones' }} />
               <Route path="/erp/sueldos/liber" element={<LiberPage />} handle={{ crumb: 'Export LIBER' }} />
               <Route path="/erp/sueldos/reportes" element={<ReportesSueldosPage />} handle={{ crumb: 'Reportes Sueldos' }} />
+
+              {/* Cierres Diarios — anexo SPEC Conciliación Multibanco */}
+              <Route path="/erp/cierres-diarios" element={<CierresDiariosPage />} handle={{ crumb: 'Cierres diarios' }} />
             </Route>
             <Route path="*" element={<Navigate to="/erp/dashboard" replace />} />
           </Routes>

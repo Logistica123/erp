@@ -6,6 +6,7 @@ import { AsientosPage } from './pages/AsientosPage';
 import { BalanceSSPage } from './pages/BalanceSSPage';
 import { BancosPage } from './pages/BancosPage';
 import { ConciliacionPage } from './pages/ConciliacionPage';
+import { ConciliacionReglasPage } from './pages/ConciliacionReglasPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EstadosContablesPage } from './pages/EstadosContablesPage';
 import { FacturacionPage } from './pages/FacturacionPage';
@@ -103,6 +104,7 @@ export default function App() {
               <Route path="/erp/libro-iva-ventas" element={<LibroIvaVentasPage />} handle={{ crumb: 'Libro IVA Ventas' }} />
               <Route path="/erp/bancos" element={<BancosPage />} handle={{ crumb: 'Bancos' }} />
               <Route path="/erp/conciliacion" element={<ConciliacionPage />} handle={{ crumb: 'Conciliación' }} />
+              <Route path="/erp/conciliacion-reglas" element={<ConciliacionReglasPage />} handle={{ crumb: 'Reglas conciliación' }} />
               <Route path="/erp/ordenes-pago" element={<OrdenesPagoPage />} handle={{ crumb: 'Órdenes de pago' }} />
 
               {/* F2 — Tesorería */}

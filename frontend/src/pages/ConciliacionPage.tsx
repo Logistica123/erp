@@ -19,6 +19,11 @@ type MovimientoBancario = {
   cuenta_bancaria_id: number;
   cuenta_bancaria: { id: number; codigo: string; nombre: string };
   asiento_id: number | null;
+  cuit_contraparte: string | null;
+  nombre_contraparte: string | null;
+  confianza_match: number | null;
+  etiqueta_sugerida: string | null;
+  regla_aplicada_id: number | null;
 };
 type Cuenta = { id: number; codigo: string; nombre: string; imputable: boolean; admite_cc: boolean; admite_auxiliar: boolean };
 type Auxiliar = { id: number; codigo: string; nombre: string; tipo: string };
@@ -33,6 +38,8 @@ export function ConciliacionPage() {
   const [ignorar, setIgnorar] = useState<MovimientoBancario | null>(null);
   const [nuevoMov, setNuevoMov] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkAccion, setBulkAccion] = useState<'CONCILIAR_CONTRA_CUENTA' | 'IGNORAR' | null>(null);
 
   const { data: cuentasBanc } = useQuery<{ data: CuentaBancaria[] }>({
     queryKey: ['cuentas-bancarias'],
@@ -68,6 +75,21 @@ export function ConciliacionPage() {
         <div className="mb-4 p-3 bg-danger-bg text-danger border border-danger/30 rounded-md text-[12px]">{err}</div>
       )}
 
+      {selected.size > 0 && (
+        <div className="mb-3 p-3 bg-navy-50 border border-navy-200 rounded-md flex items-center gap-3 text-[12px]">
+          <span className="font-medium text-navy-800">{selected.size} mov{selected.size > 1 ? 's' : ''} seleccionado{selected.size > 1 ? 's' : ''}</span>
+          <Button size="sm" variant="primary" onClick={() => setBulkAccion('CONCILIAR_CONTRA_CUENTA')}>
+            <Check className="w-3 h-3" /> Conciliar contra cuenta…
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setBulkAccion('IGNORAR')}>
+            <X className="w-3 h-3" /> Ignorar todos…
+          </Button>
+          <button className="ml-auto text-ink-muted hover:text-ink-2 text-[11px]" onClick={() => setSelected(new Set())}>
+            Limpiar selección
+          </button>
+        </div>
+      )}
+
       <Card>
         <CardHeader
           title="Movimientos bancarios"
@@ -101,27 +123,75 @@ export function ConciliacionPage() {
           <table className="w-full border-collapse text-[12px]">
             <thead>
               <tr className="bg-surface-hover border-b border-line-strong">
+                <th className="w-[28px] px-[6px] py-[7px] text-center">
+                  <input
+                    type="checkbox"
+                    checked={!!movs?.data.length && movs.data.every((m) => selected.has(m.id))}
+                    onChange={(e) => {
+                      const all = movs?.data.map((m) => m.id) ?? [];
+                      setSelected(e.target.checked ? new Set(all) : new Set());
+                    }}
+                  />
+                </th>
                 <th className="px-[10px] py-[7px] text-left text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[90px]">Fecha</th>
                 <th className="px-[10px] py-[7px] text-left text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[120px]">Cuenta banc.</th>
                 <th className="px-[10px] py-[7px] text-left text-[11px] font-semibold text-navy-800 uppercase tracking-wider">Concepto</th>
-                <th className="px-[10px] py-[7px] text-right text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[120px]">Débito</th>
-                <th className="px-[10px] py-[7px] text-right text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[120px]">Crédito</th>
+                <th className="px-[10px] py-[7px] text-left text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[200px]">Contraparte</th>
+                <th className="px-[10px] py-[7px] text-right text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[100px]">Débito</th>
+                <th className="px-[10px] py-[7px] text-right text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[100px]">Crédito</th>
                 <th className="px-[10px] py-[7px] text-left text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[120px]">Estado</th>
                 <th className="w-[200px]" />
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={7} className="py-10 text-center text-ink-muted"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Cargando…</td></tr>
+                <tr><td colSpan={9} className="py-10 text-center text-ink-muted"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Cargando…</td></tr>
               )}
               {movs?.data.length === 0 && !isLoading && (
-                <tr><td colSpan={7} className="py-10 text-center text-ink-muted"><AlertCircle className="w-4 h-4 inline mr-1" />No hay movimientos.</td></tr>
+                <tr><td colSpan={9} className="py-10 text-center text-ink-muted"><AlertCircle className="w-4 h-4 inline mr-1" />No hay movimientos.</td></tr>
               )}
               {movs?.data.map((m, i) => (
-                <tr key={m.id} className={`border-b border-line hover:bg-surface-hover ${i % 2 ? 'bg-surface-row' : ''}`}>
+                <tr key={m.id} className={`border-b border-line hover:bg-surface-hover ${i % 2 ? 'bg-surface-row' : ''} ${selected.has(m.id) ? 'bg-blue-50/50' : ''}`}>
+                  <td className="px-[6px] py-[7px] text-center">
+                    {(m.estado === 'PENDIENTE' || m.estado === 'ETIQUETADO') && (
+                      <input
+                        type="checkbox"
+                        checked={selected.has(m.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          if (e.target.checked) next.add(m.id); else next.delete(m.id);
+                          setSelected(next);
+                        }}
+                      />
+                    )}
+                  </td>
                   <td className="px-[10px] py-[7px] tabular text-ink-2">{m.fecha.slice(0, 10)}</td>
                   <td className="px-[10px] py-[7px] font-mono text-[11px] text-navy-700">{m.cuenta_bancaria.codigo}</td>
-                  <td className="px-[10px] py-[7px] text-ink-2">{m.concepto}</td>
+                  <td className="px-[10px] py-[7px] text-ink-2">
+                    {m.concepto}
+                    {m.etiqueta_sugerida === 'PASANTE_MP' && (
+                      <span className="ml-2 px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-700 font-medium">PASANTE MP</span>
+                    )}
+                  </td>
+                  <td className="px-[10px] py-[7px] text-[11px]">
+                    {m.nombre_contraparte ? (
+                      <div>
+                        <div className="text-ink-2">{m.nombre_contraparte}</div>
+                        <div className="flex items-center gap-1 text-ink-muted text-[10px]">
+                          {m.cuit_contraparte && <span className="font-mono">{m.cuit_contraparte}</span>}
+                          {m.confianza_match !== null && (
+                            <span className={`px-1 rounded ${
+                              m.confianza_match >= 80 ? 'bg-success-bg text-success'
+                                : m.confianza_match >= 50 ? 'bg-amber-100 text-amber-700'
+                                : 'bg-line text-ink-muted'
+                            }`}>
+                              {m.confianza_match}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : <span className="text-ink-muted">—</span>}
+                  </td>
                   <td className={`px-[10px] py-[7px] text-right tabular ${Number(m.debito) ? 'text-danger font-medium' : 'text-ink-muted'}`}>
                     {Number(m.debito) ? fmtMoney(Number(m.debito)) : '—'}
                   </td>
@@ -192,7 +262,143 @@ export function ConciliacionPage() {
         }}
         onError={setErr}
       />
+
+      <BulkModal
+        accion={bulkAccion}
+        ids={[...selected]}
+        onClose={() => setBulkAccion(null)}
+        onSuccess={() => {
+          setBulkAccion(null);
+          setSelected(new Set());
+          qc.invalidateQueries({ queryKey: ['mov-banc'] });
+        }}
+        onError={setErr}
+      />
     </>
+  );
+}
+
+function BulkModal({
+  accion,
+  ids,
+  onClose,
+  onSuccess,
+  onError,
+}: {
+  accion: 'CONCILIAR_CONTRA_CUENTA' | 'IGNORAR' | null;
+  ids: number[];
+  onClose: () => void;
+  onSuccess: () => void;
+  onError: (e: string) => void;
+}) {
+  const [cuentaContableId, setCuentaContableId] = useState<number | ''>('');
+  const [motivoId, setMotivoId] = useState<number | ''>('');
+  const [observacion, setObservacion] = useState('');
+
+  const { data: cuentasResp } = useQuery<{ data: Cuenta[] }>({
+    queryKey: ['cuentas', 'imputables'],
+    queryFn: () => api.get('/api/erp/cuentas?imputable=true'),
+    enabled: !!accion,
+  });
+  const { data: motivos } = useQuery<{ data: Motivo[] }>({
+    queryKey: ['motivos-ignorado'],
+    queryFn: async () => ({
+      data: [
+        { id: 1, codigo: 'COMISION_BANC', descripcion: 'Comisión bancaria' },
+        { id: 2, codigo: 'IMP_LEY_25413', descripcion: 'Imp. Ley 25413' },
+        { id: 3, codigo: 'NO_CONCERNIENTE', descripcion: 'No concierne a la empresa' },
+      ],
+    }),
+    enabled: accion === 'IGNORAR',
+  });
+
+  const submit = useMutation<{ data: { exitos: number; errores: number } }>({
+    mutationFn: () =>
+      api.post('/api/erp/movimientos-bancarios/batch', {
+        accion,
+        ids,
+        payload:
+          accion === 'CONCILIAR_CONTRA_CUENTA'
+            ? { cuenta_contable_contraparte_id: cuentaContableId, observacion: observacion || null }
+            : { motivo_ignorado_id: motivoId, observacion: observacion || null },
+      }) as Promise<{ data: { exitos: number; errores: number } }>,
+    onSuccess: (resp) => {
+      if (resp.data.errores > 0) {
+        onError(`Bulk: ${resp.data.exitos} OK, ${resp.data.errores} con error.`);
+      }
+      onSuccess();
+    },
+    onError: (e) => onError(e instanceof ApiError ? e.message : 'Error'),
+  });
+
+  if (!accion) return null;
+  const titulo = accion === 'CONCILIAR_CONTRA_CUENTA' ? 'Conciliar en lote' : 'Ignorar en lote';
+  const puedeEnviar = accion === 'CONCILIAR_CONTRA_CUENTA' ? !!cuentaContableId : !!motivoId;
+
+  return (
+    <Modal
+      open={!!accion}
+      onClose={onClose}
+      title={`${titulo} (${ids.length} mov${ids.length > 1 ? 's' : ''})`}
+      size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" disabled={!puedeEnviar || submit.isPending} onClick={() => submit.mutate()}>
+            {submit.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+            Aplicar a {ids.length} movimientos
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {accion === 'CONCILIAR_CONTRA_CUENTA' ? (
+          <div>
+            <label className="block text-[11px] font-semibold text-ink-muted uppercase tracking-wider mb-1">
+              Cuenta contable contraparte
+            </label>
+            <select
+              value={cuentaContableId}
+              onChange={(e) => setCuentaContableId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full px-[9px] py-[6px] text-[13px] border border-line-strong rounded-md bg-white"
+            >
+              <option value="">Seleccionar cuenta…</option>
+              {cuentasResp?.data.map((c) => (
+                <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-[11px] font-semibold text-ink-muted uppercase tracking-wider mb-1">
+              Motivo
+            </label>
+            <select
+              value={motivoId}
+              onChange={(e) => setMotivoId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full px-[9px] py-[6px] text-[13px] border border-line-strong rounded-md bg-white"
+            >
+              <option value="">Seleccionar motivo…</option>
+              {motivos?.data.map((m) => (
+                <option key={m.id} value={m.id}>{m.descripcion}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-[11px] font-semibold text-ink-muted uppercase tracking-wider mb-1">
+            Observación (opcional)
+          </label>
+          <input
+            value={observacion}
+            onChange={(e) => setObservacion(e.target.value)}
+            placeholder="Aplicada en lote"
+            className="w-full px-[9px] py-[6px] text-[13px] border border-line-strong rounded-md bg-white"
+          />
+        </div>
+      </div>
+    </Modal>
   );
 }
 

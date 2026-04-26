@@ -792,5 +792,25 @@ Route::prefix('api/erp')->group(function () {
             Route::get('/reportes/empleado/{id}/cc',          [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'ccEmpleado'])
                 ->whereNumber('id')->name('erp.sueldos.rep.cc');
         });
+
+        // ====================================================================
+        // Anexo Cierres Diarios — workflow + ajuste retroactivo + exports.
+        // ====================================================================
+        Route::prefix('cierres-diarios')->group(function () {
+            Route::get('/',                              [\App\Erp\Http\Controllers\CierresDiariosController::class, 'index'])
+                ->name('erp.cierres.dia.index');
+            Route::get('/{fecha}',                       [\App\Erp\Http\Controllers\CierresDiariosController::class, 'show'])
+                ->name('erp.cierres.dia.show');
+            Route::post('/{fecha}/iniciar',              [\App\Erp\Http\Controllers\CierresDiariosController::class, 'iniciar'])
+                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.iniciar');
+            Route::post('/{fecha}/sellar',               [\App\Erp\Http\Controllers\CierresDiariosController::class, 'sellar'])
+                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.sellar');
+            Route::post('/{fecha}/ajuste-retroactivo',   [\App\Erp\Http\Controllers\CierresDiariosController::class, 'ajusteRetroactivo'])
+                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.ajuste');
+            Route::get('/{fecha}/exportar-liber',        [\App\Erp\Http\Controllers\CierresDiariosController::class, 'exportarLiber'])
+                ->name('erp.cierres.dia.export.liber');
+            Route::get('/{fecha}/exportar-pdf',          [\App\Erp\Http\Controllers\CierresDiariosController::class, 'exportarPdf'])
+                ->name('erp.cierres.dia.export.pdf');
+        });
     });
 });

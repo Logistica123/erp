@@ -2,6 +2,7 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Services\SaldosClientesService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +21,8 @@ use Illuminate\Support\Facades\DB;
  */
 class ReportesVentasComprasController extends Controller
 {
+    public function __construct(private readonly SaldosClientesService $saldos) {}
+
     public function libroIvaCompras(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -122,7 +125,29 @@ class ReportesVentasComprasController extends Controller
 
     public function antiguedadSaldos(Request $request): JsonResponse
     {
-        return $this->antiguedad('venta');
+        $hoy = Carbon::today();
+        $items = [];
+        foreach ($this->saldos->saldosPorCliente($hoy) as $row) {
+            $aging = $this->saldos->aging($row['auxiliar_id'], $hoy);
+            $items[] = array_merge($row, $aging, ['cantidad_facturas' => 1]);
+        }
+        usort($items, fn ($a, $b) => $b['saldo'] <=> $a['saldo']);
+
+        $tot = fn ($k) => round(array_sum(array_column($items, $k)), 2);
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'tipo' => 'clientes',
+                'items' => $items,
+                'totales' => [
+                    'rango_0_30'    => $tot('rango_0_30'),
+                    'rango_31_60'   => $tot('rango_31_60'),
+                    'rango_61_90'   => $tot('rango_61_90'),
+                    'rango_91_plus' => $tot('rango_91_plus'),
+                    'total'         => $tot('saldo'),
+                ],
+            ],
+        ]);
     }
 
     public function antiguedadProveedores(Request $request): JsonResponse

@@ -2,6 +2,7 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Services\SaldosClientesService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
@@ -12,6 +13,8 @@ use Illuminate\Support\Facades\DB;
  */
 class DashboardController extends Controller
 {
+    public function __construct(private readonly SaldosClientesService $saldos) {}
+
     public function stats(): JsonResponse
     {
         $empresaId = 1;
@@ -34,21 +37,13 @@ class DashboardController extends Controller
             ')
             ->first();
 
-        // Saldo a cobrar (con IVA, a hoy) — alineado con Aging clientes:
-        // facturas + NC en estados pendientes (CONTROLADA / COBRO_PARCIAL),
-        // neteando con tc.signo (FACTURA=+1, NC=-1). EMITIDA queda fuera porque
-        // todavía no transicionó por contabilidad.
-        $pendientes = DB::table('erp_facturas_venta as f')
-            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
-            ->where('f.empresa_id', $empresaId)
-            ->whereIn('f.estado', ['CONTROLADA', 'COBRO_PARCIAL'])
-            ->whereIn('tc.clase', ['FACTURA', 'NOTA_CREDITO'])
-            ->whereNull('f.deleted_at')
-            ->selectRaw('
-                SUM(CASE WHEN tc.clase = "FACTURA" THEN 1 ELSE 0 END) as cant,
-                COALESCE(SUM(f.imp_total * tc.signo), 0) as total
-            ')
-            ->first();
+        // Saldo a cobrar (con IVA, a hoy) — single source of truth via
+        // SaldosClientesService que lee directo de la cuenta contable
+        // 1.1.4.01 Deudores por Ventas (debe − haber). Suma facturas, resta
+        // NC y cobros automáticamente porque cada uno generó su asiento.
+        $saldoTotal = $this->saldos->saldoTotal($hoy, $empresaId);
+        $cantPendientes = count($this->saldos->saldosPorCliente($hoy, $empresaId));
+        $pendientes = (object) ['cant' => $cantPendientes, 'total' => $saldoTotal];
 
         // Evolución últimos 6 meses (facturado neto + total)
         $seisMeses = [];

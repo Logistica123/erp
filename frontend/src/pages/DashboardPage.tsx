@@ -151,9 +151,9 @@ export function DashboardPage() {
           accent="success"
         />
         <Kpi
-          label="Por cobrar"
+          label="Saldo a cobrar (con IVA, hoy)"
           value={fmtMoney(data.por_cobrar.total)}
-          sub={`${data.por_cobrar.cant} facturas pendientes`}
+          sub={`Facturas pendientes − NC · ${data.por_cobrar.cant} facturas`}
           accent="warning"
         />
         <Kpi

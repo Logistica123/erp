@@ -20,11 +20,14 @@ export function useApi<T>(
   return useQuery<T, ApiError>({
     queryKey: key,
     queryFn: async ({ signal }) => {
-      const resp = await api.get<{ ok: boolean; data: T; error?: { code: string; message: string } }>(
+      const resp = await api.get<{ ok?: boolean; data: T; error?: { code: string; message: string } }>(
         path,
         signal
       );
-      if (!resp.ok) {
+      // Convención: el backend devuelve {ok, data} en endpoints nuevos. Algunos
+      // endpoints viejos solo devuelven {data}. Solo tratamos como error si ok
+      // viene explícitamente false.
+      if (resp.ok === false) {
         throw new ApiError(409, resp, resp.error?.message ?? 'Error del backend');
       }
       return resp.data;
@@ -54,7 +57,7 @@ export function useApiMutation<TData, TVars = unknown>(
   return useMutation<TData, ApiError, TVars>({
     mutationFn: async (vars) => {
       const resp = await fn(vars);
-      if (!resp.ok) {
+      if (resp.ok === false) {
         throw new ApiError(409, resp, resp.error?.message ?? 'Error del backend');
       }
       return resp.data;

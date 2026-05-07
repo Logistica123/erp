@@ -19,11 +19,11 @@ class DashboardController extends Controller
         $inicioMes = $hoy->copy()->startOfMonth()->toDateString();
         $finMes = $hoy->copy()->endOfMonth()->toDateString();
 
-        // Facturas mes (signadas: NC resta)
+        // Facturas mes (signadas: NC resta) — todos los estados activos.
         $mesTotales = DB::table('erp_facturas_venta as f')
             ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
             ->where('f.empresa_id', $empresaId)
-            ->where('f.estado', 'EMITIDA')
+            ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL', 'COBRADA'])
             ->whereBetween('f.fecha_emision', [$inicioMes, $finMes])
             ->whereNull('f.deleted_at')
             ->selectRaw('
@@ -34,14 +34,20 @@ class DashboardController extends Controller
             ')
             ->first();
 
-        // Facturas pendientes de cobro
+        // Saldo a cobrar (con IVA, a hoy) — alineado con Aging clientes:
+        // facturas + NC en estados pendientes (CONTROLADA / COBRO_PARCIAL),
+        // neteando con tc.signo (FACTURA=+1, NC=-1). EMITIDA queda fuera porque
+        // todavía no transicionó por contabilidad.
         $pendientes = DB::table('erp_facturas_venta as f')
             ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
             ->where('f.empresa_id', $empresaId)
-            ->where('f.estado', 'EMITIDA')
-            ->whereIn('tc.clase', ['FACTURA'])  // notas crédito no son cobrables
+            ->whereIn('f.estado', ['CONTROLADA', 'COBRO_PARCIAL'])
+            ->whereIn('tc.clase', ['FACTURA', 'NOTA_CREDITO'])
             ->whereNull('f.deleted_at')
-            ->selectRaw('COUNT(*) as cant, COALESCE(SUM(f.imp_total), 0) as total')
+            ->selectRaw('
+                SUM(CASE WHEN tc.clase = "FACTURA" THEN 1 ELSE 0 END) as cant,
+                COALESCE(SUM(f.imp_total * tc.signo), 0) as total
+            ')
             ->first();
 
         // Evolución últimos 6 meses (facturado neto + total)
@@ -53,7 +59,7 @@ class DashboardController extends Controller
             $row = DB::table('erp_facturas_venta as f')
                 ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
                 ->where('f.empresa_id', $empresaId)
-                ->where('f.estado', 'EMITIDA')
+                ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL', 'COBRADA'])
                 ->whereBetween('f.fecha_emision', [$ini, $fin])
                 ->whereNull('f.deleted_at')
                 ->selectRaw('COUNT(*) as cant, COALESCE(SUM(f.imp_total * tc.signo), 0) as total')

@@ -142,10 +142,13 @@ export function FacturacionPage() {
         <Card>
           <CardBody>
             <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Total neto
+              Total neto del período (sin IVA)
             </div>
             <div className="mt-2 text-2xl font-bold text-gray-900">
               {fmtMoney(totales.total - totales.iva)}
+            </div>
+            <div className="text-[11px] text-gray-500 mt-1">
+              Suma de la base imponible de las facturas filtradas
             </div>
           </CardBody>
         </Card>

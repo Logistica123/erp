@@ -2,6 +2,7 @@
 
 namespace App\Erp\Services\LibroIva;
 
+use App\Erp\Services\ExcelParserService;
 use DomainException;
 use Illuminate\Support\Carbon;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -117,6 +118,82 @@ class ParserLibroIva
         }
 
         return $filas;
+    }
+
+    /**
+     * ADDENDUM v1.10 RN-RP-2/RN-RP-3 — variante con diagnóstico:
+     *   - Acumula errores en lugar de silenciar (return null en parsearFila).
+     *   - Reporta stats: total / procesadas / skipped (vacías) / con error.
+     *   - Las filas correctas se devuelven igual; el operador puede importar
+     *     parcial y reimportar las que corrija después (idempotencia por
+     *     hash_linea en el caller).
+     *
+     * @return array{
+     *   filas: array<int, FilaLibroIva>,
+     *   stats: array{totales:int, procesadas:int, skipped:int, errores:int},
+     *   errores: array<int, array{row:int, motivo:string}>
+     * }
+     */
+    public function parseConDiagnostico(string $path, ExcelParserService $parser): array
+    {
+        if (! is_readable($path)) {
+            throw new DomainException("FORMATO_INVALIDO: no se pudo abrir {$path}");
+        }
+
+        // Detectar header con la lógica existente (lee el archivo entero).
+        try {
+            $reader = IOFactory::createReaderForFile($path);
+            $reader->setReadDataOnly(true);
+            $sheet = $reader->load($path)->getActiveSheet();
+        } catch (\Throwable $e) {
+            throw new DomainException('FORMATO_INVALIDO: no es un XLSX/CSV válido — '.$e->getMessage());
+        }
+        $rowsHead = $sheet->toArray(null, true, false, false);
+        [$headerRowIdx, $headerMap] = $this->detectarHeader($rowsHead);
+        if ($headerRowIdx === null) {
+            throw new DomainException('FORMATO_INVALIDO: no se detectaron columnas conocidas');
+        }
+
+        $filas = [];
+        $errores = [];
+        $procesadas = 0;
+        // ExcelParser usa 1-based; filaInicio = headerRowIdx + 2 (header está en headerRowIdx 0-based)
+        $filaInicio = $headerRowIdx + 2;
+        $totales = $parser->contarFilasArchivo($path);
+
+        foreach ($parser->iterarFilasNoVacias($path, $filaInicio) as $entry) {
+            try {
+                $fila = $this->parsearFila($entry['values'], $headerMap);
+                if ($fila !== null) {
+                    $filas[] = $fila;
+                    $procesadas++;
+                } else {
+                    // parsearFila devolvió null pero la fila tenía datos:
+                    // típicamente fecha o tipo_cbte vacío.
+                    $errores[] = [
+                        'row' => $entry['row_number'],
+                        'motivo' => 'fila incompleta (falta fecha o tipo de comprobante)',
+                    ];
+                }
+            } catch (\Throwable $e) {
+                $errores[] = ['row' => $entry['row_number'], 'motivo' => $e->getMessage()];
+            }
+        }
+
+        // Skipped vacías: total - filaInicio + 1 - (procesadas + errores)
+        $filasUtiles = max(0, $totales - $filaInicio + 1);
+        $skipped = max(0, $filasUtiles - $procesadas - count($errores));
+
+        return [
+            'filas' => $filas,
+            'stats' => [
+                'totales' => $totales,
+                'procesadas' => $procesadas,
+                'skipped' => $skipped,
+                'errores' => count($errores),
+            ],
+            'errores' => $errores,
+        ];
     }
 
     /**

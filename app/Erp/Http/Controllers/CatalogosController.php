@@ -178,7 +178,7 @@ class CatalogosController
         }
 
         return response()->json([
-            'data' => $query->limit(50)->get(['id', 'tipo', 'codigo', 'nombre', 'cuit']),
+            'data' => $query->limit(50)->get(['id', 'tipo', 'codigo', 'nombre', 'cuit', 'cuenta_contable_default_id']),
         ]);
     }
 

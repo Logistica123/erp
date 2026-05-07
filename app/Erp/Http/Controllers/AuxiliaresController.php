@@ -90,15 +90,27 @@ class AuxiliaresController
             'manual.codigo' => ['nullable', 'string', 'max:30'],
             'manual.nombre' => ['nullable', 'string', 'max:250'],
             'manual.cuit' => ['nullable', 'string', 'max:20'],
+            'cuenta_contable_default_id' => ['nullable', 'integer', 'exists:erp_cuentas_contables,id'],
         ]);
 
         $empresaId = $data['empresa_id'] ?? ($request->user()->erpPerfil?->empresa_id ?? 1);
+        // ADDENDUM v1.10 — autocomplete cuenta_default según tipo si no vino.
+        $cuentaDefaultId = $data['cuenta_contable_default_id']
+            ?? $this->cuentaDefaultPorTipo($empresaId, $data['tipo']);
 
         try {
             if (! empty($data['desde_distriapp']['persona_id'])) {
                 $row = $this->bridge->crearDesdePersona((int) $data['desde_distriapp']['persona_id'], $empresaId);
+                if ($cuentaDefaultId && empty($row['cuenta_contable_default_id'])) {
+                    Auxiliar::where('id', $row['id'])->update(['cuenta_contable_default_id' => $cuentaDefaultId]);
+                    $row['cuenta_contable_default_id'] = $cuentaDefaultId;
+                }
             } elseif (! empty($data['desde_distriapp']['cliente_id'])) {
                 $row = $this->bridge->crearDesdeCliente((int) $data['desde_distriapp']['cliente_id'], $empresaId);
+                if ($cuentaDefaultId && empty($row['cuenta_contable_default_id'])) {
+                    Auxiliar::where('id', $row['id'])->update(['cuenta_contable_default_id' => $cuentaDefaultId]);
+                    $row['cuenta_contable_default_id'] = $cuentaDefaultId;
+                }
             } elseif (! empty($data['manual'])) {
                 $m = $data['manual'];
                 $aux = Auxiliar::create([
@@ -107,6 +119,7 @@ class AuxiliaresController
                     'codigo' => $m['codigo'] ?? 'MAN-'.now()->timestamp,
                     'nombre' => $m['nombre'] ?? '',
                     'cuit' => isset($m['cuit']) ? preg_replace('/[^0-9]/', '', $m['cuit']) : null,
+                    'cuenta_contable_default_id' => $cuentaDefaultId,
                     'activo' => true,
                 ]);
                 $row = $aux->toArray();
@@ -124,6 +137,45 @@ class AuxiliaresController
         }
 
         return response()->json(['ok' => true, 'data' => $row], 201);
+    }
+
+    /**
+     * ADDENDUM v1.10 — PATCH /auxiliares/{id} para actualizar la cuenta
+     * default y otros campos editables del auxiliar. RN-CA-3 garantizado por
+     * naturaleza: este update solo afecta operaciones futuras; los asientos
+     * históricos ya fueron grabados con la cuenta vigente al momento de
+     * asentar y no se tocan acá.
+     */
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $auxiliar = Auxiliar::findOrFail($id);
+        $data = $request->validate([
+            'nombre' => ['nullable', 'string', 'max:250'],
+            'cuit' => ['nullable', 'string', 'max:20'],
+            'activo' => ['nullable', 'boolean'],
+            'cuenta_contable_default_id' => ['nullable', 'integer', 'exists:erp_cuentas_contables,id'],
+        ]);
+        if (isset($data['cuit']) && $data['cuit']) {
+            $data['cuit'] = preg_replace('/[^0-9]/', '', $data['cuit']);
+        }
+        $auxiliar->update($data);
+        return response()->json(['ok' => true, 'data' => $auxiliar->fresh()->load('cuentaDefault:id,codigo,nombre')]);
+    }
+
+    /**
+     * Helper interno: devuelve el id de la cuenta default sugerida según
+     * el tipo de auxiliar. NULL si no hay mapeo (Socio, Vehiculo, Bien, etc).
+     */
+    private function cuentaDefaultPorTipo(int $empresaId, string $tipo): ?int
+    {
+        $codigo = Auxiliar::CUENTA_DEFAULT_POR_TIPO[$tipo] ?? null;
+        if (! $codigo) {
+            return null;
+        }
+        $id = DB::table('erp_cuentas_contables')
+            ->where('empresa_id', $empresaId)->where('codigo', $codigo)
+            ->value('id');
+        return $id ? (int) $id : null;
     }
 
     public function saldo(Request $request, int $id): JsonResponse

@@ -70,6 +70,8 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/auxiliares', [CatalogosController::class, 'auxiliares'])->name('erp.auxiliares');
         Route::get('/auxiliares/buscar', [AuxiliaresController::class, 'buscar'])->name('erp.auxiliares.buscar');
         Route::post('/auxiliares', [AuxiliaresController::class, 'store'])->name('erp.auxiliares.store');
+        Route::patch('/auxiliares/{id}', [AuxiliaresController::class, 'update'])
+            ->whereNumber('id')->name('erp.auxiliares.update');
         Route::get('/auxiliares/{id}/saldo', [AuxiliaresController::class, 'saldo'])
             ->whereNumber('id')->name('erp.auxiliares.saldo');
         Route::get('/bancos', [CatalogosController::class, 'bancos'])->name('erp.bancos');

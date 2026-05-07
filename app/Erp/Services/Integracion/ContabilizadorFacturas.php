@@ -279,7 +279,7 @@ class ContabilizadorFacturas
         if (! $cuentaIvaCf) {
             throw new \RuntimeException('Cuenta IVA Crédito Fiscal no existe');
         }
-        $cuentaGasto = $this->resolverCuentaGasto($empresaId, $f->centro_costo_id);
+        $cuentaGasto = $this->resolverCuentaGasto($empresaId, $f->centro_costo_id, $f->auxiliar_id);
 
         $netoSinIva = round(
             (float) $f->imp_neto_gravado + (float) $f->imp_no_gravado + (float) $f->imp_exento, 2
@@ -399,9 +399,30 @@ class ContabilizadorFacturas
         return $asiento;
     }
 
-    private function resolverCuentaGasto(int $empresaId, ?int $ccId): int
+    /**
+     * ADDENDUM v1.10 — prioridad de resolución:
+     *   1. Cuenta default asignada al auxiliar (cuenta_contable_default_id).
+     *      Solo se usa si la cuenta default NO es la cuenta de proveedores
+     *      (2.1.1.*) — esa va al haber, no al debe del gasto.
+     *   2. Fallback: primera 5.1.* imputable.
+     */
+    private function resolverCuentaGasto(int $empresaId, ?int $ccId, ?int $auxiliarId = null): int
     {
-        // Fallback: buscar primera cuenta '5.1.*' imputable
+        if ($auxiliarId) {
+            $row = DB::table('erp_auxiliares as a')
+                ->leftJoin('erp_cuentas_contables as c', 'c.id', '=', 'a.cuenta_contable_default_id')
+                ->where('a.id', $auxiliarId)
+                ->select('c.id', 'c.codigo', 'c.imputable')
+                ->first();
+            // Usar default solo si es una cuenta de gasto/imputable y no es de proveedores
+            // (que ya se usa como contrapartida).
+            if ($row && $row->id && $row->imputable
+                && ! str_starts_with((string) $row->codigo, '2.1.1.')
+                && ! str_starts_with((string) $row->codigo, '1.1.4.')) {
+                return (int) $row->id;
+            }
+        }
+
         $id = DB::table('erp_cuentas_contables')
             ->where('empresa_id', $empresaId)
             ->where('codigo', 'like', '5.1%')

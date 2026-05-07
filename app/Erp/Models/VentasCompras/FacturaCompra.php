@@ -32,6 +32,8 @@ class FacturaCompra extends Model
         'observaciones', 'motivo_observacion', 'adjunto_url',
         'centro_costo_id', 'asiento_id',
         'created_by_user_id', 'controlada_by_user_id', 'controlada_at',
+        // Addendum v1.9 (reescrito) — import enriquecido del Libro IVA Compras
+        'no_tomada', 'cliente_auxiliar_id', 'periodo_pagado_texto', 'tipo_gasto', 'import_id',
     ];
 
     protected $casts = [
@@ -41,6 +43,7 @@ class FacturaCompra extends Model
         'fecha_vto_cae' => 'date',
         'fecha_imputacion' => 'date',
         'imputacion_diferida' => 'boolean',
+        'no_tomada' => 'boolean',
         'controlada_at' => 'datetime',
         'cotizacion' => 'decimal:4',
         'imp_neto_gravado' => 'decimal:2',
@@ -116,5 +119,15 @@ class FacturaCompra extends Model
     public function periodo(): BelongsTo
     {
         return $this->belongsTo(\App\Erp\Models\Periodo::class, 'periodo_id');
+    }
+
+    public function clienteAuxiliar(): BelongsTo
+    {
+        return $this->belongsTo(\App\Erp\Models\Auxiliar::class, 'cliente_auxiliar_id');
+    }
+
+    public function importLibroIva(): BelongsTo
+    {
+        return $this->belongsTo(LibroIvaComprasImport::class, 'import_id');
     }
 }

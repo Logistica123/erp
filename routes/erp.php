@@ -2,6 +2,7 @@
 
 use App\Erp\Http\Controllers\ArcaController;
 use App\Erp\Http\Controllers\AliasContraparteController;
+use App\Erp\Http\Controllers\LibroIvaComprasImportController;
 use App\Erp\Http\Controllers\AsientosController;
 use App\Erp\Http\Controllers\AuditoriaController;
 use App\Erp\Http\Controllers\AuthController;
@@ -304,6 +305,20 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.libro-iva.importacion-detalle');
         Route::post('/libro-iva/importaciones/{id}/conciliar-masivo', [\App\Erp\Http\Controllers\LibroIvaController::class, 'conciliarMasivo'])
             ->whereNumber('id')->name('erp.libro-iva.conciliar-masivo');
+
+        // ADDENDUM v1.9 — Import enriquecido del Libro IVA Compras
+        Route::post('/libro-iva-compras/import/preview', [LibroIvaComprasImportController::class, 'preview'])
+            ->name('erp.livc.preview');
+        Route::post('/libro-iva-compras/import/confirmar', [LibroIvaComprasImportController::class, 'confirmar'])
+            ->name('erp.livc.confirmar');
+        Route::get('/libro-iva-compras/imports', [LibroIvaComprasImportController::class, 'imports'])
+            ->name('erp.livc.imports');
+        Route::get('/libro-iva-compras/imports/{id}', [LibroIvaComprasImportController::class, 'importDetalle'])
+            ->whereNumber('id')->name('erp.livc.import-detalle');
+        Route::get('/libro-iva-compras/no-tomadas', [LibroIvaComprasImportController::class, 'noTomadas'])
+            ->name('erp.livc.no-tomadas');
+        Route::post('/libro-iva-compras/no-tomadas/tomar', [LibroIvaComprasImportController::class, 'tomarFacturas'])
+            ->name('erp.livc.no-tomadas.tomar');
 
         // Facturación (venta)
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])

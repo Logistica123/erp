@@ -36,6 +36,79 @@ class FacturaCompraService
     ) {}
 
     /**
+     * ADDENDUM v1.9 — Calcula los campos de imputación para una factura de
+     * compra a partir de `fecha_emision` y `fecha_imputacion` (opcional).
+     *
+     * Reglas (RN-FI-1, RN-FI-2):
+     *   - `fecha_imputacion` default = `fecha_emision` si no se pasa.
+     *   - `fecha_imputacion >= fecha_emision` (CHECK constraint + validación).
+     *   - El período fiscal se busca por la `fecha_imputacion`.
+     *   - Si el período está CERRADO/BLOQUEADO, requiere permiso
+     *     `compras.imputar_periodo_cerrado`.
+     *
+     * @return array{fecha_imputacion:string, periodo_id:?int, imputacion_diferida:int}
+     * @throws DomainException FECHA_IMPUTACION_INVALIDA | PERIODO_CERRADO_SIN_PERMISO
+     */
+    public function resolverImputacion(
+        string $fechaEmision,
+        ?string $fechaImputacion,
+        User $usuario,
+        int $empresaId = 1,
+    ): array {
+        $fechaImp = $fechaImputacion ?: $fechaEmision;
+
+        if ($fechaImp < $fechaEmision) {
+            throw new DomainException(
+                'FECHA_IMPUTACION_INVALIDA: la imputación no puede ser anterior a la fecha del comprobante.'
+            );
+        }
+
+        $periodo = DB::table('erp_periodos as p')
+            ->join('erp_ejercicios as e', 'e.id', '=', 'p.ejercicio_id')
+            ->where('e.empresa_id', $empresaId)
+            ->whereDate('p.fecha_inicio', '<=', $fechaImp)
+            ->whereDate('p.fecha_fin', '>=', $fechaImp)
+            ->select('p.id', 'p.estado', 'p.anio', 'p.mes')
+            ->first();
+
+        if ($periodo && in_array($periodo->estado, ['CERRADO', 'BLOQUEADO'], true)) {
+            $mes = sprintf('%02d/%d', $periodo->mes, $periodo->anio);
+            $tienePermiso = DB::table('erp_rol_permiso as rp')
+                ->join('erp_permisos as p', 'p.id', '=', 'rp.permiso_id')
+                ->join('erp_usuario_rol as ur', 'ur.rol_id', '=', 'rp.rol_id')
+                ->join('erp_usuario_perfil as up', 'up.id', '=', 'ur.usuario_perfil_id')
+                ->where('up.user_id', $usuario->id)
+                ->where('p.codigo', 'compras.imputar_periodo_cerrado')
+                ->exists();
+
+            if (! $tienePermiso) {
+                throw new DomainException(
+                    "PERIODO_CERRADO_SIN_PERMISO: el período {$mes} está cerrado. "
+                    .'Para imputar facturas a períodos cerrados se requiere el permiso '
+                    .'compras.imputar_periodo_cerrado. Elegí una fecha en un período abierto '
+                    .'o solicitá autorización a un usuario con dicho permiso.'
+                );
+            }
+
+            $this->audit->logEvento(
+                accion: 'IMPUTAR_PERIODO_CERRADO',
+                modulo: 'compras',
+                descripcion: sprintf(
+                    'Factura compra imputada a período cerrado %s por %s',
+                    $mes, $usuario->name
+                ),
+                empresaId: $empresaId,
+            );
+        }
+
+        return [
+            'fecha_imputacion' => $fechaImp,
+            'periodo_id' => $periodo?->id,
+            'imputacion_diferida' => $fechaImp > $fechaEmision ? 1 : 0,
+        ];
+    }
+
+    /**
      * RECIBIDA | OBSERVADA → CONTROLADA. Genera asiento automático RN-34.
      * Habilita el pago vía OP (RN-31 gate en OrdenPagoService).
      */

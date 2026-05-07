@@ -241,14 +241,17 @@ class LibroIvaService
 
     private function queryCompras(PeriodoFiscal $periodo)
     {
+        // ADDENDUM v1.9 RN-FI-4: el Libro IVA Compras lista por
+        // fecha_imputacion, no fecha_emision (AFIP imputa al período en que
+        // se decide cargar el comprobante).
         return DB::table('erp_facturas_compra as f')
             ->join('erp_tipos_comprobante as t', 't.id', '=', 'f.tipo_comprobante_id')
             ->where('f.empresa_id', $periodo->empresa_id)
-            ->whereYear('f.fecha_emision', $periodo->anio)
-            ->whereMonth('f.fecha_emision', $periodo->mes)
+            ->whereYear('f.fecha_imputacion', $periodo->anio)
+            ->whereMonth('f.fecha_imputacion', $periodo->mes)
             ->whereIn('f.estado', self::ESTADOS_COMPRA_INCLUIDOS)
             ->select([
-                'f.id', 'f.fecha_emision', 'f.numero',
+                'f.id', 'f.fecha_emision', 'f.fecha_imputacion', 'f.numero',
                 't.codigo_interno as tipo_codigo', 't.letra', 't.signo', 't.clase',
                 'f.punto_venta as pto_vta',
                 'f.cuit_emisor', 'f.razon_social_emisor as razon_social',
@@ -256,7 +259,7 @@ class LibroIvaService
                 'f.imp_iva', 'f.imp_tributos', 'f.imp_percepciones',
                 'f.imp_retenciones', 'f.imp_total', 'f.cae',
             ])
-            ->orderBy('f.fecha_emision')
+            ->orderBy('f.fecha_imputacion')
             ->orderBy('f.id');
     }
 
@@ -267,8 +270,8 @@ class LibroIvaService
             ->join('erp_tipos_comprobante as t', 't.id', '=', 'f.tipo_comprobante_id')
             ->join('erp_alicuotas_iva as a', 'a.id', '=', 'fi.alicuota_iva_id')
             ->where('f.empresa_id', $periodo->empresa_id)
-            ->whereYear('f.fecha_emision', $periodo->anio)
-            ->whereMonth('f.fecha_emision', $periodo->mes)
+            ->whereYear('f.fecha_imputacion', $periodo->anio)
+            ->whereMonth('f.fecha_imputacion', $periodo->mes)
             ->whereIn('f.estado', self::ESTADOS_COMPRA_INCLUIDOS)
             ->groupBy('a.codigo_interno')
             ->select([

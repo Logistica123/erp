@@ -17,6 +17,9 @@ type FacturaCompra = {
   numero: number;
   cae: string | null;
   fecha_emision: string;
+  fecha_imputacion: string | null;
+  imputacion_diferida: boolean | number;
+  periodo_id: number | null;
   fecha_vencimiento: string | null;
   imp_neto_gravado: number | string;
   imp_iva: number | string;
@@ -90,6 +93,17 @@ export function FacturasCompraPage() {
 
   const columns: Column<FacturaCompra>[] = [
     { key: 'fecha_emision', header: 'Fecha', width: '90px', render: (r) => fmtDate(r.fecha_emision) },
+    { key: 'imputado', header: 'Imputado', width: '110px',
+      render: (r) => {
+        const dif = !!r.imputacion_diferida;
+        if (!dif) return <span className="text-ink-muted">—</span>;
+        const ym = r.fecha_imputacion ? r.fecha_imputacion.slice(0, 7) : '—';
+        return (
+          <span className="px-1.5 py-0.5 text-[10.5px] rounded bg-amber-100 text-amber-800 font-medium">
+            → {ym}
+          </span>
+        );
+      } },
     { key: 'comprobante', header: 'Comprobante', width: '180px',
       render: (r) => (
         <div>
@@ -270,7 +284,20 @@ function DetalleModal({ id, onClose }: { id: number; onClose: () => void }) {
         <div className="space-y-4 text-[12.5px]">
           <div className="grid grid-cols-3 gap-3">
             <Info label="Comprobante" value={`${f.letra} ${f.tipo_codigo} ${String(f.punto_venta).padStart(5, '0')}-${String(f.numero).padStart(8, '0')}`} />
-            <Info label="Fecha" value={fmtDate(f.fecha_emision)} />
+            <Info label="Fecha emisión" value={fmtDate(f.fecha_emision)} />
+            <Info
+              label="Fecha imputación"
+              value={
+                <span className="flex items-center gap-2">
+                  {fmtDate(f.fecha_imputacion ?? f.fecha_emision)}
+                  {!!f.imputacion_diferida && (
+                    <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-800 font-medium">
+                      Diferida
+                    </span>
+                  )}
+                </span>
+              }
+            />
             <Info label="CAE" value={f.cae ?? '—'} />
             <Info label="Proveedor" value={f.razon_social_emisor} />
             <Info label="CUIT" value={f.cuit_emisor} />

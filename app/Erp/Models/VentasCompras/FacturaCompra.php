@@ -23,6 +23,7 @@ class FacturaCompra extends Model
     protected $fillable = [
         'empresa_id', 'tipo_comprobante_id', 'punto_venta', 'numero',
         'cae', 'fecha_vto_cae', 'fecha_emision', 'fecha_recepcion', 'fecha_vencimiento',
+        'fecha_imputacion', 'periodo_id', 'imputacion_diferida',
         'auxiliar_id', 'cuit_emisor', 'razon_social_emisor', 'condicion_iva_id',
         'moneda_id', 'cotizacion',
         'imp_neto_gravado', 'imp_no_gravado', 'imp_exento',
@@ -38,6 +39,8 @@ class FacturaCompra extends Model
         'fecha_recepcion' => 'date',
         'fecha_vencimiento' => 'date',
         'fecha_vto_cae' => 'date',
+        'fecha_imputacion' => 'date',
+        'imputacion_diferida' => 'boolean',
         'controlada_at' => 'datetime',
         'cotizacion' => 'decimal:4',
         'imp_neto_gravado' => 'decimal:2',
@@ -108,5 +111,10 @@ class FacturaCompra extends Model
     public function constataciones(): HasMany
     {
         return $this->hasMany(ComprobanteConstatacion::class, 'factura_compra_id');
+    }
+
+    public function periodo(): BelongsTo
+    {
+        return $this->belongsTo(\App\Erp\Models\Periodo::class, 'periodo_id');
     }
 }

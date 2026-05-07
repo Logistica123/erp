@@ -36,6 +36,7 @@ class FacturasCompraController extends Controller
             ->whereNull('f.deleted_at')
             ->select([
                 'f.id', 'f.numero', 'f.cae', 'f.fecha_emision', 'f.fecha_vencimiento',
+                'f.fecha_imputacion', 'f.periodo_id', 'f.imputacion_diferida',
                 'f.imp_neto_gravado', 'f.imp_iva', 'f.imp_total',
                 'f.origen', 'f.estado', 'f.constatacion_estado',
                 'tc.codigo_interno as tipo_codigo', 'tc.letra', 'tc.clase as tipo_clase',
@@ -88,6 +89,7 @@ class FacturasCompraController extends Controller
             'cae' => ['nullable', 'string', 'max:20'],
             'fecha_vto_cae' => ['nullable', 'date'],
             'fecha_emision' => ['required', 'date'],
+            'fecha_imputacion' => ['nullable', 'date'],
             'fecha_recepcion' => ['nullable', 'date'],
             'fecha_vencimiento' => ['nullable', 'date'],
             'auxiliar_id' => ['required', 'integer', 'exists:erp_auxiliares,id'],
@@ -108,9 +110,22 @@ class FacturasCompraController extends Controller
             'centro_costo_id' => ['nullable', 'integer'],
         ]);
 
-        $factura = DB::transaction(function () use ($data, $request) {
+        try {
+            $imputacion = $this->service->resolverImputacion(
+                $data['fecha_emision'],
+                $data['fecha_imputacion'] ?? null,
+                $request->user(),
+            );
+        } catch (\DomainException $e) {
+            $code = explode(':', $e->getMessage(), 2)[0];
+            $status = $code === 'PERIODO_CERRADO_SIN_PERMISO' ? 403 : 422;
+            return response()->json(['ok' => false, 'error' => ['code' => $code, 'message' => $e->getMessage()]], $status);
+        }
+
+        $factura = DB::transaction(function () use ($data, $request, $imputacion) {
             return FacturaCompra::create([
                 ...$data,
+                ...$imputacion,
                 'empresa_id' => 1,
                 'origen' => $data['cae'] ? 'MANUAL' : 'MANUAL',
                 'estado' => FacturaCompraService::ESTADO_RECIBIDA,
@@ -140,6 +155,7 @@ class FacturasCompraController extends Controller
 
         $data = $request->validate([
             'fecha_emision' => ['nullable', 'date'],
+            'fecha_imputacion' => ['nullable', 'date'],
             'fecha_vencimiento' => ['nullable', 'date'],
             'imp_neto_gravado' => ['nullable', 'numeric', 'min:0'],
             'imp_iva' => ['nullable', 'numeric', 'min:0'],
@@ -147,6 +163,22 @@ class FacturasCompraController extends Controller
             'observaciones' => ['nullable', 'string', 'max:1000'],
             'centro_costo_id' => ['nullable', 'integer'],
         ]);
+
+        // Si tocan alguna fecha relevante, recomputar imputación.
+        if (isset($data['fecha_emision']) || isset($data['fecha_imputacion'])) {
+            try {
+                $imputacion = $this->service->resolverImputacion(
+                    $data['fecha_emision'] ?? $factura->fecha_emision->toDateString(),
+                    $data['fecha_imputacion'] ?? null,
+                    $request->user(),
+                );
+                $data = [...$data, ...$imputacion];
+            } catch (\DomainException $e) {
+                $code = explode(':', $e->getMessage(), 2)[0];
+                $status = $code === 'PERIODO_CERRADO_SIN_PERMISO' ? 403 : 422;
+                return response()->json(['ok' => false, 'error' => ['code' => $code, 'message' => $e->getMessage()]], $status);
+            }
+        }
 
         $factura->update($data);
 

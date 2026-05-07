@@ -289,7 +289,24 @@ class ContabilizadorFacturas
         $impTotal = (float) $f->imp_total;
         $esNC = ($f->cbte_signo ?? 1) < 0;
 
+        // ADDENDUM v1.9 — fecha del asiento = fecha_imputacion (no emisión).
+        // Glosa enriquecida si la imputación es diferida.
+        $fechaEmision = $f->fecha_emision instanceof \DateTimeInterface
+            ? $f->fecha_emision->format('Y-m-d') : (string) $f->fecha_emision;
+        $fechaImputacion = ! empty($f->fecha_imputacion)
+            ? ($f->fecha_imputacion instanceof \DateTimeInterface
+                ? $f->fecha_imputacion->format('Y-m-d') : (string) $f->fecha_imputacion)
+            : $fechaEmision;
+        $diferida = $fechaImputacion > $fechaEmision;
+
         $glosa = ($esNC ? 'NC compra #' : 'Factura compra #').$f->numero.' — '.$f->proveedor_nombre;
+        if ($diferida) {
+            $glosa .= sprintf(
+                ' · comprobante del %s imputado al %s',
+                date('d/m/Y', strtotime($fechaEmision)),
+                date('d/m/Y', strtotime($fechaImputacion)),
+            );
+        }
         $movs = [];
 
         if (! $esNC) {
@@ -364,7 +381,7 @@ class ContabilizadorFacturas
         $payload = [
             'empresa_id' => $empresaId,
             'diario_id' => (int) $diarioCpr,
-            'fecha' => $f->fecha_emision instanceof \DateTime ? $f->fecha_emision->format('Y-m-d') : (string) $f->fecha_emision,
+            'fecha' => $fechaImputacion, // ADDENDUM v1.9: imputación, no emisión.
             'glosa' => $glosa,
             'origen' => 'FACTURA_CPR',
             'origen_id' => $f->id,

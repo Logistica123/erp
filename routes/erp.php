@@ -2,6 +2,7 @@
 
 use App\Erp\Http\Controllers\ArcaController;
 use App\Erp\Http\Controllers\AliasContraparteController;
+use App\Erp\Http\Controllers\LibroIvaComprasExportController;
 use App\Erp\Http\Controllers\LibroIvaComprasImportController;
 use App\Erp\Http\Controllers\AsientosController;
 use App\Erp\Http\Controllers\AuditoriaController;
@@ -319,6 +320,22 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.livc.no-tomadas');
         Route::post('/libro-iva-compras/no-tomadas/tomar', [LibroIvaComprasImportController::class, 'tomarFacturas'])
             ->name('erp.livc.no-tomadas.tomar');
+
+        // ADDENDUM v1.11 — Generador F.8001 Libro IVA Digital Compras
+        Route::post('/libro-iva-compras/{periodoId}/exportar-f8001', [LibroIvaComprasExportController::class, 'exportar'])
+            ->whereNumber('periodoId')->name('erp.livc.exportar');
+        Route::get('/libro-iva-compras/exports', [LibroIvaComprasExportController::class, 'index'])
+            ->name('erp.livc.exports');
+        Route::get('/libro-iva-compras/exports/{id}', [LibroIvaComprasExportController::class, 'show'])
+            ->whereNumber('id')->name('erp.livc.export-detalle');
+        Route::get('/libro-iva-compras/exports/{id}/cbte', [LibroIvaComprasExportController::class, 'descargarCbte'])
+            ->whereNumber('id')->name('erp.livc.export-cbte');
+        Route::get('/libro-iva-compras/exports/{id}/alicuotas', [LibroIvaComprasExportController::class, 'descargarAlicuotas'])
+            ->whereNumber('id')->name('erp.livc.export-alicuotas');
+        Route::post('/libro-iva-compras/exports/{id}/marcar-enviado', [LibroIvaComprasExportController::class, 'marcarEnviado'])
+            ->whereNumber('id')->name('erp.livc.export-enviado');
+        Route::post('/libro-iva-compras/exports/{id}/comparar-liber', [LibroIvaComprasExportController::class, 'compararLiber'])
+            ->whereNumber('id')->name('erp.livc.export-comparar');
 
         // Facturación (venta)
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])

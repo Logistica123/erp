@@ -49,6 +49,7 @@ import { PresupuestosPage } from './pages/PresupuestosPage';
 import { EjecucionPresupuestoPage } from './pages/EjecucionPresupuestoPage';
 import { DistriappPage } from './pages/DistriappPage';
 import { LibroIvaImportarPage } from './pages/LibroIvaImportarPage';
+import { LibroIvaComprasExportPage } from './pages/LibroIvaComprasExportPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
 import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
 import { AusenciasPage } from './pages/Sueldos/AusenciasPage';
@@ -156,6 +157,7 @@ export default function App() {
               <Route path="/erp/inicio" element={<Navigate to="/erp/dashboard" replace />} />
               <Route path="/erp/distriapp" element={<DistriappPage />} handle={{ crumb: 'DistriApp' }} />
               <Route path="/erp/libro-iva-compras" element={<LibroIvaImportarPage />} handle={{ crumb: 'Libro IVA — importar' }} />
+              <Route path="/erp/libro-iva-compras/exportar" element={<LibroIvaComprasExportPage />} handle={{ crumb: 'Libro IVA — exportar F.8001' }} />
 
               {/* Sueldos (SPEC 08) */}
               <Route path="/erp/sueldos/empleados" element={<EmpleadosPage />} handle={{ crumb: 'Empleados' }} />

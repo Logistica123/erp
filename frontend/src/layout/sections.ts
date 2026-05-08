@@ -71,6 +71,7 @@ export const sections: NavSection[] = [
       { to: '/erp/facturas-compra', label: 'Facturas de compra', icon: ShoppingCart },
       { to: '/erp/cc-proveedores', label: 'CC Proveedores', icon: Users },
       { to: '/erp/libro-iva-compras', label: 'Libro IVA Compras (import)', icon: ScrollText },
+      { to: '/erp/libro-iva-compras/exportar', label: 'Libro IVA Compras (export F.8001)', icon: FileText },
     ],
   },
   {

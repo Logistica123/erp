@@ -53,10 +53,12 @@ class LibroIvaComprasImportTest extends TestCase
     public function test_preview_archivo_con_columnas_extras_las_detecta(): void
     {
         // Genero un CSV con header enriquecido en runtime.
+        // v1.14: "Período pagado" → "Período trabajado" (renombrado, era typo
+        // del v1.13). Sumamos también la columna nueva "Jurisdicción".
         $tmp = tempnam(sys_get_temp_dir(), 'liva_').'.csv';
-        $content = '"Fecha de Emisión";"Tipo de Comprobante";"Punto de Venta";"Número de Comprobante";"Importe Total";"Tomado";"Cliente";"Período pagado";"Tipo";"Observaciones"'."\r\n"
-                 . '2026-03-15;1;1;100;1000,00;SI;OCASA;2026-03;Combustible;Test'."\r\n"
-                 . '2026-03-16;1;1;101;500,00;NO;Loginter;2026-03;Otros;'."\r\n";
+        $content = '"Fecha de Emisión";"Tipo de Comprobante";"Punto de Venta";"Número de Comprobante";"Importe Total";"Tomado";"Cliente";"Período trabajado";"Jurisdicción";"Tipo";"Observaciones"'."\r\n"
+                 . '2026-03-15;1;1;100;1000,00;SI;OCASA;2026-03;902;Combustible;Test'."\r\n"
+                 . '2026-03-16;1;1;101;500,00;NO;Loginter;2026-03-Q1;901;Otros;'."\r\n";
         file_put_contents($tmp, mb_convert_encoding($content, 'ISO-8859-1', 'UTF-8'));
 
         $r = $this->svc->preview($tmp, 'enriquecido.csv', $this->empresaId);
@@ -66,7 +68,8 @@ class LibroIvaComprasImportTest extends TestCase
         $this->assertSame(1, $r['filas_con_tomado_no']);
         $this->assertContains('tomado', $r['columnas_extras_detectadas']);
         $this->assertContains('cliente', $r['columnas_extras_detectadas']);
-        $this->assertContains('periodo pagado', $r['columnas_extras_detectadas']);
+        $this->assertContains('periodo trabajado', $r['columnas_extras_detectadas']);
+        $this->assertContains('jurisdiccion', $r['columnas_extras_detectadas']);
         $this->assertContains('tipo', $r['columnas_extras_detectadas']);
         $this->assertContains('observaciones', $r['columnas_extras_detectadas']);
         @unlink($tmp);

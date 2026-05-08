@@ -32,8 +32,10 @@ class FacturaCompra extends Model
         'observaciones', 'motivo_observacion', 'adjunto_url',
         'centro_costo_id', 'asiento_id',
         'created_by_user_id', 'controlada_by_user_id', 'controlada_at',
-        // Addendum v1.9 (reescrito) — import enriquecido del Libro IVA Compras
-        'no_tomada', 'cliente_auxiliar_id', 'periodo_pagado_texto', 'tipo_gasto', 'import_id',
+        // Addendum v1.13 (ex v1.9 reescrito) — import enriquecido del Libro IVA Compras
+        'no_tomada', 'cliente_auxiliar_id', 'tipo_gasto', 'import_id',
+        // Addendum v1.14 — período trabajado + jurisdicción IIBB
+        'periodo_trabajado_texto', 'jurisdiccion_codigo',
     ];
 
     protected $casts = [

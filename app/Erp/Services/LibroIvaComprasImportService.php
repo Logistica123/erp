@@ -45,9 +45,17 @@ class LibroIvaComprasImportService
         'denominacion vendedor', 'importe total',
     ];
 
-    /** Headers extras del contador (opcionales). */
+    /**
+     * Headers extras del contador (opcionales).
+     *
+     * v1.14: "periodo pagado" eliminado (era typo del v1.13 — el concepto
+     * "Período asignado" ya está cubierto por fecha_imputacion a nivel
+     * archivo). Se reemplaza por "periodo trabajado" (período de servicio
+     * real) y se agrega "jurisdiccion" (código IIBB AFIP, 901-924).
+     */
     private const HEADERS_EXTRAS = [
-        'tomado', 'cliente', 'periodo pagado', 'observaciones', 'tipo',
+        'tomado', 'cliente', 'observaciones', 'tipo',
+        'periodo trabajado', 'jurisdiccion',
     ];
 
     public function __construct(
@@ -448,10 +456,19 @@ class LibroIvaComprasImportService
             $imp = ['fecha_imputacion' => $fechaEmision, 'periodo_id' => null, 'imputacion_diferida' => 0];
         }
 
-        // Período pagado y tipo (extras del contador).
-        $periodoPagado = $this->normalizarPeriodo((string) $this->get($r, $headerMap, 'periodo pagado'));
+        // Período trabajado, jurisdicción y tipo (extras del contador).
+        // v1.14: `periodo trabajado` reemplaza al ex `periodo pagado`.
+        $periodoTrabajado = $this->normalizarPeriodoTrabajado(
+            (string) $this->get($r, $headerMap, 'periodo trabajado')
+        );
+        $juris = strtoupper(trim((string) $this->get($r, $headerMap, 'jurisdiccion')));
+        $juris = preg_match('/^\d{3}$/', $juris) ? $juris : null;
         $tipoGasto = trim((string) $this->get($r, $headerMap, 'tipo')) ?: null;
         $observ = trim((string) $this->get($r, $headerMap, 'observaciones')) ?: null;
+        // CC derivado del cliente (auxiliar). Si no hay cliente, queda NULL.
+        $centroCostoId = $clienteAuxId
+            ? DB::table('erp_centros_costo')->where('auxiliar_id', $clienteAuxId)->value('id')
+            : null;
 
         $factura = FacturaCompra::create([
             'empresa_id' => $empresaId,
@@ -473,7 +490,9 @@ class LibroIvaComprasImportService
             'estado' => $tomada ? FacturaCompraService::ESTADO_RECIBIDA : FacturaCompraService::ESTADO_RECIBIDA,
             'no_tomada' => $tomada ? 0 : 1,
             'cliente_auxiliar_id' => $clienteAuxId,
-            'periodo_pagado_texto' => $periodoPagado,
+            'periodo_trabajado_texto' => $periodoTrabajado,
+            'jurisdiccion_codigo' => $juris,
+            'centro_costo_id' => $centroCostoId,
             'tipo_gasto' => $tipoGasto,
             'observaciones' => $observ,
             'import_id' => $importId,
@@ -565,5 +584,20 @@ class LibroIvaComprasImportService
             return sprintf('%04d-%02d', (int) $m[2], (int) $m[1]);
         }
         return $texto; // guardar crudo si no parsea (no falla)
+    }
+
+    /**
+     * v1.14: período trabajado acepta YYYY-MM (mensual) o YYYY-MM-Q1/Q2 (quincenal).
+     * Si no parsea, guarda crudo (igual que normalizarPeriodo).
+     */
+    private function normalizarPeriodoTrabajado(string $texto): ?string
+    {
+        $texto = trim($texto);
+        if ($texto === '') return null;
+        if (preg_match('/^(\d{4})[\-\/](\d{1,2})[\-\/]?(Q[12])?$/i', $texto, $m)) {
+            $base = sprintf('%04d-%02d', (int) $m[1], (int) $m[2]);
+            return isset($m[3]) && $m[3] !== '' ? $base.'-'.strtoupper($m[3]) : $base;
+        }
+        return $this->normalizarPeriodo($texto);
     }
 }

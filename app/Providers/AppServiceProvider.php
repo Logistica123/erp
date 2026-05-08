@@ -14,6 +14,7 @@ use App\Erp\Models\Periodo;
 use App\Erp\Models\Rol;
 use App\Erp\Models\UsuarioPerfil;
 use App\Erp\Observers\AuditableObserver;
+use App\Erp\Observers\AuxiliarClienteObserver;
 use App\Erp\Policies\AsientoPolicy;
 use App\Erp\Policies\CuentaContablePolicy;
 use App\Erp\Policies\EjercicioPolicy;
@@ -46,6 +47,9 @@ class AppServiceProvider extends ServiceProvider
         foreach ($modelosAuditables as $modelo) {
             $modelo::observe(AuditableObserver::class);
         }
+
+        // ADDENDUM v1.14 — auto-crear CC al dar de alta un auxiliar tipo=Cliente.
+        Auxiliar::observe(AuxiliarClienteObserver::class);
 
         // Policies del ERP
         Gate::policy(Asiento::class, AsientoPolicy::class);

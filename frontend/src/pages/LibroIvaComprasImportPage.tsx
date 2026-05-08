@@ -57,7 +57,12 @@ type ConfirmResp = {
 const MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-const EXTRAS_OBLIGATORIAS = ['tomado', 'cliente', 'observaciones', 'tipo'];
+// v1.13 introdujo 4 columnas extras (tomado/cliente/observaciones/tipo).
+// v1.14 sumó 2 más (periodo trabajado/jurisdiccion). Todas opcionales.
+const EXTRAS_OBLIGATORIAS = [
+  'tomado', 'cliente', 'observaciones', 'tipo',
+  'periodo trabajado', 'jurisdiccion',
+];
 
 const ESTADO_BADGES: Record<Import['estado'], 'success' | 'danger' | 'warning'> = {
   OK: 'success', ERROR: 'danger', PARCIAL: 'warning',

@@ -163,16 +163,19 @@ class ReportesVentasComprasController extends Controller
             ? ['CONTROLADA', 'COBRO_PARCIAL']
             : ['CONTROLADA', 'PAGO_PARCIAL'];
 
+        // Addendum v1.12 Sprint C — incluir tc.signo para que las NC resten
+        // en el total y los buckets en lugar de sumar (bug pre-existente).
         $rows = DB::table("{$tabla} as f")
             ->join('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
             ->join('erp_monedas as m', 'm.id', '=', 'f.moneda_id')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
             ->whereIn('f.estado', $estados)
             ->whereNull('f.deleted_at')
             ->where('f.empresa_id', 1)
             ->select([
                 'a.id as auxiliar_id', 'a.nombre', 'a.cuit',
                 'f.id', 'f.fecha_emision', 'f.fecha_vencimiento',
-                'f.imp_total', 'm.codigo as moneda',
+                'f.imp_total', 'm.codigo as moneda', 'tc.signo',
             ])
             ->get();
 
@@ -196,8 +199,11 @@ class ReportesVentasComprasController extends Controller
                 $dias <= 90 => 'rango_61_90',
                 default => 'rango_91_plus',
             };
-            $buckets[$k][$col] += (float) $r->imp_total;
-            $buckets[$k]['total'] += (float) $r->imp_total;
+            // tc.signo: +1 para FACTURA/ND, -1 para NC (definido en seed
+            // 03_ventas_compras). El total respeta la convención contable.
+            $importeFirmado = (float) $r->imp_total * (int) ($r->signo ?? 1);
+            $buckets[$k][$col] += $importeFirmado;
+            $buckets[$k]['total'] += $importeFirmado;
             $buckets[$k]['cantidad_facturas']++;
         }
 

@@ -31,6 +31,7 @@ use App\Erp\Http\Controllers\MovimientosBancariosController;
 use App\Erp\Http\Controllers\OrdenesPagoController;
 use App\Erp\Http\Controllers\PeriodosController;
 use App\Erp\Http\Controllers\ReportesTesoreriaController;
+use App\Erp\Http\Controllers\ReportesV14Controller;
 use App\Erp\Http\Controllers\ReportesVentasComprasController;
 use App\Erp\Http\Controllers\SesionesController;
 use Illuminate\Support\Facades\Route;
@@ -370,6 +371,18 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.reportes.aging-proveedores');
         Route::get('/reportes/fce-estados', [ReportesVentasComprasController::class, 'fceEstados'])
             ->name('erp.reportes.fce-estados');
+
+        // ADDENDUM v1.14 — Reportes por CC / Jurisdicción
+        Route::get('/reportes/ventas-por-cliente', [ReportesV14Controller::class, 'ventasPorCliente'])
+            ->name('erp.reportes.ventas-por-cliente');
+        Route::get('/reportes/gastos-por-cliente', [ReportesV14Controller::class, 'gastosPorCliente'])
+            ->name('erp.reportes.gastos-por-cliente');
+        Route::get('/reportes/margen-por-cliente', [ReportesV14Controller::class, 'margenPorCliente'])
+            ->name('erp.reportes.margen-por-cliente');
+        Route::get('/reportes/ventas-por-jurisdiccion', [ReportesV14Controller::class, 'ventasPorJurisdiccion'])
+            ->name('erp.reportes.ventas-por-jurisdiccion');
+        Route::get('/reportes/gastos-por-jurisdiccion', [ReportesV14Controller::class, 'gastosPorJurisdiccion'])
+            ->name('erp.reportes.gastos-por-jurisdiccion');
 
         // ARCA — emisión (fachada sobre factura venta) — SPEC 03 §6.6
         Route::get('/facturas-venta/{id}/emision-status', [ArcaController::class, 'emisionStatus'])

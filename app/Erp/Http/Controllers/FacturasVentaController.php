@@ -141,10 +141,19 @@ class FacturasVentaController extends Controller
     public function catalogosEmision(Request $request): JsonResponse
     {
         return response()->json([
-            'clientes' => DB::table('erp_auxiliares')
-                ->where('empresa_id', 1)->where('tipo', 'Cliente')->where('activo', 1)
-                ->orderBy('nombre')
-                ->get(['id', 'nombre', 'cuit', 'codigo']),
+            // Addendum v1.14: incluimos centro_costo_id+codigo derivado del
+            // CC asociado al auxiliar (1:1) para mostrarlo read-only en el form.
+            'clientes' => DB::table('erp_auxiliares as a')
+                ->leftJoin('erp_centros_costo as cc', 'cc.auxiliar_id', '=', 'a.id')
+                ->where('a.empresa_id', 1)->where('a.tipo', 'Cliente')->where('a.activo', 1)
+                ->orderBy('a.nombre')
+                ->get([
+                    'a.id', 'a.nombre', 'a.cuit', 'a.codigo',
+                    'cc.id as centro_costo_id', 'cc.codigo as centro_costo_codigo',
+                ]),
+            'jurisdicciones' => DB::table('erp_iibb_jurisdicciones')
+                ->where('activa', 1)->orderBy('codigo')
+                ->get(['codigo', 'nombre']),
             'tipos_comprobante' => DB::table('erp_tipos_comprobante')
                 ->where('activo', 1)
                 ->whereIn('clase', ['FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO'])
@@ -194,6 +203,10 @@ class FacturasVentaController extends Controller
             'cantidad' => ['nullable', 'numeric', 'min:0.0001'],
             'precio_unit' => ['nullable', 'numeric', 'min:0'],
             'alicuota_iva_id' => ['nullable', 'integer'],
+            // Addendum v1.14: período trabajado (YYYY-MM o YYYY-MM-Q1/Q2)
+            // y jurisdicción IIBB (código AFIP 901-924). Ambos opcionales.
+            'periodo_trabajado_texto' => ['nullable', 'string', 'max:20'],
+            'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
         ]);
 
         $user = $request->user();

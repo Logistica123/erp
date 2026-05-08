@@ -71,6 +71,7 @@ export const sections: NavSection[] = [
       { to: '/erp/facturas-compra', label: 'Facturas de compra', icon: ShoppingCart },
       { to: '/erp/cc-proveedores', label: 'CC Proveedores', icon: Users },
       { to: '/erp/libro-iva-compras/import', label: 'Libro IVA Compras (import enriquecido)', icon: ScrollText },
+      { to: '/erp/libro-iva-compras/no-tomadas', label: 'Libro IVA Compras (no tomadas)', icon: ScrollText },
       { to: '/erp/libro-iva-compras/exportar', label: 'Libro IVA Compras (export F.8001)', icon: FileText },
     ],
   },
@@ -93,6 +94,7 @@ export const sections: NavSection[] = [
     items: [
       { to: '/erp/reportes/aging', label: 'Aging clientes/prov', icon: TrendingUp },
       { to: '/erp/reportes/comparativo', label: 'Comparativo períodos', icon: TrendingUp },
+      { to: '/erp/reportes/analiticos', label: 'Analíticos (CC + Jurisdicción)', icon: TrendingUp },
     ],
   },
   {

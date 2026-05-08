@@ -51,6 +51,8 @@ import { DistriappPage } from './pages/DistriappPage';
 import { LibroIvaImportarPage } from './pages/LibroIvaImportarPage';
 import { LibroIvaComprasExportPage } from './pages/LibroIvaComprasExportPage';
 import { LibroIvaComprasImportPage } from './pages/LibroIvaComprasImportPage';
+import { LibroIvaComprasNoTomadasPage } from './pages/LibroIvaComprasNoTomadasPage';
+import { ReportesAnaliticosPage } from './pages/ReportesAnaliticosPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
 import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
 import { AusenciasPage } from './pages/Sueldos/AusenciasPage';
@@ -137,6 +139,7 @@ export default function App() {
               <Route path="/erp/impuestos/bp" element={<BpPage />} handle={{ crumb: 'BP F.2000' }} />
               <Route path="/erp/reportes/aging" element={<AgingPage />} handle={{ crumb: 'Aging' }} />
               <Route path="/erp/reportes/comparativo" element={<ComparativoPage />} handle={{ crumb: 'Comparativo' }} />
+              <Route path="/erp/reportes/analiticos" element={<ReportesAnaliticosPage />} handle={{ crumb: 'Analíticos (CC + Jurisdicción)' }} />
 
               {/* F6 — ARCA Gateway */}
               <Route path="/erp/arca/dashboard" element={<ArcaDashboardPage />} handle={{ crumb: 'ARCA Gateway' }} />
@@ -159,6 +162,7 @@ export default function App() {
               <Route path="/erp/distriapp" element={<DistriappPage />} handle={{ crumb: 'DistriApp' }} />
               <Route path="/erp/libro-iva-compras" element={<LibroIvaImportarPage />} handle={{ crumb: 'Libro IVA — importar (legacy)' }} />
               <Route path="/erp/libro-iva-compras/import" element={<LibroIvaComprasImportPage />} handle={{ crumb: 'Libro IVA — import enriquecido' }} />
+              <Route path="/erp/libro-iva-compras/no-tomadas" element={<LibroIvaComprasNoTomadasPage />} handle={{ crumb: 'Libro IVA — no tomadas' }} />
               <Route path="/erp/libro-iva-compras/exportar" element={<LibroIvaComprasExportPage />} handle={{ crumb: 'Libro IVA — exportar F.8001' }} />
 
               {/* Sueldos (SPEC 08) */}

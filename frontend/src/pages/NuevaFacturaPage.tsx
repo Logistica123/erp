@@ -8,7 +8,10 @@ import { fmtMoney } from '@/lib/cn';
 import { api } from '@/lib/api';
 
 type Catalogos = {
-  clientes: { id: number; nombre: string; cuit: string | null; codigo: string }[];
+  clientes: {
+    id: number; nombre: string; cuit: string | null; codigo: string;
+    centro_costo_id: number | null; centro_costo_codigo: string | null;
+  }[];
   tipos_comprobante: {
     id: number;
     codigo_interno: string;
@@ -20,6 +23,7 @@ type Catalogos = {
   puntos_venta: { id: number; numero: number; nombre: string; tipo_emision: string }[];
   alicuotas_iva: { id: number; codigo_interno: string; nombre: string; tasa: string }[];
   monedas: { id: number; codigo: string; nombre: string; simbolo: string | null }[];
+  jurisdicciones: { codigo: string; nombre: string }[];
 };
 
 type EmitirResp = {
@@ -46,6 +50,14 @@ type Item = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Addendum v1.14: default = mes anterior (caso típico de servicios logísticos
+// facturados a posteriori). YYYY-MM.
+const defaultPeriodoTrabajado = () => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
 const itemVacio = (alicuotaIvaId: number): Item => ({
   descripcion: '',
   cantidad: '1',
@@ -65,6 +77,9 @@ export function NuevaFacturaPage() {
     concepto_afip: 2,
     fecha_emision: today(),
     moneda_id: 1,
+    // Addendum v1.14
+    periodo_trabajado_texto: defaultPeriodoTrabajado(),
+    jurisdiccion_codigo: '',
   });
   const [items, setItems] = useState<Item[]>([itemVacio(0)]);
 
@@ -306,7 +321,59 @@ export function NuevaFacturaPage() {
                   <option value={3}>3 — Productos y servicios</option>
                 </select>
               </div>
+
+              {/* Addendum v1.14 — período trabajado + jurisdicción + CC derivado */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
+                  Período trabajado
+                </label>
+                <input
+                  type="text" value={header.periodo_trabajado_texto}
+                  onChange={(e) => setHeader({ ...header, periodo_trabajado_texto: e.target.value })}
+                  placeholder="2026-03 o 2026-03-Q1"
+                  className="w-full border rounded-md px-3 py-2 text-sm"
+                />
+                <div className="text-[11px] text-gray-500 mt-1">
+                  YYYY-MM (mensual) o YYYY-MM-Q1/Q2 (quincenal)
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
+                  Jurisdicción IIBB
+                </label>
+                <select
+                  value={header.jurisdiccion_codigo}
+                  onChange={(e) => setHeader({ ...header, jurisdiccion_codigo: e.target.value })}
+                  className="w-full border rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">— sin jurisdicción —</option>
+                  {cats?.jurisdicciones?.map((j) => (
+                    <option key={j.codigo} value={j.codigo}>
+                      {j.codigo} — {j.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
+
+            {/* CC derivado del cliente — read-only */}
+            {(() => {
+              const c = cats?.clientes.find((x) => x.id === header.cliente_id);
+              if (!c) return null;
+              return (
+                <div className="text-[11.5px] text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
+                  Centro de Costos asociado al cliente:{' '}
+                  {c.centro_costo_codigo ? (
+                    <span className="font-mono font-semibold text-gray-800">
+                      {c.centro_costo_codigo} — {c.nombre}
+                    </span>
+                  ) : (
+                    <span className="text-amber-600 italic">— sin CC (se creará al emitir) —</span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Items */}
             <div>

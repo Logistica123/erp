@@ -39,6 +39,13 @@ type FacturaCompra = {
   moneda: string;
   asiento_id: number | null;
   asiento_numero: number | null;
+  // Addendum v1.13 + v1.14
+  no_tomada: number | boolean;
+  cliente_auxiliar_id: number | null;
+  tipo_gasto: string | null;
+  periodo_trabajado_texto: string | null;
+  jurisdiccion_codigo: string | null;
+  centro_costo_id: number | null;
 };
 
 const ESTADOS = ['RECIBIDA', 'CONTROLADA', 'OBSERVADA', 'PAGO_PARCIAL', 'PAGADA', 'ANULADA_POR_NC', 'RECHAZADA'];
@@ -71,6 +78,11 @@ export function FacturasCompraPage() {
   const [origen, setOrigen] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  // Addendum v1.13 + v1.14 — filtros enriquecidos
+  const [noTomada, setNoTomada] = useState<'' | '0' | '1'>('');
+  const [tipoGasto, setTipoGasto] = useState('');
+  const [periodoTrab, setPeriodoTrab] = useState('');
+  const [juris, setJuris] = useState('');
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
@@ -78,8 +90,12 @@ export function FacturasCompraPage() {
     if (origen) p.set('origen', origen);
     if (desde)  p.set('desde', desde);
     if (hasta)  p.set('hasta', hasta);
+    if (noTomada !== '') p.set('no_tomada', noTomada);
+    if (tipoGasto) p.set('tipo_gasto', tipoGasto);
+    if (periodoTrab) p.set('periodo_trabajado', periodoTrab);
+    if (juris) p.set('jurisdiccion', juris);
     return p.toString();
-  }, [estado, origen, desde, hasta]);
+  }, [estado, origen, desde, hasta, noTomada, tipoGasto, periodoTrab, juris]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['facturas-compra', qs],
@@ -120,6 +136,22 @@ export function FacturasCompraPage() {
       ) },
     { key: 'imp_total', header: 'Total', align: 'right', width: '120px',
       render: (r) => `${r.moneda} ${fmtMoney(r.imp_total)}` },
+    { key: 'tomado', header: 'Tomado', width: '90px',
+      render: (r) => Number(r.no_tomada) === 1
+        ? <Badge variant="warning">NO</Badge>
+        : <Badge variant="success">SÍ</Badge> },
+    { key: 'periodo_trabajado_texto', header: 'P. trabaj.', width: '110px',
+      render: (r) => r.periodo_trabajado_texto
+        ? <code className="text-[11px]">{r.periodo_trabajado_texto}</code>
+        : <span className="text-ink-muted">—</span> },
+    { key: 'jurisdiccion_codigo', header: 'Juris.', width: '70px',
+      render: (r) => r.jurisdiccion_codigo
+        ? <code className="text-[11px]">{r.jurisdiccion_codigo}</code>
+        : <span className="text-ink-muted">—</span> },
+    { key: 'tipo_gasto', header: 'Tipo gasto', width: '120px',
+      render: (r) => r.tipo_gasto
+        ? <span className="text-[11.5px]">{r.tipo_gasto}</span>
+        : <span className="text-ink-muted">—</span> },
     { key: 'estado', header: 'Estado', width: '140px',
       render: (r) => <Badge variant={badgeFor(r.estado)}>{r.estado}</Badge> },
     { key: 'constatacion', header: 'Constat.', width: '120px',
@@ -170,6 +202,26 @@ export function FacturasCompraPage() {
             <Field label="Hasta" type="date" value={hasta}
               onChange={(e) => setHasta(e.target.value)}
               containerClassName="w-[150px]" />
+            {/* Addendum v1.13 + v1.14 */}
+            <SelectField label="Tomado" value={noTomada} placeholder="Todas"
+              onChange={(e) => setNoTomada(e.target.value as '' | '0' | '1')}
+              containerClassName="w-[140px]"
+              options={[
+                { value: '0', label: 'SI (tomadas)' },
+                { value: '1', label: 'NO (no_tomadas)' },
+              ]} />
+            <Field label="Tipo gasto" value={tipoGasto}
+              onChange={(e) => setTipoGasto(e.target.value)}
+              placeholder="Combustible…"
+              containerClassName="w-[170px]" />
+            <Field label="Período trabajado" value={periodoTrab}
+              onChange={(e) => setPeriodoTrab(e.target.value)}
+              placeholder="2026-03"
+              containerClassName="w-[160px]" />
+            <Field label="Jurisdicción" value={juris}
+              onChange={(e) => setJuris(e.target.value)}
+              placeholder="901"
+              containerClassName="w-[120px]" />
           </div>
           {error && <FormError error={errorMessage(error)} />}
           <DataTable columns={columns} rows={data?.data ?? []} loading={isLoading}
@@ -305,6 +357,19 @@ function DetalleModal({ id, onClose }: { id: number; onClose: () => void }) {
             <Info label="Neto gravado" value={`${f.moneda} ${fmtMoney(f.imp_neto_gravado)}`} />
             <Info label="IVA" value={`${f.moneda} ${fmtMoney(f.imp_iva)}`} />
             <Info label="Total" value={<strong className="text-navy-800">{f.moneda} {fmtMoney(f.imp_total)}</strong>} />
+            {/* Addendum v1.14 — período trabajado, jurisdicción y CC */}
+            {(f as Record<string, unknown>)['periodo_trabajado_texto'] != null && (
+              <Info label="Período trabajado" value={String((f as Record<string, unknown>)['periodo_trabajado_texto'])} />
+            )}
+            {(f as Record<string, unknown>)['jurisdiccion_codigo'] != null && (
+              <Info label="Jurisdicción IIBB" value={String((f as Record<string, unknown>)['jurisdiccion_codigo'])} />
+            )}
+            {(f as Record<string, unknown>)['centro_costo_id'] != null && (
+              <Info label="Centro de Costos #" value={String((f as Record<string, unknown>)['centro_costo_id'])} />
+            )}
+            {(f as Record<string, unknown>)['tipo_gasto'] != null && (
+              <Info label="Tipo de gasto" value={String((f as Record<string, unknown>)['tipo_gasto'])} />
+            )}
           </div>
           {f.items && f.items.length > 0 && (
             <div>

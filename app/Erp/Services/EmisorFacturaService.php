@@ -184,6 +184,11 @@ class EmisorFacturaService
             throw new RuntimeException('Emisión no aprobada: '.$texto);
         }
 
+        // Addendum v1.14: período trabajado, jurisdicción y CC derivado del cliente.
+        $periodoTrab = ! empty($input['periodo_trabajado_texto']) ? trim((string) $input['periodo_trabajado_texto']) : null;
+        $juris = ! empty($input['jurisdiccion_codigo']) ? strtoupper(trim((string) $input['jurisdiccion_codigo'])) : null;
+        $ccId = DB::table('erp_centros_costo')->where('auxiliar_id', $cliente->id)->value('id');
+
         // 5. Persistir
         $facturaId = DB::table('erp_facturas_venta')->insertGetId([
             'empresa_id' => $empresaId,
@@ -208,6 +213,9 @@ class EmisorFacturaService
             'imp_total' => $imp_total,
             'origen' => 'WSFE_ERP',
             'estado' => 'EMITIDA',
+            'periodo_trabajado_texto' => $periodoTrab,
+            'jurisdiccion_codigo' => $juris,
+            'centro_costo_id' => $ccId,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

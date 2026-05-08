@@ -45,6 +45,9 @@ class FacturasCompraController extends Controller
                 'f.cuit_emisor', 'f.razon_social_emisor',
                 'm.codigo as moneda',
                 'f.asiento_id', 'asi.numero as asiento_numero',
+                // Addendum v1.13 + v1.14 — campos enriquecidos del import
+                'f.no_tomada', 'f.cliente_auxiliar_id', 'f.tipo_gasto',
+                'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo', 'f.centro_costo_id',
             ]);
 
         if ($estado = $request->query('estado')) {
@@ -61,6 +64,20 @@ class FacturasCompraController extends Controller
         }
         if ($origen = $request->query('origen')) {
             $q->where('f.origen', $origen);
+        }
+        // Addendum v1.13 + v1.14 — filtros enriquecidos.
+        $noTomada = $request->query('no_tomada');
+        if ($noTomada === '0' || $noTomada === '1') {
+            $q->where('f.no_tomada', (int) $noTomada);
+        }
+        if ($tipoGasto = $request->query('tipo_gasto')) {
+            $q->where('f.tipo_gasto', $tipoGasto);
+        }
+        if ($periodoTrab = $request->query('periodo_trabajado')) {
+            $q->where('f.periodo_trabajado_texto', $periodoTrab);
+        }
+        if ($juris = $request->query('jurisdiccion')) {
+            $q->where('f.jurisdiccion_codigo', $juris);
         }
 
         return response()->json([

@@ -13,6 +13,7 @@ use App\Erp\Http\Controllers\BalanceController;
 use App\Erp\Http\Controllers\CajaController;
 use App\Erp\Http\Controllers\ConfigController;
 use App\Erp\Http\Controllers\CobrosController;
+use App\Erp\Http\Controllers\ImputacionesNcController;
 use App\Erp\Http\Controllers\CotizacionesController;
 use App\Erp\Http\Controllers\EcheqController;
 use App\Erp\Http\Controllers\ExtractosController;
@@ -84,6 +85,12 @@ Route::prefix('api/erp')->group(function () {
 
         // Contabilidad — catálogo de cuentas
         Route::get('/cuentas', [CuentasContablesController::class, 'index'])->name('erp.cuentas.index');
+        // ADDENDUM v1.15 Sprint L — exportar CSV (debe ir antes de /{id} para no shadowear).
+        Route::get('/cuentas/exportar', [CuentasContablesController::class, 'exportar'])
+            ->name('erp.cuentas.exportar');
+        Route::post('/cuentas', [CuentasContablesController::class, 'store'])->name('erp.cuentas.store');
+        Route::delete('/cuentas/{id}', [CuentasContablesController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.cuentas.destroy');
         Route::get('/cuentas/{id}', [CuentasContablesController::class, 'show'])
             ->whereNumber('id')
             ->name('erp.cuentas.show');
@@ -216,12 +223,23 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.ti.anular');
 
         // Tesorería — cobros (SPEC 02 §6.6)
+        // ADDENDUM v1.15 Sprint O — items-cobrables (debe ir antes de /{id}).
+        Route::get('/cobros/items-cobrables', [CobrosController::class, 'itemsCobrables'])
+            ->name('erp.cobros.items-cobrables');
         Route::get('/cobros', [CobrosController::class, 'index'])->name('erp.cobros.index');
         Route::post('/cobros', [CobrosController::class, 'store'])->name('erp.cobros.store');
         Route::get('/cobros/{id}', [CobrosController::class, 'show'])
             ->whereNumber('id')->name('erp.cobros.show');
         Route::post('/cobros/{id}/anular', [CobrosController::class, 'anular'])
             ->whereNumber('id')->name('erp.cobros.anular');
+
+        // ADDENDUM v1.15 Sprint O — Imputación de Notas de Crédito.
+        Route::get('/imputaciones-nc', [ImputacionesNcController::class, 'index'])
+            ->name('erp.imputaciones-nc.index');
+        Route::post('/imputaciones-nc', [ImputacionesNcController::class, 'store'])
+            ->name('erp.imputaciones-nc.store');
+        Route::delete('/imputaciones-nc/{id}', [ImputacionesNcController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.imputaciones-nc.destroy');
 
         // Tesorería — eCheq (SPEC 02 §6.4)
         Route::get('/echeq', [EcheqController::class, 'index'])->name('erp.echeq.index');

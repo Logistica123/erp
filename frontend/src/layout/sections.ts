@@ -33,7 +33,7 @@ export const sections: NavSection[] = [
   {
     label: 'Contabilidad',
     items: [
-      { to: '/erp/asientos', label: 'Asientos', icon: BookOpen },
+      // v1.15 Sprint M — Asientos absorbido en Libro Diario (botón "+ Nuevo asiento" en su header).
       { to: '/erp/libro-diario', label: 'Libro Diario', icon: BookText },
       { to: '/erp/libro-mayor', label: 'Libro Mayor', icon: BookOpen },
       { to: '/erp/plan-cuentas', label: 'Plan de Cuentas', icon: ListTree },
@@ -61,6 +61,7 @@ export const sections: NavSection[] = [
     items: [
       { to: '/erp/facturacion', label: 'Facturas de venta', icon: FileText },
       { to: '/erp/cc-clientes', label: 'CC Clientes', icon: Users },
+      { to: '/erp/cc-clientes/imputar-nc', label: 'Imputar NC a facturas', icon: Users },
       { to: '/erp/libro-iva-ventas', label: 'Libro IVA Ventas (import)', icon: ScrollText },
       { to: '/erp/fce', label: 'FCE MiPyME', icon: ClipboardList },
     ],

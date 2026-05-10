@@ -7,6 +7,7 @@ use App\Erp\Services\CobroService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -20,6 +21,105 @@ use Illuminate\Validation\Rule;
 class CobrosController
 {
     public function __construct(private readonly CobroService $service) {}
+
+    /**
+     * GET /api/erp/cobros/items-cobrables?cliente_id={X}
+     *
+     * v1.15 Sprint O — Devuelve facturas/ND con saldo > 0 y NC libres del
+     * cliente (saldo_imputable > 0). Solo items contables que tengan saldo
+     * para aplicar/imputar contra un cobro.
+     */
+    public function itemsCobrables(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'cliente_id' => ['required', 'integer'],
+        ]);
+        $empresaId = $request->user()->erpPerfil?->empresa_id ?? 1;
+
+        // Facturas/ND del cliente con saldo > 0.
+        // saldo = imp_total * tc.signo  −  SUM(cobro_items.importe)  −  SUM(imputaciones_nc.importe)
+        // Para FACTURAs y NDs, tc.signo = +1 → saldo deudor positivo.
+        $facturas = DB::table('erp_facturas_venta as f')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+            ->leftJoin('erp_cobro_items as ci', 'ci.factura_id', '=', 'f.id')
+            ->leftJoin('erp_cobros as co', function ($j) {
+                $j->on('co.id', '=', 'ci.cobro_id')->whereNotIn('co.estado', ['ANULADO']);
+            })
+            ->leftJoin('erp_imputaciones_nc as inc', 'inc.factura_id', '=', 'f.id')
+            ->where('f.empresa_id', $empresaId)
+            ->where('f.auxiliar_id', $data['cliente_id'])
+            ->whereNull('f.deleted_at')
+            ->whereIn('tc.clase', ['FACTURA', 'NOTA_DEBITO'])
+            ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL'])
+            ->groupBy('f.id', 'f.numero', 'f.fecha_emision', 'f.imp_total',
+                'f.punto_venta', 'tc.codigo_interno', 'tc.letra', 'tc.clase')
+            ->select(
+                'f.id', 'f.numero', 'f.fecha_emision', 'f.punto_venta', 'f.imp_total',
+                'tc.codigo_interno as tipo_codigo', 'tc.letra', 'tc.clase as tipo_clase',
+                DB::raw('COALESCE(SUM(DISTINCT ci.importe), 0) as cobrado'),
+                DB::raw('COALESCE(SUM(DISTINCT inc.importe), 0) as imputado_nc'),
+            )
+            ->get()
+            ->map(function ($r) {
+                $saldo = (float) $r->imp_total - (float) $r->cobrado - (float) $r->imputado_nc;
+                return [
+                    'tipo' => strtolower($r->tipo_clase),
+                    'id' => (int) $r->id,
+                    'label' => sprintf('%s-%s %s-%s',
+                        $r->tipo_codigo, $r->letra,
+                        str_pad((string) $r->punto_venta, 4, '0', STR_PAD_LEFT),
+                        str_pad((string) $r->numero, 8, '0', STR_PAD_LEFT)),
+                    'fecha' => $r->fecha_emision,
+                    'total' => (float) $r->imp_total,
+                    'saldo' => round($saldo, 2),
+                ];
+            })
+            ->filter(fn ($r) => $r['saldo'] > 0.005)
+            ->values();
+
+        // NC del cliente con saldo imputable.
+        // NC tiene tc.signo = -1, por lo que imp_total ya viene firmado por
+        // convención del seed o lo imputamos como abs() y lo restamos al cobro.
+        $ncs = DB::table('erp_facturas_venta as f')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+            ->leftJoin('erp_imputaciones_nc as inc', 'inc.nc_id', '=', 'f.id')
+            ->where('f.empresa_id', $empresaId)
+            ->where('f.auxiliar_id', $data['cliente_id'])
+            ->whereNull('f.deleted_at')
+            ->where('tc.clase', 'NOTA_CREDITO')
+            ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL'])
+            ->groupBy('f.id', 'f.numero', 'f.fecha_emision', 'f.imp_total',
+                'f.punto_venta', 'tc.codigo_interno', 'tc.letra')
+            ->select(
+                'f.id', 'f.numero', 'f.fecha_emision', 'f.punto_venta', 'f.imp_total',
+                'tc.codigo_interno as tipo_codigo', 'tc.letra',
+                DB::raw('COALESCE(SUM(inc.importe), 0) as imputado'),
+            )
+            ->get()
+            ->map(function ($r) {
+                // NC: imp_total siempre positivo en DB, signo va por tc.signo.
+                $saldoImp = (float) $r->imp_total - (float) $r->imputado;
+                return [
+                    'tipo' => 'nc',
+                    'id' => (int) $r->id,
+                    'label' => sprintf('%s-%s %s-%s',
+                        $r->tipo_codigo, $r->letra,
+                        str_pad((string) $r->punto_venta, 4, '0', STR_PAD_LEFT),
+                        str_pad((string) $r->numero, 8, '0', STR_PAD_LEFT)),
+                    'fecha' => $r->fecha_emision,
+                    'total' => -1 * (float) $r->imp_total, // signo negativo para presentación
+                    'saldo' => round(-1 * $saldoImp, 2),
+                    'saldo_imputable' => round($saldoImp, 2),
+                ];
+            })
+            ->filter(fn ($r) => abs($r['saldo']) > 0.005)
+            ->values();
+
+        return response()->json([
+            'ok' => true,
+            'data' => $facturas->concat($ncs)->sortBy('fecha')->values()->all(),
+        ]);
+    }
 
     public function index(Request $request): JsonResponse
     {

@@ -92,6 +92,7 @@ class AsientosController
             'diario_id' => ['required', 'integer'],
             'fecha' => ['required', 'date'],
             'glosa' => ['nullable', 'string', 'max:500'],
+            'observaciones' => ['nullable', 'string'], // v1.15 Sprint M
             'movimientos' => ['required', 'array', 'min:2'],
             'movimientos.*.cuenta_id' => ['nullable', 'integer'],
             'movimientos.*.cuenta_codigo' => ['nullable', 'string', 'max:20'],

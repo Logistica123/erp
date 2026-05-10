@@ -17,6 +17,7 @@ class Asiento extends Model
     protected $fillable = [
         'empresa_id', 'ejercicio_id', 'periodo_id', 'diario_id',
         'numero', 'fecha', 'fecha_contabilizacion', 'glosa',
+        'observaciones', // v1.15 Sprint M
         'origen', 'origen_id', 'origen_tabla', 'estado', 'moneda_base',
         'total_debe', 'total_haber',
         // 'desbalance' es columna GENERATED — no se incluye en fillable.

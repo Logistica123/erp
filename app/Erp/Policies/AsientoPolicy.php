@@ -65,7 +65,11 @@ class AsientoPolicy
             return false;
         }
 
-        return $this->tienePermiso($user, 'contabilidad.asientos.editar');
+        // v1.15 Sprint M — el addendum pide permiso dedicado
+        // `contabilidad.asientos.eliminar_borrador`. Aceptamos también
+        // `contabilidad.asientos.editar` por backward compat.
+        return $this->tienePermiso($user, 'contabilidad.asientos.eliminar_borrador')
+            || $this->tienePermiso($user, 'contabilidad.asientos.editar');
     }
 
     private function tienePermiso(User $user, string $codigo): bool

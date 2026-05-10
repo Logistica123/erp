@@ -87,6 +87,7 @@ export function NuevoAsientoPage() {
   const [diarioId, setDiarioId] = useState<number | null>(null);
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
   const [glosa, setGlosa] = useState('');
+  const [observaciones, setObservaciones] = useState(''); // v1.15 Sprint M
   const [lineas, setLineas] = useState<Linea[]>([emptyLinea(), emptyLinea()]);
   const [resultado, setResultado] = useState<{ ok: string; detalle?: string } | null>(null);
 
@@ -121,6 +122,7 @@ export function NuevoAsientoPage() {
         diario_id: diarioId,
         fecha,
         glosa: glosa || null,
+        observaciones: observaciones || null,
         movimientos: lineas.map((l) => ({
           cuenta_id: l.cuenta_id,
           cuenta_codigo: l.cuenta_id ? undefined : l.cuenta_codigo || undefined,
@@ -250,6 +252,20 @@ export function NuevoAsientoPage() {
               placeholder="Descripción general del asiento"
             />
           </div>
+        </div>
+
+        {/* Addendum v1.15 Sprint M — Observaciones (texto libre detallado, opcional) */}
+        <div>
+          <div className="text-[10px] font-semibold text-ink-muted uppercase tracking-wider mb-1">
+            Observaciones (opcional)
+          </div>
+          <textarea
+            className="w-full px-[9px] py-[6px] text-[12px] border border-line-strong rounded-md bg-white"
+            value={observaciones}
+            onChange={(e) => setObservaciones(e.target.value)}
+            placeholder="Texto libre detallado. Aparece solo en el detalle del asiento."
+            rows={2}
+          />
         </div>
 
         {/* Editor de líneas */}

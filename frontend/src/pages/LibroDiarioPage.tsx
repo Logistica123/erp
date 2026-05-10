@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Download, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Download, Loader2, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { fmtMoney } from '@/lib/cn';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api, ApiError } from '@/lib/api';
+import { useToast } from '@/hooks/useToast';
 
 type Asiento = {
   id: number;
@@ -40,6 +42,18 @@ export function LibroDiarioPage() {
   const [desde, setDesde] = useState(firstOfMonth());
   const [hasta, setHasta] = useState(today());
   const [estado, setEstado] = useState<'' | Asiento['estado']>('');
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  const eliminar = useMutation<unknown, ApiError, number>({
+    mutationFn: (id) => api.delete(`/api/erp/asientos/${id}`),
+    onSuccess: () => {
+      toast.success('Asiento BORRADOR eliminado');
+      qc.invalidateQueries({ queryKey: ['asientos'] });
+    },
+    onError: (e) => toast.error('No se pudo eliminar', e.message),
+  });
 
   const { data, isLoading } = useQuery<Resp>({
     queryKey: ['asientos', { desde, hasta, estado }],
@@ -72,6 +86,9 @@ export function LibroDiarioPage() {
           </Button>
           <Button variant="secondary">
             <Download className="w-3 h-3" /> Exportar PDF
+          </Button>
+          <Button variant="primary" onClick={() => navigate('/erp/asientos/nuevo')}>
+            <Plus className="w-3 h-3" /> Nuevo asiento
           </Button>
         </div>
       </div>
@@ -135,12 +152,13 @@ export function LibroDiarioPage() {
                 <th className="px-[10px] py-[7px] text-left text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[80px]">
                   Hash
                 </th>
+                <th className="px-[6px] py-[7px] w-[36px]"></th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-ink-muted">
+                  <td colSpan={9} className="py-10 text-center text-ink-muted">
                     <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Cargando…
                   </td>
                 </tr>
@@ -168,11 +186,27 @@ export function LibroDiarioPage() {
                   <td className="px-[10px] py-[7px] font-mono text-[10px] text-ink-muted" title={a.hash_integridad ?? ''}>
                     {a.hash_integridad ? `${a.hash_integridad.slice(0, 8)}…` : '—'}
                   </td>
+                  <td className="px-[6px] py-[6px] text-right">
+                    {a.estado === 'BORRADOR' && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`Eliminar asiento BORRADOR #${a.numero}? Esta acción no se puede deshacer.`)) {
+                            eliminar.mutate(a.id);
+                          }
+                        }}
+                        className="opacity-50 hover:opacity-100 hover:text-danger cursor-pointer"
+                        title="Eliminar BORRADOR"
+                        disabled={eliminar.isPending}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {data && asientos.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-ink-muted">
+                  <td colSpan={9} className="py-10 text-center text-ink-muted">
                     Sin asientos en el período.
                   </td>
                 </tr>

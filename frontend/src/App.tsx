@@ -2,7 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './layout/AppShell';
 import { ToastProvider } from './hooks/useToast';
-import { AsientosPage } from './pages/AsientosPage';
+// AsientosPage eliminado del sidebar/rutas en v1.15 Sprint M (consolidación con Libro Diario).
 import { AuditoriaPage } from './pages/AuditoriaPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { BalanceSSPage } from './pages/BalanceSSPage';
@@ -53,6 +53,7 @@ import { LibroIvaComprasExportPage } from './pages/LibroIvaComprasExportPage';
 import { LibroIvaComprasImportPage } from './pages/LibroIvaComprasImportPage';
 import { LibroIvaComprasNoTomadasPage } from './pages/LibroIvaComprasNoTomadasPage';
 import { ReportesAnaliticosPage } from './pages/ReportesAnaliticosPage';
+import { ImputarNcPage } from './pages/ImputarNcPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
 import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
 import { AusenciasPage } from './pages/Sueldos/AusenciasPage';
@@ -98,7 +99,8 @@ export default function App() {
               <Route path="/erp" element={<Navigate to="/erp/dashboard" replace />} />
               <Route path="/erp/dashboard" element={<DashboardPage />} handle={{ crumb: 'Dashboard' }} />
               <Route path="/erp/asientos/nuevo" element={<NuevoAsientoPage />} handle={{ crumb: 'Nuevo asiento' }} />
-              <Route path="/erp/asientos" element={<AsientosPage />} handle={{ crumb: 'Asientos' }} />
+              {/* v1.15 Sprint M — /erp/asientos redirige a /erp/libro-diario (consolidación). */}
+              <Route path="/erp/asientos" element={<Navigate to="/erp/libro-diario" replace />} />
               <Route path="/erp/libro-diario" element={<LibroDiarioPage />} handle={{ crumb: 'Libro Diario' }} />
               <Route path="/erp/libro-mayor" element={<LibroMayorPage />} handle={{ crumb: 'Libro Mayor' }} />
               <Route path="/erp/plan-cuentas" element={<PlanCuentasPage />} handle={{ crumb: 'Plan de Cuentas' }} />
@@ -122,6 +124,7 @@ export default function App() {
               {/* F3 — Compras + CC + FCE */}
               <Route path="/erp/facturas-compra" element={<FacturasCompraPage />} handle={{ crumb: 'Facturas de compra' }} />
               <Route path="/erp/cc-clientes" element={<CCPage kind="clientes" />} handle={{ crumb: 'CC Clientes' }} />
+              <Route path="/erp/cc-clientes/imputar-nc" element={<ImputarNcPage />} handle={{ crumb: 'Imputar NC' }} />
               <Route path="/erp/cc-proveedores" element={<CCPage kind="proveedores" />} handle={{ crumb: 'CC Proveedores' }} />
               <Route path="/erp/fce" element={<FcePage />} handle={{ crumb: 'FCE MiPyME' }} />
 

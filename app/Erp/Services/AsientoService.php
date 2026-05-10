@@ -117,6 +117,7 @@ class AsientoService
                 'fecha' => $fecha,
                 'fecha_contabilizacion' => now(),
                 'glosa' => $data['glosa'] ?? null,
+                'observaciones' => $data['observaciones'] ?? null, // v1.15 Sprint M
                 'origen' => $data['origen'] ?? 'MANUAL',
                 'origen_id' => $data['origen_id'] ?? null,
                 'origen_tabla' => $data['origen_tabla'] ?? null,

@@ -19,6 +19,17 @@ class ErpRequireMfaFresh
 {
     public function handle(Request $request, Closure $next): Response
     {
+        // Si el usuario no tiene MFA habilitado en su perfil ERP, la regla de
+        // "MFA fresco" no aplica — la sesión nunca llega a `mfa_verificado=true`
+        // porque no hay flujo TOTP que lo dispare.
+        // (v1.15 Sprint N — fix del bug O-PE-1: cerrar/reabrir período fallaba
+        // silenciosamente con 401 MFA_REFRESH_REQUERIDO para usuarios sin MFA.)
+        $user = $request->user();
+        $perfil = $user?->erpPerfil;
+        if ($perfil && ! $perfil->mfa_habilitado) {
+            return $next($request);
+        }
+
         $sesion = $request->attributes->get('erp_sesion');
 
         if (! $sesion instanceof Sesion) {

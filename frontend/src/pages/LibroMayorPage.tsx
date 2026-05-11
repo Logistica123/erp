@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { SelectorCuentaContable } from '@/components/contabilidad/SelectorCuentaContable';
 
 type Cuenta = {
   id: number;
@@ -116,18 +117,18 @@ export function LibroMayorPage() {
                 onChange={(e) => setHasta(e.target.value)}
                 className="px-[9px] py-1 text-[12px] border border-line-strong rounded-md bg-white"
               />
-              <select
-                value={effectiveId ?? ''}
-                onChange={(e) => setCuentaId(Number(e.target.value))}
-                className="px-[9px] py-1 text-[12px] border border-line-strong rounded-md bg-white min-w-[280px]"
-              >
-                <option value="">Seleccionar cuenta…</option>
-                {cuentas.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.codigo} — {c.nombre}
-                  </option>
-                ))}
-              </select>
+              {/* v1.15 Sprint M+: SelectorCuentaContable reemplaza al dropdown gigante. */}
+              {/* incluirInactivas=true → cuentas dadas de baja con movimientos históricos */}
+              {/* siguen siendo consultables (O-LM-2). */}
+              <div className="min-w-[320px]">
+                <SelectorCuentaContable
+                  value={effectiveId ?? null}
+                  onChange={(id) => setCuentaId(id)}
+                  soloImputables
+                  incluirInactivas
+                  placeholder="Buscar cuenta por código o nombre…"
+                />
+              </div>
             </div>
           }
         />

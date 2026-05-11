@@ -54,6 +54,8 @@ import { LibroIvaComprasImportPage } from './pages/LibroIvaComprasImportPage';
 import { LibroIvaComprasNoTomadasPage } from './pages/LibroIvaComprasNoTomadasPage';
 import { ReportesAnaliticosPage } from './pages/ReportesAnaliticosPage';
 import { ImputarNcPage } from './pages/ImputarNcPage';
+import { AsientoDetallePage } from './pages/AsientoDetallePage';
+import { CentrosCostoPage } from './pages/CentrosCostoPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
 import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
 import { AusenciasPage } from './pages/Sueldos/AusenciasPage';
@@ -99,6 +101,8 @@ export default function App() {
               <Route path="/erp" element={<Navigate to="/erp/dashboard" replace />} />
               <Route path="/erp/dashboard" element={<DashboardPage />} handle={{ crumb: 'Dashboard' }} />
               <Route path="/erp/asientos/nuevo" element={<NuevoAsientoPage />} handle={{ crumb: 'Nuevo asiento' }} />
+              {/* v1.15 Sprint M+ — pantalla detalle read-only */}
+              <Route path="/erp/asientos/:id" element={<AsientoDetallePage />} handle={{ crumb: 'Detalle asiento' }} />
               {/* v1.15 Sprint M — /erp/asientos redirige a /erp/libro-diario (consolidación). */}
               <Route path="/erp/asientos" element={<Navigate to="/erp/libro-diario" replace />} />
               <Route path="/erp/libro-diario" element={<LibroDiarioPage />} handle={{ crumb: 'Libro Diario' }} />
@@ -106,6 +110,8 @@ export default function App() {
               <Route path="/erp/plan-cuentas" element={<PlanCuentasPage />} handle={{ crumb: 'Plan de Cuentas' }} />
               <Route path="/erp/balance-ss" element={<BalanceSSPage />} handle={{ crumb: 'Sumas y Saldos' }} />
               <Route path="/erp/periodos" element={<PeriodosPage />} handle={{ crumb: 'Períodos' }} />
+              {/* v1.14 ampliación — ABM de Centros de Costo */}
+              <Route path="/erp/centros-costo" element={<CentrosCostoPage />} handle={{ crumb: 'Centros de Costo' }} />
               <Route path="/erp/estados-contables" element={<EstadosContablesPage />} handle={{ crumb: 'Estados Contables' }} />
               <Route path="/erp/facturacion" element={<FacturacionPage />} handle={{ crumb: 'Facturación' }} />
               <Route path="/erp/facturacion/nueva" element={<NuevaFacturaPage />} handle={{ crumb: 'Nueva factura' }} />

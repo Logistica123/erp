@@ -29,7 +29,10 @@ class CuentasContablesController
             ->where('empresa_id', $empresaId)
             ->orderBy('codigo');
 
-        if ($request->boolean('activo', true)) {
+        // v1.15 Sprint L+: query param `incluir_inactivas=1` permite mostrar
+        // cuentas dadas de baja en el listado (toggle "Mostrar inactivas" del UI).
+        $incluirInactivas = $request->boolean('incluir_inactivas');
+        if ($request->boolean('activo', true) && ! $incluirInactivas) {
             $query->where('activo', true);
         }
 
@@ -66,6 +69,55 @@ class CuentasContablesController
                 'total' => $cuentas->count(),
                 'imputables' => $cuentas->where('imputable', true)->count(),
             ],
+        ]);
+    }
+
+    /**
+     * GET /api/erp/cuentas/imputables?q={texto}&limit=20&incluir_inactivas={0|1}
+     *
+     * v1.15 Sprint M+ — endpoint para el componente <SelectorCuentaContable />.
+     * Busca por código o nombre, filtra solo cuentas imputables (las que
+     * pueden recibir movimientos). Soporta consulta histórica con
+     * `incluir_inactivas=1` (Libro Mayor, Sumas y Saldos).
+     */
+    public function imputables(Request $request): JsonResponse
+    {
+        $empresaId = $this->empresaIdFromRequest($request);
+        $q = trim((string) $request->query('q', ''));
+        $limit = (int) $request->query('limit', 20);
+        $incluirInactivas = (bool) $request->query('incluir_inactivas', false);
+
+        $query = CuentaContable::where('empresa_id', $empresaId)
+            ->where('imputable', true);
+
+        if (! $incluirInactivas) {
+            $query->where('activo', true);
+        }
+
+        if ($q !== '') {
+            $query->where(function ($sub) use ($q) {
+                $sub->where('codigo', 'like', "{$q}%")
+                    ->orWhere('nombre', 'like', "%{$q}%");
+            });
+        }
+
+        $rows = $query->orderBy('codigo')
+            ->limit($limit > 0 && $limit <= 100 ? $limit : 20)
+            ->get(['id', 'codigo', 'nombre', 'activo', 'admite_cc', 'admite_auxiliar', 'tipo_auxiliar', 'moneda']);
+
+        return response()->json([
+            'ok' => true,
+            'data' => $rows->map(fn ($c) => [
+                'id' => $c->id,
+                'codigo' => $c->codigo,
+                'nombre' => $c->nombre,
+                'activo' => (bool) $c->activo,
+                'admite_cc' => (bool) $c->admite_cc,
+                'admite_auxiliar' => (bool) $c->admite_auxiliar,
+                'tipo_auxiliar' => $c->tipo_auxiliar,
+                'moneda' => $c->moneda,
+                'label' => $c->codigo.' — '.$c->nombre,
+            ])->all(),
         ]);
     }
 
@@ -292,6 +344,85 @@ class CuentasContablesController
                 'codigo' => $cuenta->codigo,
                 'desactivada_con_referencias' => $force && ! empty($bloqueos),
                 'bloqueos_ignorados' => $force ? $bloqueos : [],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/erp/cuentas/{id}/reactivar — v1.15 Sprint L+.
+     *
+     * Permite revertir un soft delete. Si la cuenta padre también está inactiva,
+     * rechaza con 422 + sugerencia (frontend puede ofrecer "Reactivar padre+hija").
+     * Reutiliza el permiso `contabilidad.cuentas.eliminar` (D-PC-7).
+     */
+    public function reactivar(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $perfil = $user?->erpPerfil;
+        if (! $perfil?->tienePermiso('contabilidad.cuentas.eliminar')) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'SIN_PERMISO', 'message' => 'Necesitás el permiso contabilidad.cuentas.eliminar.'],
+            ], 403);
+        }
+
+        $empresaId = $this->empresaIdFromRequest($request);
+        $cuenta = CuentaContable::where('empresa_id', $empresaId)->find($id);
+        if (! $cuenta) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_ENCONTRADA']], 404);
+        }
+        if ($cuenta->activo) {
+            return response()->json(['ok' => true, 'data' => ['mensaje' => 'Ya estaba activa.']]);
+        }
+
+        // ¿El padre está inactivo? Si sí, requiere reactivación encadenada.
+        if ($cuenta->codigo_padre_id) {
+            $padre = DB::table('erp_cuentas_contables')
+                ->where('id', $cuenta->codigo_padre_id)
+                ->first(['id', 'codigo', 'nombre', 'activo']);
+            if ($padre && ! $padre->activo) {
+                $reactivarPadre = $request->boolean('reactivar_padre');
+                if (! $reactivarPadre) {
+                    return response()->json([
+                        'ok' => false,
+                        'error' => [
+                            'code' => 'PADRE_INACTIVO',
+                            'message' => sprintf(
+                                'La cuenta padre %s — %s también está inactiva. Para reactivar esta cuenta, primero hay que reactivar el padre.',
+                                $padre->codigo, $padre->nombre
+                            ),
+                            'padre' => ['id' => (int) $padre->id, 'codigo' => $padre->codigo, 'nombre' => $padre->nombre],
+                            'sugerencia' => 'Reenviá la request con ?reactivar_padre=1 para reactivar padre+hija juntos.',
+                        ],
+                    ], 422);
+                }
+                // Reactivar padre primero.
+                DB::table('erp_cuentas_contables')
+                    ->where('id', $padre->id)
+                    ->update([
+                        'activo' => 1,
+                        'reactivada_at' => now(),
+                        'reactivada_por' => $user->id,
+                        'eliminada_at' => null,
+                        'eliminada_por' => null,
+                    ]);
+            }
+        }
+
+        $cuenta->update([
+            'activo' => 1,
+            'reactivada_at' => now(),
+            'reactivada_por' => $user->id,
+            'eliminada_at' => null,
+            'eliminada_por' => null,
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'id' => $cuenta->id,
+                'codigo' => $cuenta->codigo,
+                'reactivada_padre' => ! empty($padre) && $request->boolean('reactivar_padre'),
             ],
         ]);
     }

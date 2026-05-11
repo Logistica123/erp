@@ -108,6 +108,45 @@ class CobroService
         }
 
         return DB::transaction(function () use ($data, $auxiliar, $sumaItems) {
+            // v1.15 Sprint O+ (RN-TS-5 / D-TS-9): defensa en profundidad.
+            // Lock pesimista sobre cada factura referenciada + revalidación de
+            // saldo > 0 desde la BD para serializar cobros concurrentes. Cubre:
+            // race conditions entre operadores, POST directo a la API, snapshot
+            // viejo del cliente. Si la factura ya está saldada, 422 claro.
+            foreach ($data['items'] as $idx => $i) {
+                if (empty($i['factura_id']) || ($i['tipo_item'] ?? 'FACTURA_VENTA') !== CobroItem::TIPO_FACTURA_VENTA) {
+                    continue;
+                }
+                $factura = DB::table('erp_facturas_venta')
+                    ->where('id', $i['factura_id'])
+                    ->lockForUpdate()
+                    ->select('id', 'numero', 'imp_total', 'estado')
+                    ->first();
+                if (! $factura) {
+                    throw new DomainException('FACTURA_NO_ENCONTRADA: item #'.($idx + 1));
+                }
+                $cobrado = (float) DB::table('erp_cobro_items as ci')
+                    ->join('erp_cobros as co', 'co.id', '=', 'ci.cobro_id')
+                    ->where('ci.factura_id', $factura->id)
+                    ->whereNotIn('co.estado', ['ANULADO'])
+                    ->sum('ci.importe');
+                $imputadoNc = (float) DB::table('erp_imputaciones_nc')
+                    ->where('factura_id', $factura->id)
+                    ->sum('importe');
+                $saldo = (float) $factura->imp_total - $cobrado - $imputadoNc;
+                if ($saldo <= 0.005) {
+                    throw new DomainException(sprintf(
+                        'FACTURA_SALDADA: la factura %s ya fue cobrada totalmente. No se puede aplicar cobro adicional. Refrescá la pantalla.',
+                        $factura->numero
+                    ));
+                }
+                if ((float) $i['importe'] > $saldo + 0.005) {
+                    throw new DomainException(sprintf(
+                        'IMPORTE_EXCEDE_SALDO: el monto $%.2f del item #%d supera el saldo pendiente $%.2f de la factura %s.',
+                        (float) $i['importe'], $idx + 1, $saldo, $factura->numero
+                    ));
+                }
+            }
             DB::statement('SET @erp_current_user_id = ?', [$data['usuario_id']]);
 
             $numero = $this->proximoNumero($data['empresa_id']);

@@ -46,13 +46,17 @@ class ImputacionesNcController
             $errores = [];
 
             foreach ($data['imputaciones'] as $idx => $imp) {
+                // v1.15 Sprint O+ (D-TS-10): lock pesimista sobre NC y factura
+                // dentro de la transacción. Revalidar saldos desde la BD —
+                // serializa imputaciones concurrentes y previene over-imputation.
                 $nc = DB::table('erp_facturas_venta as f')
                     ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
                     ->where('f.id', $imp['nc_id'])
                     ->where('f.empresa_id', $empresaId)
                     ->where('f.auxiliar_id', $data['cliente_id'])
                     ->where('tc.clase', 'NOTA_CREDITO')
-                    ->select('f.id', 'f.imp_total')
+                    ->lockForUpdate()
+                    ->select('f.id', 'f.imp_total', 'f.numero')
                     ->first();
                 $factura = DB::table('erp_facturas_venta as f')
                     ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
@@ -60,7 +64,8 @@ class ImputacionesNcController
                     ->where('f.empresa_id', $empresaId)
                     ->where('f.auxiliar_id', $data['cliente_id'])
                     ->whereIn('tc.clase', ['FACTURA', 'NOTA_DEBITO'])
-                    ->select('f.id', 'f.imp_total')
+                    ->lockForUpdate()
+                    ->select('f.id', 'f.imp_total', 'f.numero')
                     ->first();
 
                 if (! $nc || ! $factura) {

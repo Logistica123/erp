@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Download, Loader2, Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Loader2, Plus, Trash2, AlertTriangle, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -78,10 +78,15 @@ function indentClass(nivel: 1 | 2 | 3 | 4): string {
 // v1.15 Sprint L — niveles de expansión persistidos en localStorage.
 type NivelExp = 'all' | '1' | '2' | '3';
 const STORAGE_KEY = 'erp.plan-cuentas.nivel-expansion';
+// v1.15 Sprint L+ — toggle "Mostrar inactivas" persistido.
+const STORAGE_INACTIVAS = 'erp.plan-cuentas.mostrar-inactivas';
 
 function loadNivelExp(): NivelExp {
   const v = localStorage.getItem(STORAGE_KEY);
   return v === 'all' || v === '1' || v === '2' || v === '3' ? v : '2';
+}
+function loadMostrarInactivas(): boolean {
+  return localStorage.getItem(STORAGE_INACTIVAS) === '1';
 }
 
 function collectAllIds(nodes: Cuenta[], out: Set<number> = new Set()): Set<number> {
@@ -98,9 +103,10 @@ export function PlanCuentasPage() {
   const toast = useToast();
   const qc = useQueryClient();
 
+  const [mostrarInactivas, setMostrarInactivas] = useState<boolean>(loadMostrarInactivas);
   const { data, isLoading, error } = useQuery<Resp>({
-    queryKey: ['cuentas', 'tree'],
-    queryFn: () => api.get<Resp>('/api/erp/cuentas?tree=true'),
+    queryKey: ['cuentas', 'tree', mostrarInactivas],
+    queryFn: () => api.get<Resp>(`/api/erp/cuentas?tree=true${mostrarInactivas ? '&incluir_inactivas=1' : ''}`),
   });
 
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -108,6 +114,8 @@ export function PlanCuentasPage() {
   const [nivelExp, setNivelExp] = useState<NivelExp>(loadNivelExp);
   const [nuevaOpen, setNuevaOpen] = useState(false);
   const [eliminarOpen, setEliminarOpen] = useState<Cuenta | null>(null);
+  // v1.15 Sprint L+ — modal reactivar (incluye fallback "reactivar padre+hija").
+  const [reactivarOpen, setReactivarOpen] = useState<Cuenta | null>(null);
 
   // Aplicar el nivel de expansión cuando cambia o cuando llega la data.
   useEffect(() => {
@@ -183,6 +191,14 @@ export function PlanCuentasPage() {
             <option value="2">Hasta nivel 2</option>
             <option value="3">Hasta nivel 3</option>
           </select>
+          <label className="flex items-center gap-1 text-[11.5px] text-ink-2 cursor-pointer px-2">
+            <input type="checkbox" checked={mostrarInactivas}
+              onChange={(e) => {
+                setMostrarInactivas(e.target.checked);
+                localStorage.setItem(STORAGE_INACTIVAS, e.target.checked ? '1' : '0');
+              }} />
+            Mostrar inactivas
+          </label>
           <Button variant="secondary" onClick={exportarCSV}>
             <Download className="w-3 h-3" /> Exportar
           </Button>
@@ -227,7 +243,9 @@ export function PlanCuentasPage() {
             return (
               <div
                 key={c.id}
-                className={`grid border-b border-line text-[12px] items-center ${levelClasses(c, i % 2 === 1)}`}
+                className={`grid border-b border-line text-[12px] items-center ${levelClasses(c, i % 2 === 1)} ${
+                  c.activo ? '' : 'opacity-50 italic'
+                }`}
                 style={{ gridTemplateColumns: '120px 1fr 80px 80px 60px 60px 140px 40px' }}
               >
                 <div className={`px-[10px] py-[7px] font-mono text-[11px] ${codeColor(c.nivel)}`}>{c.codigo}</div>
@@ -274,6 +292,15 @@ export function PlanCuentasPage() {
                       <Trash2 className="w-3 h-3" />
                     </button>
                   )}
+                  {!c.activo && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setReactivarOpen(c); }}
+                      className="opacity-70 hover:opacity-100 hover:text-success cursor-pointer"
+                      title="Reactivar cuenta"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -307,7 +334,81 @@ export function PlanCuentasPage() {
           onDeleted={() => { qc.invalidateQueries({ queryKey: ['cuentas'] }); setEliminarOpen(null); }}
         />
       )}
+      {reactivarOpen && (
+        <ReactivarCuentaModal
+          cuenta={reactivarOpen}
+          onClose={() => setReactivarOpen(null)}
+          onDone={() => { qc.invalidateQueries({ queryKey: ['cuentas'] }); setReactivarOpen(null); }}
+        />
+      )}
     </>
+  );
+}
+
+function ReactivarCuentaModal({
+  cuenta, onClose, onDone,
+}: {
+  cuenta: Cuenta;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [padreInactivo, setPadreInactivo] = useState<{ id: number; codigo: string; nombre: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const m = useMutation<unknown, ApiError, boolean>({
+    mutationFn: (reactivarPadre) => api.post(
+      `/api/erp/cuentas/${cuenta.id}/reactivar${reactivarPadre ? '?reactivar_padre=1' : ''}`
+    ),
+    onSuccess: () => {
+      toast.success(`Cuenta ${cuenta.codigo} reactivada`);
+      onDone();
+    },
+    onError: (e) => {
+      const payload = e.payload as { error?: { code?: string; padre?: { id: number; codigo: string; nombre: string } } };
+      if (payload?.error?.code === 'PADRE_INACTIVO' && payload.error.padre) {
+        setPadreInactivo(payload.error.padre);
+      } else {
+        setError(e.message);
+      }
+    },
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Reactivar cuenta ${cuenta.codigo}`} size="sm"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" disabled={m.isPending}
+            onClick={() => { setError(null); m.mutate(!!padreInactivo); }}>
+            {m.isPending ? 'Reactivando…'
+              : padreInactivo ? 'Reactivar padre + hija' : 'Reactivar'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-[12.5px]">
+        <div>
+          ¿Reactivar la cuenta <code className="font-semibold">{cuenta.codigo} — {cuenta.nombre}</code>?
+        </div>
+        <div className="text-[11.5px] text-ink-muted">
+          La cuenta vuelve a estar activa y disponible para nuevos asientos.
+        </div>
+        {padreInactivo && (
+          <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3">
+            <div className="flex items-center gap-1 text-[12px] font-semibold text-warning mb-1">
+              <AlertTriangle className="w-3.5 h-3.5" /> Padre inactivo
+            </div>
+            <div className="text-[11.5px] text-ink">
+              La cuenta padre <code>{padreInactivo.codigo} — {padreInactivo.nombre}</code> también
+              está inactiva. Para reactivar esta cuenta hay que reactivar el padre primero
+              (se hace en el mismo click).
+            </div>
+          </div>
+        )}
+        <FormError error={error} />
+      </div>
+    </Modal>
   );
 }
 

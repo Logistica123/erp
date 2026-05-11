@@ -23,6 +23,7 @@ use App\Erp\Http\Controllers\RolesPermisosController;
 use App\Erp\Http\Controllers\TransferenciasInternasController;
 use App\Erp\Http\Controllers\UsuariosController;
 use App\Erp\Http\Controllers\CatalogosController;
+use App\Erp\Http\Controllers\CentrosCostoController;
 use App\Erp\Http\Controllers\CuentasContablesController;
 use App\Erp\Http\Controllers\EjerciciosController;
 use App\Erp\Http\Controllers\EstadosContablesController;
@@ -70,7 +71,17 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/periodos', [CatalogosController::class, 'periodos'])->name('erp.periodos');
         Route::get('/periodos/abierto', [CatalogosController::class, 'periodoAbierto'])->name('erp.periodos.abierto');
         Route::get('/monedas', [CatalogosController::class, 'monedas'])->name('erp.monedas');
+        // Catálogo simple (compat con SelectField).
         Route::get('/centros-costo', [CatalogosController::class, 'centrosCosto'])->name('erp.centros-costo');
+        // v1.14 ampliación — ABM completo (listado paginado/filtros + CRUD).
+        Route::get('/centros-costo/abm', [CentrosCostoController::class, 'index'])->name('erp.cc.abm.index');
+        Route::post('/centros-costo', [CentrosCostoController::class, 'store'])->name('erp.cc.store');
+        Route::put('/centros-costo/{id}', [CentrosCostoController::class, 'update'])
+            ->whereNumber('id')->name('erp.cc.update');
+        Route::delete('/centros-costo/{id}', [CentrosCostoController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.cc.destroy');
+        Route::post('/centros-costo/{id}/reactivar', [CentrosCostoController::class, 'reactivar'])
+            ->whereNumber('id')->name('erp.cc.reactivar');
         Route::get('/auxiliares', [CatalogosController::class, 'auxiliares'])->name('erp.auxiliares');
         Route::get('/auxiliares/buscar', [AuxiliaresController::class, 'buscar'])->name('erp.auxiliares.buscar');
         Route::post('/auxiliares', [AuxiliaresController::class, 'store'])->name('erp.auxiliares.store');
@@ -88,9 +99,15 @@ Route::prefix('api/erp')->group(function () {
         // ADDENDUM v1.15 Sprint L — exportar CSV (debe ir antes de /{id} para no shadowear).
         Route::get('/cuentas/exportar', [CuentasContablesController::class, 'exportar'])
             ->name('erp.cuentas.exportar');
+        // ADDENDUM v1.15 Sprint M+ — endpoint del SelectorCuentaContable.
+        Route::get('/cuentas/imputables', [CuentasContablesController::class, 'imputables'])
+            ->name('erp.cuentas.imputables');
         Route::post('/cuentas', [CuentasContablesController::class, 'store'])->name('erp.cuentas.store');
         Route::delete('/cuentas/{id}', [CuentasContablesController::class, 'destroy'])
             ->whereNumber('id')->name('erp.cuentas.destroy');
+        // v1.15 Sprint L+
+        Route::post('/cuentas/{id}/reactivar', [CuentasContablesController::class, 'reactivar'])
+            ->whereNumber('id')->name('erp.cuentas.reactivar');
         Route::get('/cuentas/{id}', [CuentasContablesController::class, 'show'])
             ->whereNumber('id')
             ->name('erp.cuentas.show');

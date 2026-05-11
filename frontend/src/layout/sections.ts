@@ -39,6 +39,7 @@ export const sections: NavSection[] = [
       { to: '/erp/plan-cuentas', label: 'Plan de Cuentas', icon: ListTree },
       { to: '/erp/balance-ss', label: 'Sumas y Saldos', icon: Scale },
       { to: '/erp/periodos', label: 'Períodos', icon: CalendarCheck },
+      { to: '/erp/centros-costo', label: 'Centros de Costo', icon: ListTree },
       { to: '/erp/estados-contables', label: 'Estados Contables', icon: FileBarChart },
     ],
   },

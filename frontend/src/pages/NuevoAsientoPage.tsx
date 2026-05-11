@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { fmtMoney } from '@/lib/cn';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
+import { SelectorCuentaContable } from '@/components/contabilidad/SelectorCuentaContable';
 
 type Diario = { id: number; codigo: string; nombre: string; tipo: string };
 type Cuenta = {
@@ -78,12 +79,6 @@ export function NuevoAsientoPage() {
   const ccs = ccResp?.data ?? [];
   const auxiliares = auxResp?.data ?? [];
 
-  const cuentasByCodigo = useMemo(() => {
-    const m = new Map<string, Cuenta>();
-    for (const c of cuentas) m.set(c.codigo, c);
-    return m;
-  }, [cuentas]);
-
   const [diarioId, setDiarioId] = useState<number | null>(null);
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
   const [glosa, setGlosa] = useState('');
@@ -102,6 +97,9 @@ export function NuevoAsientoPage() {
   const totalHaber = lineas.reduce((s, l) => s + l.haber, 0);
   const diff = totalDebe - totalHaber;
   const balanced = Math.abs(diff) < 0.005 && totalDebe > 0;
+  // v1.15 Sprint M+: bloquea submit si alguna línea no tiene cuenta seleccionada.
+  const lineasSinCuenta = lineas.filter((l) => l.cuenta_id == null && (l.debe > 0 || l.haber > 0));
+  const todasLineasConCuenta = lineasSinCuenta.length === 0;
 
   function updateLinea(id: string, patch: Partial<Linea>) {
     setLineas((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -111,10 +109,8 @@ export function NuevoAsientoPage() {
     setLineas((prev) => (prev.length > 2 ? prev.filter((l) => l.id !== id) : prev));
   }
 
-  function onCuentaChange(id: string, codigo: string) {
-    const c = cuentasByCodigo.get(codigo);
-    updateLinea(id, { cuenta_codigo: codigo, cuenta_id: c?.id ?? null });
-  }
+  // v1.15 Sprint M+: onCuentaChange + cuentasByCodigo removidos —
+  // SelectorCuentaContable maneja la selección y emite id+meta directamente.
 
   const crearYContabilizar = useMutation({
     mutationFn: async () => {
@@ -183,7 +179,7 @@ export function NuevoAsientoPage() {
           </Button>
           <Button
             variant="success"
-            disabled={!balanced || crearYContabilizar.isPending || loadingCatalogos}
+            disabled={!balanced || !todasLineasConCuenta || crearYContabilizar.isPending || loadingCatalogos}
             onClick={() => crearYContabilizar.mutate()}
           >
             {crearYContabilizar.isPending ? (
@@ -285,21 +281,22 @@ export function NuevoAsientoPage() {
             </thead>
             <tbody>
               {lineas.map((l, i) => {
-                const cuenta = l.cuenta_id ? cuentas.find((c) => c.id === l.cuenta_id) : cuentasByCodigo.get(l.cuenta_codigo);
+                const cuenta = l.cuenta_id ? cuentas.find((c) => c.id === l.cuenta_id) : null;
                 return (
                   <tr key={l.id} className="border-b border-line hover:bg-surface-hover">
                     <td className="text-center font-mono text-[11px] text-ink-muted w-[30px]">{i + 1}</td>
                     <td className="p-[6px_10px]">
-                      <input
-                        list="cuentas-list"
-                        className="w-full px-[6px] py-1 text-[12px] border border-transparent hover:border-line focus:outline-1 focus:outline-azure focus:border-azure focus:bg-white rounded bg-transparent"
-                        value={l.cuenta_codigo}
-                        onChange={(e) => onCuentaChange(l.id, e.target.value)}
-                        placeholder="Código o nombre"
+                      {/* v1.15 Sprint M+: SelectorCuentaContable reemplaza el input texto libre — */}
+                      {/* el operador SOLO puede elegir una cuenta del plan, jamás escribir libre. */}
+                      <SelectorCuentaContable
+                        value={l.cuenta_id}
+                        onChange={(id, meta) => updateLinea(l.id, {
+                          cuenta_id: id,
+                          cuenta_codigo: meta?.codigo ?? '',
+                        })}
+                        soloImputables
+                        placeholder="Código o nombre…"
                       />
-                      {cuenta && (
-                        <div className="text-[10px] text-ink-muted mt-[2px] font-mono pl-1">{cuenta.nombre}</div>
-                      )}
                     </td>
                     <td className="p-[6px_10px]">
                       <select
@@ -380,14 +377,7 @@ export function NuevoAsientoPage() {
           </table>
         </div>
 
-        {/* Datalist para autocompletado de cuentas */}
-        <datalist id="cuentas-list">
-          {cuentas.map((c) => (
-            <option key={c.id} value={c.codigo}>
-              {c.nombre}
-            </option>
-          ))}
-        </datalist>
+        {/* v1.15 Sprint M+: datalist eliminado — SelectorCuentaContable lo reemplaza con autocomplete real. */}
 
         {/* Footer */}
         <div className="p-[14px_16px] bg-surface-row border-t border-line grid grid-cols-[1fr_auto] gap-5 items-center">

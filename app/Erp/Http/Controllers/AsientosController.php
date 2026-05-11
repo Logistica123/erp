@@ -192,13 +192,25 @@ class AsientosController
     private function domainError(DomainException $e): JsonResponse
     {
         $code = explode(':', $e->getMessage(), 2)[0] ?? 'DOMINIO';
+        // v1.15 Sprint M+: las validaciones de input (cuenta inexistente/no
+        // imputable, CC/auxiliar requerido, líneas inválidas) van con 422 en
+        // lugar del genérico 400 anterior. El mensaje ya viene "línea N: …"
+        // del service, así que el frontend puede parsear y mostrar inline.
         $status = match ($code) {
-            'PERIODO_BLOQUEADO' => 409,
+            'PERIODO_BLOQUEADO',
             'ESTADO_INVALIDO' => 409,
-            default => 400,
+            'CUENTA_NO_ENCONTRADA',
+            'CUENTA_NO_IMPUTABLE',
+            'CC_REQUERIDO',
+            'AUXILIAR_REQUERIDO',
+            'LINEA_INVALIDA',
+            'ASIENTO_MINIMO',
+            'ASIENTO_DESBALANCEADO' => 422,
+            default => 422,
         };
 
         return response()->json([
+            'ok' => false,
             'error' => [
                 'code' => $code,
                 'message' => $e->getMessage(),

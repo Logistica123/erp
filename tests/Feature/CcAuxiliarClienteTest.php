@@ -43,7 +43,10 @@ class CcAuxiliarClienteTest extends TestCase
 
         $cc = DB::table('erp_centros_costo')->where('auxiliar_id', $aux->id)->first();
         $this->assertNotNull($cc, 'No se creó CC automático para el auxiliar Cliente');
-        $this->assertSame('CLI-'.str_pad((string) $aux->id, 4, '0', STR_PAD_LEFT), $cc->codigo);
+        // v1.14 ampliación (CC-07): código slug en lugar de ID padded.
+        // El observer toma la primera palabra "significativa" del nombre.
+        $this->assertMatchesRegularExpression('/^CLI-[A-Z0-9]+(-\d+)?$/', $cc->codigo,
+            "Código esperado formato CLI-{slug} o CLI-{slug}-N, obtenido: {$cc->codigo}");
         $this->assertSame('CLIENTE', $cc->tipo);
         $this->assertSame('Cliente Test CC-01', $cc->nombre);
     }

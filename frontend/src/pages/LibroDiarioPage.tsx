@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Download, Loader2, Plus, Trash2, Eye, Pencil, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -152,7 +152,7 @@ export function LibroDiarioPage() {
                 <th className="px-[10px] py-[7px] text-left text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[80px]">
                   Hash
                 </th>
-                <th className="px-[6px] py-[7px] w-[36px]"></th>
+                <th className="px-[6px] py-[7px] text-right text-[11px] font-semibold text-navy-800 uppercase tracking-wider w-[120px]">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -186,21 +186,45 @@ export function LibroDiarioPage() {
                   <td className="px-[10px] py-[7px] font-mono text-[10px] text-ink-muted" title={a.hash_integridad ?? ''}>
                     {a.hash_integridad ? `${a.hash_integridad.slice(0, 8)}…` : '—'}
                   </td>
+                  {/* v1.15 Sprint M+: acciones por fila según estado del asiento. */}
                   <td className="px-[6px] py-[6px] text-right">
-                    {a.estado === 'BORRADOR' && (
+                    <div className="flex justify-end gap-1">
                       <button
-                        onClick={() => {
-                          if (confirm(`Eliminar asiento BORRADOR #${a.numero}? Esta acción no se puede deshacer.`)) {
-                            eliminar.mutate(a.id);
-                          }
-                        }}
-                        className="opacity-50 hover:opacity-100 hover:text-danger cursor-pointer"
-                        title="Eliminar BORRADOR"
-                        disabled={eliminar.isPending}
-                      >
-                        <Trash2 className="w-3 h-3" />
+                        onClick={() => navigate(`/erp/asientos/${a.id}`)}
+                        className="p-1 opacity-50 hover:opacity-100 hover:text-azure cursor-pointer"
+                        title="Ver detalle">
+                        <Eye className="w-3 h-3" />
                       </button>
-                    )}
+                      {a.estado === 'BORRADOR' && (
+                        <>
+                          <button
+                            onClick={() => navigate(`/erp/asientos/nuevo?edit=${a.id}`)}
+                            className="p-1 opacity-50 hover:opacity-100 hover:text-azure cursor-pointer"
+                            title="Editar BORRADOR">
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Eliminar asiento BORRADOR #${a.numero}? Esta acción no se puede deshacer.`)) {
+                                eliminar.mutate(a.id);
+                              }
+                            }}
+                            className="p-1 opacity-50 hover:opacity-100 hover:text-danger cursor-pointer"
+                            title="Eliminar BORRADOR"
+                            disabled={eliminar.isPending}>
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
+                      {a.estado === 'CONTABILIZADO' && (
+                        <button
+                          onClick={() => navigate(`/erp/asientos/${a.id}`)}
+                          className="p-1 opacity-50 hover:opacity-100 hover:text-warning cursor-pointer"
+                          title="Anular (en detalle)">
+                          <Ban className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

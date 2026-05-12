@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Wallet, Plus, Trash2, Eye } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Wallet, Plus, Trash2, Eye, ListChecks } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -13,8 +13,18 @@ import { useToast } from '@/hooks/useToast';
 type Auxiliar = { id: number; codigo: string; nombre: string; tipo?: string };
 type Moneda = { id: number; codigo: string };
 type MedioPago = { id: number; codigo: string; nombre: string; afecta_caja?: number; afecta_banco?: number; genera_echeq?: number };
-type Caja = { id: number; codigo: string; nombre: string };
-type CuentaBanco = { id: number; codigo: string; nombre: string };
+type Caja = { id: number; codigo: string; nombre: string; moneda_id?: number; moneda?: Moneda };
+type CuentaBanco = { id: number; codigo: string; nombre: string; moneda_id?: number; moneda?: Moneda };
+
+// v1.15 Sprint O+ — items cobrables del backend (/api/erp/cobros/items-cobrables)
+type ItemCobrable = {
+  tipo: 'factura' | 'nd' | 'nc';
+  id: number;
+  label: string;
+  fecha: string;
+  total: number;
+  saldo: number;
+};
 
 type Cobro = {
   id: number;
@@ -112,7 +122,7 @@ export function CobrosPage() {
   );
 }
 
-type ItemBorrador = { tipo_item: string; concepto: string; importe: string };
+type ItemBorrador = { tipo_item: string; concepto: string; importe: string; factura_id?: number };
 type MedioBorrador = {
   medio_pago_id: string;
   caja_id?: string;
@@ -156,6 +166,58 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
     }
   );
 
+  // v1.15 ampliación — helper "Cargar items pendientes del cliente".
+  // Llama al endpoint items-cobrables y autopobla la sección de items con
+  // las facturas/ND del cliente que tengan saldo > 0. Las NC se ignoran
+  // (van por la pantalla de Imputar NC).
+  const cargarPendientes = useApiMutation<{ data: ItemCobrable[] } | ItemCobrable[], number>(
+    (clienteId) => api.get(`/api/erp/cobros/items-cobrables?cliente_id=${clienteId}`),
+    {
+      onSuccess: (resp) => {
+        const lista: ItemCobrable[] = Array.isArray(resp) ? resp : (resp.data ?? []);
+        const factsYNd = lista.filter((it) => it.tipo === 'factura' || it.tipo === 'nd');
+        if (factsYNd.length === 0) {
+          toast.info('Cliente sin pendientes', 'No hay facturas/ND con saldo para cobrar.');
+          return;
+        }
+        const nuevos: ItemBorrador[] = factsYNd.map((it) => ({
+          tipo_item: it.tipo === 'nd' ? 'NOTA_DEBITO' : 'FACTURA_VENTA',
+          concepto: `${it.label} (saldo ${fmtMoney(it.saldo)})`,
+          importe: String(it.saldo.toFixed(2)),
+          factura_id: it.id,
+        }));
+        // Si el único item actual es vacío (default), lo reemplazamos.
+        const itemsBase = items.length === 1 && !items[0].concepto && !items[0].importe ? [] : items;
+        setItems([...itemsBase, ...nuevos]);
+        toast.success(`${nuevos.length} items cargados`,
+          `Total pendiente: ${fmtMoney(factsYNd.reduce((s, i) => s + i.saldo, 0))}`);
+      },
+      onError: (e) => toast.error('No se pudo cargar', errorMessage(e)),
+    }
+  );
+
+  // v1.15 ampliación (D-TS-3) — auto-derivar moneda según el medio elegido.
+  // Si la cuenta bancaria o caja del primer medio tiene moneda definida y
+  // la moneda del header está vacía, autocompletarla.
+  useEffect(() => {
+    if (form.moneda_id) return; // ya elegida — no pisar
+    const primerMedio = mediosLista[0];
+    if (!primerMedio?.medio_pago_id) return;
+    const medio = (medios ?? []).find((mp) => String(mp.id) === primerMedio.medio_pago_id);
+    if (!medio) return;
+    let monedaId: number | null = null;
+    if (medio.afecta_banco && primerMedio.cuenta_bancaria_id) {
+      const cta = (ctasBanco ?? []).find((c) => String(c.id) === primerMedio.cuenta_bancaria_id);
+      monedaId = cta?.moneda?.id ?? cta?.moneda_id ?? null;
+    } else if (medio.afecta_caja && primerMedio.caja_id) {
+      const c = (cajas ?? []).find((x) => String(x.id) === primerMedio.caja_id);
+      monedaId = c?.moneda?.id ?? c?.moneda_id ?? null;
+    }
+    if (monedaId) {
+      setForm((f) => ({ ...f, moneda_id: String(monedaId) }));
+    }
+  }, [mediosLista, medios, ctasBanco, cajas, form.moneda_id]);
+
   const submit = () => {
     m.mutate({
       fecha: form.fecha,
@@ -166,6 +228,10 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
       observaciones: form.observaciones || undefined,
       items: items.filter((i) => i.concepto && Number(i.importe) > 0).map((i) => ({
         tipo_item: i.tipo_item, concepto: i.concepto, importe: Number(i.importe),
+        // v1.15 ampliación — factura_id viene cuando el item se cargó desde
+        // "items pendientes". El backend (Sprint O+) lo usa para lockForUpdate
+        // y validar saldo atómicamente.
+        ...(i.factura_id ? { factura_id: i.factura_id } : {}),
       })),
       medios: mediosLista.filter((mm) => mm.medio_pago_id && Number(mm.importe) > 0).map((mm) => {
         const out: Record<string, unknown> = {
@@ -219,10 +285,19 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
         <div>
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-[12px] font-semibold text-navy-800 uppercase tracking-wide">Items</h3>
-            <Button size="sm" variant="outline"
-              onClick={() => setItems([...items, { tipo_item: 'OTRO', concepto: '', importe: '' }])}>
-              <Plus className="w-3 h-3" /> Item
-            </Button>
+            <div className="flex gap-2">
+              {/* v1.15 ampliación — helper: trae las facturas/ND con saldo del cliente. */}
+              <Button size="sm" variant="outline"
+                disabled={!form.auxiliar_id || cargarPendientes.isPending}
+                onClick={() => cargarPendientes.mutate(Number(form.auxiliar_id))}>
+                <ListChecks className="w-3 h-3" />
+                {cargarPendientes.isPending ? 'Cargando…' : 'Cargar pendientes'}
+              </Button>
+              <Button size="sm" variant="outline"
+                onClick={() => setItems([...items, { tipo_item: 'OTRO', concepto: '', importe: '' }])}>
+                <Plus className="w-3 h-3" /> Item
+              </Button>
+            </div>
           </div>
           <div className="space-y-2">
             {items.map((it, idx) => (

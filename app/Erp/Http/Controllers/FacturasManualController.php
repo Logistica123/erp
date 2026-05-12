@@ -1,0 +1,459 @@
+<?php
+
+namespace App\Erp\Http\Controllers;
+
+use App\Erp\Support\AuditLogger;
+use DomainException;
+use Illuminate\Http\Client\Factory as HttpClient;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
+
+/**
+ * ADDENDUM v1.17 — Carga manual de facturas + verificación opcional ARCA.
+ *
+ *   POST /api/erp/facturas-venta/manual           registrar venta externa
+ *   POST /api/erp/facturas-compra/manual          registrar compra fuera del import
+ *   POST /api/erp/facturas/{tipo}/{id}/verificar-arca  WSCDC + padrón
+ *
+ * Reglas (FM-01..FM-10):
+ *  - Ventas manual NO emite a ARCA. origen='MANUAL', estado='EMITIDA' (sin CAE
+ *    local salvo que el operador lo cargue de la factura externa).
+ *  - Compras manual = mismo modelo que el import individual.
+ *  - El operador escribe el número (no auto-generado).
+ *  - UNIQUE (tipo, PV, numero, cuit). Si duplica → 409.
+ *  - Verificación opcional contra arca-gateway (SPEC 04).
+ */
+class FacturasManualController
+{
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly HttpClient $http,
+    ) {}
+
+    /**
+     * POST /api/erp/facturas-venta/manual
+     */
+    public function ventaStore(Request $request): JsonResponse
+    {
+        if (! $this->permiso($request, 'ventas.facturas.cargar_manual')) {
+            return $this->sinPermiso();
+        }
+
+        $data = $request->validate([
+            'tipo_comprobante_id' => ['required', 'integer', 'exists:erp_tipos_comprobante,id'],
+            'punto_venta' => ['required', 'integer', 'min:1'],
+            'numero' => ['required', 'integer', 'min:1'],
+            'fecha_emision' => ['required', 'date'],
+            'cliente_auxiliar_id' => ['nullable', 'integer', 'exists:erp_auxiliares,id'],
+            'cuit_cliente' => ['nullable', 'string', 'size:11'],
+            'razon_social_cliente' => ['nullable', 'string', 'max:200'],
+            'condicion_iva_id' => ['nullable', 'integer'],
+            'moneda_id' => ['nullable', 'integer'],
+            'cotizacion' => ['nullable', 'numeric', 'min:0.0001'],
+            'imp_neto_gravado' => ['nullable', 'numeric'],
+            'imp_no_gravado' => ['nullable', 'numeric'],
+            'imp_exento' => ['nullable', 'numeric'],
+            'imp_iva' => ['nullable', 'numeric'],
+            'imp_total' => ['required', 'numeric'],
+            'cae' => ['nullable', 'string', 'max:20'],
+            'fecha_vto_cae' => ['nullable', 'date'],
+            'periodo_trabajado_texto' => ['nullable', 'string', 'max:20'],
+            'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
+            'concepto_afip' => ['nullable', 'integer', 'min:1', 'max:3'],
+        ]);
+
+        $empresaId = $this->empresaId($request);
+
+        // Resolver auxiliar por CUIT si solo viene el CUIT.
+        $auxiliarId = $data['cliente_auxiliar_id'] ?? null;
+        if (! $auxiliarId && ! empty($data['cuit_cliente'])) {
+            $auxiliarId = DB::table('erp_auxiliares')
+                ->where('empresa_id', $empresaId)
+                ->where('tipo', 'Cliente')
+                ->where('cuit', $data['cuit_cliente'])
+                ->value('id');
+            if (! $auxiliarId) {
+                return response()->json([
+                    'ok' => false,
+                    'error' => ['code' => 'CLIENTE_NO_ENCONTRADO',
+                        'message' => "No existe un cliente con CUIT {$data['cuit_cliente']} en el ERP. Dalo de alta primero."],
+                ], 422);
+            }
+        }
+        if (! $auxiliarId) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'CLIENTE_REQUERIDO',
+                    'message' => 'Indicá cliente_auxiliar_id o cuit_cliente.'],
+            ], 422);
+        }
+
+        // Resolver punto_venta_id desde el numero de PV.
+        $pv = DB::table('erp_puntos_venta')
+            ->where('empresa_id', $empresaId)
+            ->where('numero', $data['punto_venta'])
+            ->where('activo', 1)
+            ->first(['id']);
+        if (! $pv) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'PUNTO_VENTA_INVALIDO',
+                    'message' => "Punto de venta {$data['punto_venta']} no existe o no está activo."],
+            ], 422);
+        }
+
+        // Unicidad (tipo, PV, numero, cliente). Para ventas, el cliente es el
+        // auxiliar (no el emisor — el emisor somos nosotros).
+        $existe = DB::table('erp_facturas_venta')
+            ->where('empresa_id', $empresaId)
+            ->where('tipo_comprobante_id', $data['tipo_comprobante_id'])
+            ->where('punto_venta_id', $pv->id)
+            ->where('numero', $data['numero'])
+            ->where('auxiliar_id', $auxiliarId)
+            ->whereNull('deleted_at')
+            ->exists();
+        if ($existe) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'FACTURA_DUPLICADA',
+                    'message' => 'Ya existe una factura con ese tipo + PV + número para este cliente.'],
+            ], 409);
+        }
+
+        // CC derivado del cliente.
+        $ccId = DB::table('erp_centros_costo')->where('auxiliar_id', $auxiliarId)->value('id');
+
+        // Calcular doc_tipo/doc_nro desde el auxiliar si no vienen.
+        $aux = DB::table('erp_auxiliares')->where('id', $auxiliarId)->first(['cuit', 'nombre']);
+        $docNro = $data['cuit_cliente'] ?? $aux?->cuit ?? '0';
+
+        $id = DB::table('erp_facturas_venta')->insertGetId([
+            'empresa_id' => $empresaId,
+            'tipo_comprobante_id' => $data['tipo_comprobante_id'],
+            'punto_venta_id' => $pv->id,
+            'numero' => $data['numero'],
+            'cae' => $data['cae'] ?? null,
+            'fecha_vto_cae' => $data['fecha_vto_cae'] ?? null,
+            'fecha_emision' => $data['fecha_emision'],
+            'auxiliar_id' => $auxiliarId,
+            'condicion_iva_id' => $data['condicion_iva_id'] ?? 1,
+            'doc_tipo_afip' => 80, // CUIT por default
+            'doc_nro' => (string) $docNro,
+            'moneda_id' => $data['moneda_id'] ?? 1,
+            'cotizacion' => $data['cotizacion'] ?? 1,
+            'concepto_afip' => $data['concepto_afip'] ?? 2,
+            'imp_neto_gravado' => $data['imp_neto_gravado'] ?? 0,
+            'imp_no_gravado' => $data['imp_no_gravado'] ?? 0,
+            'imp_exento' => $data['imp_exento'] ?? 0,
+            'imp_iva' => $data['imp_iva'] ?? 0,
+            'imp_tributos' => 0,
+            'imp_total' => $data['imp_total'],
+            'origen' => 'MANUAL',
+            'estado' => 'EMITIDA',
+            'periodo_trabajado_texto' => $data['periodo_trabajado_texto'] ?? null,
+            'jurisdiccion_codigo' => $data['jurisdiccion_codigo'] ?? null,
+            'centro_costo_id' => $ccId,
+            'verificada_arca' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->audit->logEvento(
+            accion: 'FACTURA_VENTA_MANUAL_REGISTRADA',
+            modulo: 'ventas',
+            descripcion: sprintf('Venta MANUAL #%d cliente_aux=%d tipo=%d PV=%d nro=%d total=%.2f',
+                $id, $auxiliarId, $data['tipo_comprobante_id'], $data['punto_venta'], $data['numero'], $data['imp_total']),
+            empresaId: $empresaId,
+        );
+
+        return response()->json([
+            'ok' => true,
+            'data' => ['id' => $id, 'origen' => 'MANUAL', 'estado' => 'EMITIDA'],
+        ], 201);
+    }
+
+    /**
+     * POST /api/erp/facturas-compra/manual
+     */
+    public function compraStore(Request $request): JsonResponse
+    {
+        if (! $this->permiso($request, 'compras.facturas.cargar_manual')) {
+            return $this->sinPermiso();
+        }
+
+        $data = $request->validate([
+            'tipo_comprobante_id' => ['required', 'integer', 'exists:erp_tipos_comprobante,id'],
+            'punto_venta' => ['required', 'integer', 'min:1'],
+            'numero' => ['required', 'integer', 'min:1'],
+            'fecha_emision' => ['required', 'date'],
+            'fecha_imputacion' => ['required', 'date'],
+            'periodo_id' => ['required', 'integer', 'exists:erp_periodos,id'],
+            'cuit_emisor' => ['required', 'string', 'size:11'],
+            'razon_social_emisor' => ['required', 'string', 'max:200'],
+            'auxiliar_id' => ['nullable', 'integer', 'exists:erp_auxiliares,id'],
+            'cliente_auxiliar_id' => ['nullable', 'integer', 'exists:erp_auxiliares,id'],
+            'centro_costo_id' => ['nullable', 'integer', 'exists:erp_centros_costo,id'],
+            'condicion_iva_id' => ['nullable', 'integer'],
+            'moneda_id' => ['nullable', 'integer'],
+            'imp_neto_gravado' => ['nullable', 'numeric'],
+            'imp_no_gravado' => ['nullable', 'numeric'],
+            'imp_exento' => ['nullable', 'numeric'],
+            'imp_iva' => ['nullable', 'numeric'],
+            'imp_total' => ['required', 'numeric'],
+            'cae' => ['nullable', 'string', 'max:20'],
+            'tomado' => ['nullable', 'boolean'],
+            'tipo_gasto' => ['nullable', 'string', 'max:80'],
+            'observaciones' => ['nullable', 'string'],
+            'periodo_trabajado_texto' => ['nullable', 'string', 'max:20'],
+            'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
+        ]);
+
+        $empresaId = $this->empresaId($request);
+
+        // Unicidad por (tipo, PV, numero, cuit_emisor).
+        $existe = DB::table('erp_facturas_compra')
+            ->where('empresa_id', $empresaId)
+            ->where('tipo_comprobante_id', $data['tipo_comprobante_id'])
+            ->where('punto_venta', $data['punto_venta'])
+            ->where('numero', $data['numero'])
+            ->where('cuit_emisor', $data['cuit_emisor'])
+            ->whereNull('deleted_at')
+            ->exists();
+        if ($existe) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'FACTURA_DUPLICADA',
+                    'message' => 'Ya existe una factura con ese tipo + PV + número para este proveedor.'],
+            ], 409);
+        }
+
+        // Resolver auxiliar del proveedor si no viene.
+        $proveedorAuxId = $data['auxiliar_id'] ?? null;
+        if (! $proveedorAuxId) {
+            $proveedorAuxId = DB::table('erp_auxiliares')
+                ->where('empresa_id', $empresaId)
+                ->where('tipo', 'Proveedor')
+                ->where('cuit', $data['cuit_emisor'])
+                ->value('id');
+            // No hay auto-upsert acá; el operador debe darlo de alta primero
+            // (en el flujo del import del Libro IVA Compras se hace upsert).
+            if (! $proveedorAuxId) {
+                return response()->json([
+                    'ok' => false,
+                    'error' => ['code' => 'PROVEEDOR_NO_ENCONTRADO',
+                        'message' => "No existe un proveedor con CUIT {$data['cuit_emisor']}. Dalo de alta primero (sidebar Compras → Proveedores)."],
+                ], 422);
+            }
+        }
+
+        // CC: si hay cliente_auxiliar_id, deriva de él; si no, usa el manual.
+        $ccId = $data['centro_costo_id'] ?? null;
+        if (! $ccId && ! empty($data['cliente_auxiliar_id'])) {
+            $ccId = DB::table('erp_centros_costo')->where('auxiliar_id', $data['cliente_auxiliar_id'])->value('id');
+        }
+        if (! $ccId && empty($data['cliente_auxiliar_id'])) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'CC_REQUERIDO',
+                    'message' => 'Esta factura no tiene cliente asociado. Elegí un Centro de Costos manual (MANT-FLOTA, ALQUILER-OFI, etc.).'],
+            ], 422);
+        }
+
+        $id = DB::table('erp_facturas_compra')->insertGetId([
+            'empresa_id' => $empresaId,
+            'tipo_comprobante_id' => $data['tipo_comprobante_id'],
+            'punto_venta' => $data['punto_venta'],
+            'numero' => $data['numero'],
+            'cae' => $data['cae'] ?? null,
+            'fecha_emision' => $data['fecha_emision'],
+            'fecha_imputacion' => $data['fecha_imputacion'],
+            'periodo_id' => $data['periodo_id'],
+            'imputacion_diferida' => substr($data['fecha_emision'], 0, 7) !== substr($data['fecha_imputacion'], 0, 7) ? 1 : 0,
+            'auxiliar_id' => $proveedorAuxId,
+            'cuit_emisor' => $data['cuit_emisor'],
+            'razon_social_emisor' => $data['razon_social_emisor'],
+            'condicion_iva_id' => $data['condicion_iva_id'] ?? 1,
+            'moneda_id' => $data['moneda_id'] ?? 1,
+            'cotizacion' => 1.0,
+            'imp_neto_gravado' => $data['imp_neto_gravado'] ?? 0,
+            'imp_no_gravado' => $data['imp_no_gravado'] ?? 0,
+            'imp_exento' => $data['imp_exento'] ?? 0,
+            'imp_iva' => $data['imp_iva'] ?? 0,
+            'imp_total' => $data['imp_total'],
+            'origen' => 'MANUAL',
+            'estado' => 'RECIBIDA',
+            'no_tomada' => isset($data['tomado']) && ! $data['tomado'] ? 1 : 0,
+            'cliente_auxiliar_id' => $data['cliente_auxiliar_id'] ?? null,
+            'centro_costo_id' => $ccId,
+            'tipo_gasto' => $data['tipo_gasto'] ?? null,
+            'observaciones' => $data['observaciones'] ?? null,
+            'periodo_trabajado_texto' => $data['periodo_trabajado_texto'] ?? null,
+            'jurisdiccion_codigo' => $data['jurisdiccion_codigo'] ?? null,
+            'verificada_arca' => 0,
+            'created_by_user_id' => $request->user()->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->audit->logEvento(
+            accion: 'FACTURA_COMPRA_MANUAL_REGISTRADA',
+            modulo: 'compras',
+            descripcion: sprintf('Compra MANUAL #%d cuit=%s tipo=%d PV=%d nro=%d total=%.2f tomado=%s',
+                $id, $data['cuit_emisor'], $data['tipo_comprobante_id'], $data['punto_venta'], $data['numero'],
+                $data['imp_total'], (isset($data['tomado']) && ! $data['tomado']) ? 'NO' : 'SI'),
+            empresaId: $empresaId,
+        );
+
+        return response()->json([
+            'ok' => true,
+            'data' => ['id' => $id, 'origen' => 'MANUAL', 'estado' => 'RECIBIDA'],
+        ], 201);
+    }
+
+    /**
+     * POST /api/erp/facturas/{tipo}/{id}/verificar-arca
+     * tipo = 'venta' o 'compra'.
+     */
+    public function verificarArca(Request $request, string $tipo, int $id): JsonResponse
+    {
+        if (! $this->permiso($request, 'facturas.verificar_arca')) {
+            return $this->sinPermiso();
+        }
+        if (! in_array($tipo, ['venta', 'compra'], true)) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'TIPO_INVALIDO']], 422);
+        }
+        $tabla = $tipo === 'venta' ? 'erp_facturas_venta' : 'erp_facturas_compra';
+        $empresaId = $this->empresaId($request);
+
+        $factura = DB::table($tabla)
+            ->where('id', $id)
+            ->where('empresa_id', $empresaId)
+            ->whereNull('deleted_at')
+            ->first();
+        if (! $factura) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_ENCONTRADA']], 404);
+        }
+
+        $cuitParaPadron = $tipo === 'compra' ? $factura->cuit_emisor : (string) ($factura->doc_nro ?? '');
+        $resultado = [
+            'cae_valido' => null,
+            'cuit_valido' => null,
+            'padron_estado' => null,
+            'motivo_rechazo' => null,
+        ];
+
+        $cfg = config('services.arca_gateway');
+        if (empty($cfg['url'])) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'ARCA_GATEWAY_NO_CONFIGURADO',
+                    'message' => 'arca-gateway no está configurado (services.arca_gateway.url).'],
+            ], 502);
+        }
+
+        try {
+            // Padrón A13/A5 — usamos A13 para Ventas (cliente) y A5 para Compras (proveedor).
+            // El gateway expone /padron/{cuit} con auto-selección del padrón apropiado.
+            $padronResp = $this->http
+                ->withHeaders($this->arcaHeaders($cfg))
+                ->timeout(10)
+                ->get(rtrim($cfg['url'], '/').'/padron/'.urlencode($cuitParaPadron));
+
+            if ($padronResp->successful()) {
+                $body = $padronResp->json();
+                $resultado['cuit_valido'] = (bool) ($body['encontrado'] ?? $body['ok'] ?? false);
+                $resultado['padron_estado'] = $body['estado'] ?? $body['situacion'] ?? null;
+            } else {
+                $resultado['motivo_rechazo'] = 'PADRON: HTTP '.$padronResp->status();
+            }
+
+            // Constatación de CAE — solo si la factura trae CAE cargado.
+            if (! empty($factura->cae)) {
+                $constatarPayload = [
+                    'tipo_cbte' => (int) $factura->tipo_comprobante_id,
+                    'pto_vta' => (int) ($factura->punto_venta ?? 0),
+                    'cbte_nro' => (int) $factura->numero,
+                    'cuit_emisor' => $cuitParaPadron,
+                    'fecha_cbte' => $factura->fecha_emision,
+                    'imp_total' => (float) $factura->imp_total,
+                    'cae' => $factura->cae,
+                ];
+                $constatarResp = $this->http
+                    ->withHeaders($this->arcaHeaders($cfg))
+                    ->timeout(15)
+                    ->post(rtrim($cfg['url'], '/').'/comp/constatar', $constatarPayload);
+                if ($constatarResp->successful()) {
+                    $body = $constatarResp->json();
+                    $resultado['cae_valido'] = (bool) ($body['cae_valido'] ?? $body['ok'] ?? false);
+                    if (! $resultado['cae_valido']) {
+                        $resultado['motivo_rechazo'] = $body['motivo'] ?? 'CAE rechazado por WSCDC';
+                    }
+                } else {
+                    $resultado['motivo_rechazo'] = ($resultado['motivo_rechazo'] ?? '').' WSCDC: HTTP '.$constatarResp->status();
+                }
+            }
+        } catch (Throwable $e) {
+            Log::error('VERIFICAR_ARCA_FALLO', [
+                'tipo' => $tipo, 'factura_id' => $id, 'error' => $e->getMessage(),
+            ]);
+            $resultado['motivo_rechazo'] = 'Error de comunicación con arca-gateway: '.$e->getMessage();
+        }
+
+        $todoOK = ($resultado['cuit_valido'] === true)
+            && ($resultado['cae_valido'] === true || empty($factura->cae));
+
+        DB::table($tabla)->where('id', $id)->update([
+            'verificada_arca' => $todoOK ? 1 : 0,
+            'verificada_arca_at' => now(),
+            'verificacion_resultado' => json_encode($resultado, JSON_UNESCAPED_UNICODE),
+            'updated_at' => now(),
+        ]);
+
+        $this->audit->logEvento(
+            accion: 'FACTURA_VERIFICADA_ARCA',
+            modulo: 'general',
+            descripcion: sprintf('%s #%d verificada=%s motivo=%s',
+                strtoupper($tipo), $id, $todoOK ? 'SI' : 'NO',
+                $resultado['motivo_rechazo'] ?? '—'),
+            empresaId: $empresaId,
+        );
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'verificada' => $todoOK,
+                'resultado' => $resultado,
+            ],
+        ]);
+    }
+
+    private function empresaId(Request $request): int
+    {
+        return $request->user()?->erpPerfil?->empresa_id ?? 1;
+    }
+
+    private function permiso(Request $request, string $codigo): bool
+    {
+        return (bool) ($request->user()?->erpPerfil?->tienePermiso($codigo) ?? false);
+    }
+
+    private function sinPermiso(): JsonResponse
+    {
+        return response()->json([
+            'ok' => false,
+            'error' => ['code' => 'SIN_PERMISO'],
+        ], 403);
+    }
+
+    /** @return array<string,string> */
+    private function arcaHeaders(array $cfg): array
+    {
+        $h = ['Accept' => 'application/json'];
+        if (! empty($cfg['api_key'])) $h['X-API-Key'] = $cfg['api_key'];
+        if (! empty($cfg['client_id'])) $h['X-Client-ID'] = $cfg['client_id'];
+        return $h;
+    }
+}

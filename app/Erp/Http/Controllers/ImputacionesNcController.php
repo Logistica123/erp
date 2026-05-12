@@ -6,6 +6,7 @@ use App\Erp\Support\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * ADDENDUM v1.15 Sprint O — imputación de Notas de Crédito a facturas/ND.
@@ -90,11 +91,32 @@ class ImputacionesNcController
 
                 $importe = (float) $imp['importe'];
                 if ($importe > $ncSaldo + 0.005) {
+                    // v1.15 Sprint O+ — log estructurado.
+                    Log::warning('IMPUTACION_NC_RECHAZADA_EXCEDE_NC', [
+                        'evento' => 'IMPUTACION_NC_RECHAZADA_EXCEDE_NC',
+                        'nc_id' => $nc->id,
+                        'nc_numero' => $nc->numero,
+                        'factura_id' => $factura->id,
+                        'user_id' => $user->id,
+                        'empresa_id' => $empresaId,
+                        'nc_saldo' => $ncSaldo,
+                        'importe_intentado' => $importe,
+                    ]);
                     $errores[] = ['idx' => $idx, 'codigo' => 'IMPORTE_EXCEDE_NC',
                         'detalle' => sprintf('importe %.2f > saldo NC %.2f', $importe, $ncSaldo)];
                     continue;
                 }
                 if ($importe > $facturaSaldo + 0.005) {
+                    Log::warning('IMPUTACION_NC_RECHAZADA_EXCEDE_FACTURA', [
+                        'evento' => 'IMPUTACION_NC_RECHAZADA_EXCEDE_FACTURA',
+                        'nc_id' => $nc->id,
+                        'factura_id' => $factura->id,
+                        'factura_numero' => $factura->numero,
+                        'user_id' => $user->id,
+                        'empresa_id' => $empresaId,
+                        'factura_saldo' => $facturaSaldo,
+                        'importe_intentado' => $importe,
+                    ]);
                     $errores[] = ['idx' => $idx, 'codigo' => 'IMPORTE_EXCEDE_FACTURA',
                         'detalle' => sprintf('importe %.2f > saldo factura %.2f', $importe, $facturaSaldo)];
                     continue;

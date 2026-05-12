@@ -122,11 +122,19 @@ export function FacturacionPage() {
             Facturas emitidas por el ERP, sincronizadas desde DistriApp o importadas vía ARCA.
           </p>
         </div>
-        <Link to="/erp/facturacion/nueva">
-          <Button>
-            <Plus className="w-4 h-4 mr-1" /> Nueva factura
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          {/* v1.17 — Botón para carga manual (NO emite ARCA). */}
+          <Link to="/erp/facturacion/nueva-manual">
+            <Button variant="outline">
+              <Plus className="w-4 h-4 mr-1" /> Nueva manual
+            </Button>
+          </Link>
+          <Link to="/erp/facturacion/nueva">
+            <Button>
+              <Plus className="w-4 h-4 mr-1" /> Emitir factura (ARCA)
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* KPIs */}

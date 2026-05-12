@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Upload, ScrollText, FileSpreadsheet, Check, AlertTriangle, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Upload, ScrollText, FileSpreadsheet, Check, AlertTriangle, ArrowRight, ArrowLeft, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -115,9 +116,17 @@ export function LibroIvaComprasImportPage() {
             <ScrollText className="w-4 h-4 text-azure" /> Libro IVA Compras — import enriquecido
           </div>}
           actions={
-            <Button variant="primary" onClick={() => setWizardOpen(true)}>
-              <Upload className="w-3 h-3" /> Importar archivo
-            </Button>
+            <div className="flex gap-2">
+              {/* v1.17 — Botón de carga manual al lado del import. */}
+              <Link to="/erp/facturas-compra/nueva?return_to=libro-iva">
+                <Button variant="outline">
+                  <Plus className="w-3 h-3" /> Cargar manual
+                </Button>
+              </Link>
+              <Button variant="primary" onClick={() => setWizardOpen(true)}>
+                <Upload className="w-3 h-3" /> Importar archivo
+              </Button>
+            </div>
           }
         />
         <CardBody className="p-4 space-y-3">

@@ -166,35 +166,52 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
     }
   );
 
-  // v1.15 ampliación — helper "Cargar items pendientes del cliente".
-  // Llama al endpoint items-cobrables y autopobla la sección de items con
-  // las facturas/ND del cliente que tengan saldo > 0. Las NC se ignoran
-  // (van por la pantalla de Imputar NC).
+  // v1.16 — modal de selección de items pendientes.
+  const [pendientesModal, setPendientesModal] = useState<{ items: ItemCobrable[]; abierto: boolean }>({
+    items: [],
+    abierto: false,
+  });
+  const [seleccionPend, setSeleccionPend] = useState<Set<number>>(new Set());
+
   const cargarPendientes = useApiMutation<{ data: ItemCobrable[] } | ItemCobrable[], number>(
     (clienteId) => api.get(`/api/erp/cobros/items-cobrables?cliente_id=${clienteId}`),
     {
       onSuccess: (resp) => {
         const lista: ItemCobrable[] = Array.isArray(resp) ? resp : (resp.data ?? []);
-        const factsYNd = lista.filter((it) => it.tipo === 'factura' || it.tipo === 'nd');
-        if (factsYNd.length === 0) {
-          toast.info('Cliente sin pendientes', 'No hay facturas/ND con saldo para cobrar.');
+        if (lista.length === 0) {
+          toast.info('Cliente sin pendientes', 'No hay comprobantes cobrables.');
           return;
         }
-        const nuevos: ItemBorrador[] = factsYNd.map((it) => ({
-          tipo_item: it.tipo === 'nd' ? 'NOTA_DEBITO' : 'FACTURA_VENTA',
-          concepto: `${it.label} (saldo ${fmtMoney(it.saldo)})`,
-          importe: String(it.saldo.toFixed(2)),
-          factura_id: it.id,
-        }));
-        // Si el único item actual es vacío (default), lo reemplazamos.
-        const itemsBase = items.length === 1 && !items[0].concepto && !items[0].importe ? [] : items;
-        setItems([...itemsBase, ...nuevos]);
-        toast.success(`${nuevos.length} items cargados`,
-          `Total pendiente: ${fmtMoney(factsYNd.reduce((s, i) => s + i.saldo, 0))}`);
+        // Pre-seleccionar facturas/ND. NC quedan deseleccionadas (van por Imputar NC).
+        const preSel = new Set<number>(lista.filter((i) => i.tipo !== 'nc').map((i) => i.id));
+        setPendientesModal({ items: lista, abierto: true });
+        setSeleccionPend(preSel);
       },
       onError: (e) => toast.error('No se pudo cargar', errorMessage(e)),
     }
   );
+
+  const confirmarSeleccionPendientes = () => {
+    const seleccionados = pendientesModal.items.filter(
+      (it) => seleccionPend.has(it.id) && it.tipo !== 'nc',
+    );
+    if (seleccionados.length === 0) {
+      toast.info('Sin selección', 'Elegí al menos una factura/ND para cargar.');
+      return;
+    }
+    const nuevos: ItemBorrador[] = seleccionados.map((it) => ({
+      tipo_item: it.tipo === 'nd' ? 'NOTA_DEBITO' : 'FACTURA_VENTA',
+      concepto: `${it.label} (saldo ${fmtMoney(it.saldo)})`,
+      importe: String(it.saldo.toFixed(2)),
+      factura_id: it.id,
+    }));
+    const itemsBase = items.length === 1 && !items[0].concepto && !items[0].importe ? [] : items;
+    setItems([...itemsBase, ...nuevos]);
+    toast.success(`${nuevos.length} items cargados`,
+      `Total pendiente: ${fmtMoney(seleccionados.reduce((s, i) => s + i.saldo, 0))}`);
+    setPendientesModal({ items: [], abierto: false });
+    setSeleccionPend(new Set());
+  };
 
   // v1.15 ampliación (D-TS-3) — auto-derivar moneda según el medio elegido.
   // Si la cuenta bancaria o caja del primer medio tiene moneda definida y
@@ -390,6 +407,71 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
 
         <FormError error={m.error ? errorMessage(m.error) : null} />
       </div>
+
+      {/* v1.16 — Modal secundario de selección de items pendientes. */}
+      {pendientesModal.abierto && (
+        <Modal open onClose={() => setPendientesModal({ items: [], abierto: false })}
+          title="Items cobrables del cliente" size="lg"
+          footer={<>
+            <Button variant="secondary" onClick={() => setPendientesModal({ items: [], abierto: false })}>Cancelar</Button>
+            <Button variant="primary" onClick={confirmarSeleccionPendientes}>
+              <ListChecks className="w-3 h-3" />
+              {`Agregar ${[...seleccionPend].filter((id) => pendientesModal.items.find((i) => i.id === id)?.tipo !== 'nc').length} items`}
+            </Button>
+          </>}>
+          <div className="space-y-3">
+            <div className="text-[11.5px] text-ink-muted">
+              Seleccioná los comprobantes a cobrar. Las <strong>NC libres</strong> aparecen acá para
+              tu referencia pero se imputan por la pantalla <code>/erp/cc-clientes/imputar-nc</code>
+              (no entran como item del cobro).
+            </div>
+            <div className="border border-line rounded-md overflow-hidden">
+              <table className="w-full text-[12px]">
+                <thead className="bg-surface-row text-[11px] uppercase tracking-wider text-ink-muted">
+                  <tr>
+                    <th className="px-2 py-2 w-[36px]"></th>
+                    <th className="px-2 py-2 text-left">Comprobante</th>
+                    <th className="px-2 py-2 text-left">Fecha</th>
+                    <th className="px-2 py-2 text-right">Total</th>
+                    <th className="px-2 py-2 text-right">Saldo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line/60">
+                  {pendientesModal.items.map((it) => {
+                    const isNc = it.tipo === 'nc';
+                    const sel = seleccionPend.has(it.id);
+                    return (
+                      <tr key={it.id} className={isNc ? 'opacity-50' : ''}>
+                        <td className="px-2 py-1.5">
+                          <input type="checkbox" checked={sel} disabled={isNc}
+                            onChange={() => {
+                              const nu = new Set(seleccionPend);
+                              nu.has(it.id) ? nu.delete(it.id) : nu.add(it.id);
+                              setSeleccionPend(nu);
+                            }} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <code className="text-[11px]">{it.label}</code>
+                          {isNc && <span className="ml-2"><Badge variant="warning">NC</Badge></span>}
+                        </td>
+                        <td className="px-2 py-1.5">{fmtDate(it.fecha)}</td>
+                        <td className="px-2 py-1.5 text-right">{fmtMoney(it.total)}</td>
+                        <td className="px-2 py-1.5 text-right font-semibold">{fmtMoney(it.saldo)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="text-[11.5px] text-ink-muted">
+              {pendientesModal.items.filter((i) => i.tipo === 'nc').length > 0 && (
+                <>NC del cliente: {pendientesModal.items.filter((i) => i.tipo === 'nc').length}.
+                  Imputalas en <code>/erp/cc-clientes/imputar-nc</code> antes del cobro si querés netear el saldo.</>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

@@ -56,6 +56,8 @@ import { ReportesAnaliticosPage } from './pages/ReportesAnaliticosPage';
 import { ImputarNcPage } from './pages/ImputarNcPage';
 import { AsientoDetallePage } from './pages/AsientoDetallePage';
 import { CentrosCostoPage } from './pages/CentrosCostoPage';
+import { FacturaVentaManualPage } from './pages/FacturaVentaManualPage';
+import { FacturaCompraManualPage } from './pages/FacturaCompraManualPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
 import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
 import { AusenciasPage } from './pages/Sueldos/AusenciasPage';
@@ -115,6 +117,8 @@ export default function App() {
               <Route path="/erp/estados-contables" element={<EstadosContablesPage />} handle={{ crumb: 'Estados Contables' }} />
               <Route path="/erp/facturacion" element={<FacturacionPage />} handle={{ crumb: 'Facturación' }} />
               <Route path="/erp/facturacion/nueva" element={<NuevaFacturaPage />} handle={{ crumb: 'Nueva factura' }} />
+              {/* v1.17 — Carga manual de factura de venta (NO emite ARCA) */}
+              <Route path="/erp/facturacion/nueva-manual" element={<FacturaVentaManualPage />} handle={{ crumb: 'Nueva manual' }} />
               <Route path="/erp/libro-iva-ventas" element={<LibroIvaVentasPage />} handle={{ crumb: 'Libro IVA Ventas' }} />
               <Route path="/erp/bancos" element={<BancosPage />} handle={{ crumb: 'Bancos' }} />
               <Route path="/erp/conciliacion" element={<ConciliacionPage />} handle={{ crumb: 'Conciliación' }} />
@@ -129,6 +133,8 @@ export default function App() {
 
               {/* F3 — Compras + CC + FCE */}
               <Route path="/erp/facturas-compra" element={<FacturasCompraPage />} handle={{ crumb: 'Facturas de compra' }} />
+              {/* v1.17 — Carga manual de factura de compra */}
+              <Route path="/erp/facturas-compra/nueva" element={<FacturaCompraManualPage />} handle={{ crumb: 'Nueva manual' }} />
               <Route path="/erp/cc-clientes" element={<CCPage kind="clientes" />} handle={{ crumb: 'CC Clientes' }} />
               <Route path="/erp/cc-clientes/imputar-nc" element={<ImputarNcPage />} handle={{ crumb: 'Imputar NC' }} />
               <Route path="/erp/cc-proveedores" element={<CCPage kind="proveedores" />} handle={{ crumb: 'CC Proveedores' }} />

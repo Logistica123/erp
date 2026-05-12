@@ -470,6 +470,37 @@ class LibroIvaComprasImportService
             ? DB::table('erp_centros_costo')->where('auxiliar_id', $clienteAuxId)->value('id')
             : null;
 
+        // v1.17 RN-FM-5: si ya existe una factura MANUAL con misma (tipo, PV, nro, CUIT)
+        // → no insertar de nuevo. Devolver conflict info en lugar del INSERT.
+        // El operador en el resumen del import ve estos conflictos y decide qué hacer.
+        $manualExistente = DB::table('erp_facturas_compra')
+            ->where('empresa_id', $empresaId)
+            ->where('tipo_comprobante_id', $tipoCbteCod)
+            ->where('punto_venta', $puntoVenta)
+            ->where('numero', $numero)
+            ->where('cuit_emisor', $cuit)
+            ->where('origen', 'MANUAL')
+            ->whereNull('deleted_at')
+            ->first(['id', 'imp_total']);
+        if ($manualExistente) {
+            $coincidenImportes = abs((float) $manualExistente->imp_total - $impTotal) < 0.01;
+            // Marcar la manual como verificada por el import (audit info).
+            DB::table('erp_facturas_compra')->where('id', $manualExistente->id)->update([
+                'origen' => 'MANUAL', // queda como MANUAL — registramos solo el match
+                'observaciones' => trim((string) (DB::table('erp_facturas_compra')->where('id', $manualExistente->id)->value('observaciones')
+                    ?? '').sprintf("\n[%s] Coincide con import #%d. Importes %s.",
+                    now()->format('Y-m-d H:i'), $importId,
+                    $coincidenImportes ? 'cuadran' : 'DIFIEREN')),
+                'updated_at' => now(),
+            ]);
+            // Throw "conflicto" para que el caller lo cuente como skipped+conflicto.
+            throw new \DomainException(sprintf(
+                'CONFLICTO_CON_MANUAL: la factura (%d-%d-%d, CUIT %s) ya existe como MANUAL (#%d). %s',
+                $tipoCbteCod, $puntoVenta, $numero, $cuit, $manualExistente->id,
+                $coincidenImportes ? 'Importes coinciden — sin acción.' : 'Importes DIFIEREN — revisar manualmente.'
+            ));
+        }
+
         $factura = FacturaCompra::create([
             'empresa_id' => $empresaId,
             'tipo_comprobante_id' => $tipoCbteCod,

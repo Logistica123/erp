@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -136,6 +137,21 @@ export function FacturasCompraPage() {
       ) },
     { key: 'imp_total', header: 'Total', align: 'right', width: '120px',
       render: (r) => `${r.moneda} ${fmtMoney(r.imp_total)}` },
+    { key: 'origen', header: 'Origen', width: '110px',
+      render: (r) => {
+        const o = (r as Record<string, unknown>)['origen'] as string;
+        const v = (r as Record<string, unknown>)['verificada_arca'] as number | boolean | undefined;
+        const variant = o === 'LIBRO_IVA_IMPORT' ? 'info'
+          : o === 'MANUAL' ? 'warning'
+          : o === 'DISTRIAPP' ? 'default'
+          : 'neutral';
+        return (
+          <div className="flex items-center gap-1">
+            <Badge variant={variant}>{o ?? '—'}</Badge>
+            {Number(v) === 1 && <span title="Verificada contra ARCA" className="text-success">✓</span>}
+          </div>
+        );
+      } },
     { key: 'tomado', header: 'Tomado', width: '90px',
       render: (r) => Number(r.no_tomada) === 1
         ? <Badge variant="warning">NO</Badge>
@@ -183,9 +199,16 @@ export function FacturasCompraPage() {
   return (
     <div className="p-6 space-y-4">
       <Card>
-        <CardHeader title={
-          <div className="flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-azure" /> Facturas de compra</div>
-        } />
+        <CardHeader
+          title={<div className="flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-azure" /> Facturas de compra</div>}
+          actions={
+            <Link to="/erp/facturas-compra/nueva">
+              <Button variant="primary" size="sm">
+                <Plus className="w-3 h-3" /> Cargar manual
+              </Button>
+            </Link>
+          }
+        />
         <CardBody className="p-4 space-y-3">
           <div className="flex flex-wrap gap-3">
             <SelectField label="Estado" value={estado} placeholder="Todos"

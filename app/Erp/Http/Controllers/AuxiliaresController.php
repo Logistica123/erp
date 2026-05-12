@@ -207,4 +207,105 @@ class AuxiliaresController
             ],
         ]);
     }
+
+    /**
+     * GET /api/erp/auxiliares/by-cuit/{cuit}?tipo=Cliente|Proveedor
+     * v1.17 — helper para form de carga manual: busca por CUIT y devuelve datos del auxiliar.
+     */
+    public function byCuit(Request $request, string $cuit): JsonResponse
+    {
+        $tipo = $request->query('tipo', 'Cliente');
+        $aux = DB::table('erp_auxiliares')
+            ->where('cuit', $cuit)
+            ->where('tipo', $tipo)
+            ->where('activo', 1)
+            ->select('id', 'codigo', 'nombre', 'cuit', 'tipo', 'cuenta_contable_default_id')
+            ->first();
+        if (! $aux) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_ENCONTRADO']], 404);
+        }
+        return response()->json(['ok' => true, 'data' => $aux]);
+    }
+
+    /**
+     * GET /api/erp/auxiliares/{id}/cc-asociado — v1.15 ampliación (CC-09).
+     *
+     * Devuelve el CC asociado a este auxiliar (si es tipo Cliente) con su
+     * movimientos_count. El frontend lo usa para el modal de baja —
+     * el operador decide si desactivar también el CC o mantenerlo visible
+     * para consultas históricas.
+     */
+    public function ccAsociado(Request $request, int $id): JsonResponse
+    {
+        $aux = Auxiliar::find($id);
+        if (! $aux) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_ENCONTRADO']], 404);
+        }
+        $cc = DB::table('erp_centros_costo')->where('auxiliar_id', $aux->id)->first();
+        if (! $cc) {
+            return response()->json(['ok' => true, 'data' => null]);
+        }
+        $movs = (int) DB::table('erp_movimientos_asiento')->where('centro_costo_id', $cc->id)->count();
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'cc_id' => (int) $cc->id,
+                'codigo' => $cc->codigo,
+                'nombre' => $cc->nombre,
+                'tipo' => $cc->tipo,
+                'activo' => (bool) $cc->activo,
+                'movimientos_count' => $movs,
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/erp/auxiliares/{id}/desactivar — v1.15 ampliación (CC-09).
+     *
+     * Desactiva el auxiliar (tipo Cliente) en transacción y, opcionalmente,
+     * también el CC asociado. El operador elige `desactivar_cc` en el modal.
+     */
+    public function desactivar(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'desactivar_cc' => ['nullable', 'boolean'],
+        ]);
+
+        $aux = Auxiliar::find($id);
+        if (! $aux) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_ENCONTRADO']], 404);
+        }
+        if (! $aux->activo) {
+            return response()->json(['ok' => true, 'data' => ['mensaje' => 'Ya estaba inactivo.']]);
+        }
+
+        $userId = $request->user()->id;
+        $desactivarCc = (bool) ($data['desactivar_cc'] ?? false);
+
+        DB::transaction(function () use ($aux, $desactivarCc, $userId) {
+            $aux->update(['activo' => 0]);
+
+            if ($desactivarCc) {
+                $cc = DB::table('erp_centros_costo')->where('auxiliar_id', $aux->id)->first();
+                if ($cc && $cc->activo) {
+                    DB::table('erp_centros_costo')
+                        ->where('id', $cc->id)
+                        ->update([
+                            'activo' => 0,
+                            'eliminada_at' => now(),
+                            'eliminada_por' => $userId,
+                            'updated_at' => now(),
+                        ]);
+                }
+            }
+        });
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'auxiliar_id' => $aux->id,
+                'cc_desactivado' => $desactivarCc,
+            ],
+        ]);
+    }
 }

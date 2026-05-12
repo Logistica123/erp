@@ -16,6 +16,7 @@ use App\Erp\Support\AuditLogger;
 use App\Models\User;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Registra un cobro de cliente con N items y N medios (SPEC 02 §7.5, RN-27).
@@ -135,12 +136,33 @@ class CobroService
                     ->sum('importe');
                 $saldo = (float) $factura->imp_total - $cobrado - $imputadoNc;
                 if ($saldo <= 0.005) {
+                    // v1.15 Sprint O+ — log estructurado para observabilidad (RN-TS-5).
+                    Log::warning('COBRO_RECHAZADO_FACTURA_SALDADA', [
+                        'evento' => 'COBRO_RECHAZADO_FACTURA_SALDADA',
+                        'factura_id' => $factura->id,
+                        'factura_numero' => $factura->numero,
+                        'user_id' => $data['usuario_id'] ?? null,
+                        'empresa_id' => $data['empresa_id'] ?? null,
+                        'saldo_actual' => $saldo,
+                        'importe_intentado' => (float) $i['importe'],
+                        'item_idx' => $idx,
+                    ]);
                     throw new DomainException(sprintf(
                         'FACTURA_SALDADA: la factura %s ya fue cobrada totalmente. No se puede aplicar cobro adicional. Refrescá la pantalla.',
                         $factura->numero
                     ));
                 }
                 if ((float) $i['importe'] > $saldo + 0.005) {
+                    Log::warning('COBRO_RECHAZADO_IMPORTE_EXCEDE_SALDO', [
+                        'evento' => 'COBRO_RECHAZADO_IMPORTE_EXCEDE_SALDO',
+                        'factura_id' => $factura->id,
+                        'factura_numero' => $factura->numero,
+                        'user_id' => $data['usuario_id'] ?? null,
+                        'empresa_id' => $data['empresa_id'] ?? null,
+                        'saldo_actual' => $saldo,
+                        'importe_intentado' => (float) $i['importe'],
+                        'item_idx' => $idx,
+                    ]);
                     throw new DomainException(sprintf(
                         'IMPORTE_EXCEDE_SALDO: el monto $%.2f del item #%d supera el saldo pendiente $%.2f de la factura %s.',
                         (float) $i['importe'], $idx + 1, $saldo, $factura->numero

@@ -13,6 +13,7 @@ use App\Erp\Http\Controllers\BalanceController;
 use App\Erp\Http\Controllers\CajaController;
 use App\Erp\Http\Controllers\ConfigController;
 use App\Erp\Http\Controllers\CobrosController;
+use App\Erp\Http\Controllers\FacturasManualController;
 use App\Erp\Http\Controllers\ImputacionesNcController;
 use App\Erp\Http\Controllers\CotizacionesController;
 use App\Erp\Http\Controllers\EcheqController;
@@ -84,11 +85,19 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.cc.reactivar');
         Route::get('/auxiliares', [CatalogosController::class, 'auxiliares'])->name('erp.auxiliares');
         Route::get('/auxiliares/buscar', [AuxiliaresController::class, 'buscar'])->name('erp.auxiliares.buscar');
+        // v1.17 helper: lookup por CUIT.
+        Route::get('/auxiliares/by-cuit/{cuit}', [AuxiliaresController::class, 'byCuit'])
+            ->where('cuit', '[0-9]{11}')->name('erp.auxiliares.by-cuit');
         Route::post('/auxiliares', [AuxiliaresController::class, 'store'])->name('erp.auxiliares.store');
         Route::patch('/auxiliares/{id}', [AuxiliaresController::class, 'update'])
             ->whereNumber('id')->name('erp.auxiliares.update');
         Route::get('/auxiliares/{id}/saldo', [AuxiliaresController::class, 'saldo'])
             ->whereNumber('id')->name('erp.auxiliares.saldo');
+        // v1.15 ampliación (CC-09) — baja cliente con opción de desactivar CC.
+        Route::get('/auxiliares/{id}/cc-asociado', [AuxiliaresController::class, 'ccAsociado'])
+            ->whereNumber('id')->name('erp.auxiliares.cc-asociado');
+        Route::post('/auxiliares/{id}/desactivar', [AuxiliaresController::class, 'desactivar'])
+            ->whereNumber('id')->name('erp.auxiliares.desactivar');
         Route::get('/bancos', [CatalogosController::class, 'bancos'])->name('erp.bancos');
         Route::get('/cuentas-bancarias', [CatalogosController::class, 'cuentasBancarias'])->name('erp.cuentas-bancarias');
         Route::get('/cajas', [CatalogosController::class, 'cajas'])->name('erp.cajas');
@@ -380,6 +389,16 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.fv.index');
         Route::post('/facturas-venta/emitir', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'emitir'])
             ->name('erp.fv.emitir');
+        // v1.17 — Carga manual (sin emitir contra ARCA).
+        Route::post('/facturas-venta/manual', [FacturasManualController::class, 'ventaStore'])
+            ->name('erp.fv.manual');
+        Route::post('/facturas-compra/manual', [FacturasManualController::class, 'compraStore'])
+            ->name('erp.fc.manual');
+        // v1.17 — Verificación opcional contra ARCA (WSCDC + padrón).
+        Route::post('/facturas/{tipo}/{id}/verificar-arca', [FacturasManualController::class, 'verificarArca'])
+            ->whereIn('tipo', ['venta', 'compra'])
+            ->whereNumber('id')
+            ->name('erp.facturas.verificar-arca');
         Route::post('/facturas-venta/{id}/cobrar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'cobrar'])
             ->whereNumber('id')->name('erp.fv.cobrar');
         Route::post('/facturas-venta/{id}/controlar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'controlar'])

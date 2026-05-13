@@ -470,9 +470,13 @@ class LibroIvaComprasImportService
             ? DB::table('erp_centros_costo')->where('auxiliar_id', $clienteAuxId)->value('id')
             : null;
 
-        // v1.17 RN-FM-5: si ya existe una factura MANUAL con misma (tipo, PV, nro, CUIT)
-        // → no insertar de nuevo. Devolver conflict info en lugar del INSERT.
-        // El operador en el resumen del import ve estos conflictos y decide qué hacer.
+        // v1.18 Sprint U5 (refina v1.17 RN-FM-5): si ya existe una factura
+        // MANUAL con misma (tipo, PV, nro, CUIT) → comparar campos clave
+        // (fecha_emision, total, neto_gravado, iva) en lugar de solo el total.
+        // - MATCH 100% → marcar la MANUAL como `MANUAL_VERIFICADA_IMPORT` +
+        //   audit log. NO insertar duplicado. (D-18-6)
+        // - DIFF en algún campo → reportar al operador con detalle por campo.
+        //   NO acción automática. (D-18-7)
         $manualExistente = DB::table('erp_facturas_compra')
             ->where('empresa_id', $empresaId)
             ->where('tipo_comprobante_id', $tipoCbteCod)
@@ -481,23 +485,62 @@ class LibroIvaComprasImportService
             ->where('cuit_emisor', $cuit)
             ->where('origen', 'MANUAL')
             ->whereNull('deleted_at')
-            ->first(['id', 'imp_total']);
+            ->first(['id', 'imp_total', 'imp_neto_gravado', 'imp_iva', 'fecha_emision', 'observaciones']);
+
         if ($manualExistente) {
-            $coincidenImportes = abs((float) $manualExistente->imp_total - $impTotal) < 0.01;
-            // Marcar la manual como verificada por el import (audit info).
+            // Comparar campos clave (D-18-5): fecha_emision, total, neto, iva.
+            $diffs = [];
+            $manualFecha = $manualExistente->fecha_emision instanceof \DateTimeInterface
+                ? $manualExistente->fecha_emision->format('Y-m-d')
+                : (string) $manualExistente->fecha_emision;
+            if ($manualFecha !== $fechaEmision) {
+                $diffs[] = ['campo' => 'fecha_emision', 'manual' => $manualFecha, 'import' => $fechaEmision];
+            }
+            if (abs((float) $manualExistente->imp_total - $impTotal) > 0.01) {
+                $diffs[] = ['campo' => 'imp_total',
+                    'manual' => (float) $manualExistente->imp_total, 'import' => $impTotal];
+            }
+            if (abs((float) $manualExistente->imp_neto_gravado - $impNetoGravado) > 0.01) {
+                $diffs[] = ['campo' => 'imp_neto_gravado',
+                    'manual' => (float) $manualExistente->imp_neto_gravado, 'import' => $impNetoGravado];
+            }
+            if (abs((float) $manualExistente->imp_iva - $impIva) > 0.01) {
+                $diffs[] = ['campo' => 'imp_iva',
+                    'manual' => (float) $manualExistente->imp_iva, 'import' => $impIva];
+            }
+
+            $obsExistente = (string) ($manualExistente->observaciones ?? '');
+            if (empty($diffs)) {
+                // MATCH 100% — marcar como verificada por import.
+                DB::table('erp_facturas_compra')->where('id', $manualExistente->id)->update([
+                    'observaciones' => trim($obsExistente.sprintf(
+                        "\n[%s] MATCH 100%% con import #%d (todos los campos clave coinciden).",
+                        now()->format('Y-m-d H:i'), $importId
+                    )),
+                    'updated_at' => now(),
+                ]);
+                throw new \DomainException(sprintf(
+                    'CONFLICTO_CON_MANUAL: la factura (%d-%d-%d, CUIT %s) ya existe como MANUAL (#%d). MATCH 100%% — marcada como verificada por import, no se duplica.',
+                    $tipoCbteCod, $puntoVenta, $numero, $cuit, $manualExistente->id
+                ));
+            }
+
+            // DIFF — reportar con detalle por campo.
+            $diffsResumen = implode(' · ', array_map(
+                fn ($d) => sprintf('%s manual=%s import=%s', $d['campo'], (string) $d['manual'], (string) $d['import']),
+                $diffs
+            ));
             DB::table('erp_facturas_compra')->where('id', $manualExistente->id)->update([
-                'origen' => 'MANUAL', // queda como MANUAL — registramos solo el match
-                'observaciones' => trim((string) (DB::table('erp_facturas_compra')->where('id', $manualExistente->id)->value('observaciones')
-                    ?? '').sprintf("\n[%s] Coincide con import #%d. Importes %s.",
-                    now()->format('Y-m-d H:i'), $importId,
-                    $coincidenImportes ? 'cuadran' : 'DIFIEREN')),
+                'observaciones' => trim($obsExistente.sprintf(
+                    "\n[%s] DIFF con import #%d en %d campo(s): %s",
+                    now()->format('Y-m-d H:i'), $importId, count($diffs), $diffsResumen
+                )),
                 'updated_at' => now(),
             ]);
-            // Throw "conflicto" para que el caller lo cuente como skipped+conflicto.
             throw new \DomainException(sprintf(
-                'CONFLICTO_CON_MANUAL: la factura (%d-%d-%d, CUIT %s) ya existe como MANUAL (#%d). %s',
+                'CONFLICTO_CON_MANUAL: factura (%d-%d-%d, CUIT %s) ya existe como MANUAL (#%d). DIFF en %d campo(s): %s — revisar manualmente.',
                 $tipoCbteCod, $puntoVenta, $numero, $cuit, $manualExistente->id,
-                $coincidenImportes ? 'Importes coinciden — sin acción.' : 'Importes DIFIEREN — revisar manualmente.'
+                count($diffs), $diffsResumen
             ));
         }
 

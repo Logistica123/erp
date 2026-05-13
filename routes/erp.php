@@ -100,6 +100,9 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.auxiliares.desactivar');
         Route::get('/bancos', [CatalogosController::class, 'bancos'])->name('erp.bancos');
         Route::get('/cuentas-bancarias', [CatalogosController::class, 'cuentasBancarias'])->name('erp.cuentas-bancarias');
+        // v1.18 Sprint T — bimoneda.
+        Route::get('/cuentas-bancarias/{id}/monedas-aceptadas', [CatalogosController::class, 'monedasAceptadas'])
+            ->whereNumber('id')->name('erp.cuentas-bancarias.monedas');
         Route::get('/cajas', [CatalogosController::class, 'cajas'])->name('erp.cajas');
         Route::get('/medios-pago', [CatalogosController::class, 'mediosPago'])->name('erp.medios-pago');
 

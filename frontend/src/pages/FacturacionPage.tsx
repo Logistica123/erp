@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 type Factura = {
   id: number;
@@ -19,6 +19,7 @@ type Factura = {
   imp_iva: string;
   imp_total: string;
   origen: string;
+  verificada_arca?: number | boolean;
   estado: string;
   es_fce: number;
   tipo_codigo: string;
@@ -84,8 +85,20 @@ type CobroCatalogos = {
 
 export function FacturacionPage() {
   const qc = useQueryClient();
-  const [estado, setEstado] = useState<string>('');
-  const [origen, setOrigen] = useState<string>('');
+  // v1.18 Sprint U U3 — filtros persistidos en query string (bookmarking).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const estado = searchParams.get('estado') ?? '';
+  const origen = searchParams.get('origen') ?? '';
+  const setEstado = (v: string) => {
+    const p = new URLSearchParams(searchParams);
+    if (v) p.set('estado', v); else p.delete('estado');
+    setSearchParams(p, { replace: true });
+  };
+  const setOrigen = (v: string) => {
+    const p = new URLSearchParams(searchParams);
+    if (v) p.set('origen', v); else p.delete('origen');
+    setSearchParams(p, { replace: true });
+  };
   const [cobroFactura, setCobroFactura] = useState<Factura | null>(null);
 
   const { data, isLoading, error } = useQuery<Resp>({
@@ -258,7 +271,15 @@ export function FacturacionPage() {
                       <td className="px-4 py-3 text-right font-mono font-semibold text-gray-900">
                         {fmtMoney(parseFloat(f.imp_total))}
                       </td>
-                      <td className="px-4 py-3">{origenBadge(f.origen)}</td>
+                      <td className="px-4 py-3">
+                        <div className="inline-flex items-center gap-1">
+                          {origenBadge(f.origen)}
+                          {/* v1.18 U6 — ✓ si verificada contra ARCA. */}
+                          {Number(f.verificada_arca) === 1 && (
+                            <span title="Verificada contra ARCA" className="text-emerald-600 font-bold">✓</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3">{estadoBadge(f.estado)}</td>
                       <td className="px-4 py-3">
                         {f.asiento_id ? (

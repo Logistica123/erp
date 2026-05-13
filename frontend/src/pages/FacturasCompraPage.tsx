@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -75,8 +75,18 @@ function constatBadge(s: string) {
 }
 
 export function FacturasCompraPage() {
-  const [estado, setEstado] = useState('');
-  const [origen, setOrigen] = useState('');
+  // v1.18 Sprint U U3 — filtros estado + origen persistidos en query string.
+  // Los demás siguen en state local (cambios de fecha/CC son interactivos).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const estado = searchParams.get('estado') ?? '';
+  const origen = searchParams.get('origen') ?? '';
+  const setQueryParam = (key: string, value: string) => {
+    const p = new URLSearchParams(searchParams);
+    if (value) p.set(key, value); else p.delete(key);
+    setSearchParams(p, { replace: true });
+  };
+  const setEstado = (v: string) => setQueryParam('estado', v);
+  const setOrigen = (v: string) => setQueryParam('origen', v);
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
   // Addendum v1.13 + v1.14 — filtros enriquecidos

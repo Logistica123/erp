@@ -137,6 +137,52 @@ class CatalogosController
         ]);
     }
 
+    /**
+     * GET /api/erp/cuentas-bancarias/{id}/monedas-aceptadas
+     * v1.18 Sprint T — bimoneda. Devuelve la moneda principal + lista de
+     * monedas aceptadas (si la cuenta es multimoneda). Si `monedas_aceptadas`
+     * es NULL, devuelve solo la principal y marca `es_monomoneda=true`.
+     */
+    public function monedasAceptadas(Request $request, int $id): JsonResponse
+    {
+        $empresaId = $this->empresaIdFromRequest($request);
+        $cuenta = CuentaBancaria::where('empresa_id', $empresaId)
+            ->where('id', $id)
+            ->with('moneda:id,codigo')
+            ->first();
+        if (! $cuenta) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_ENCONTRADA']], 404);
+        }
+
+        $principal = $cuenta->moneda?->codigo ?? 'ARS';
+        $aceptadas = $cuenta->monedas_aceptadas;
+        $esMono = empty($aceptadas);
+
+        // Resolver IDs de monedas para que el frontend los mapee al dropdown.
+        $codigos = $esMono ? [$principal] : (array) $aceptadas;
+        $monedaRows = \App\Erp\Models\Moneda::whereIn('codigo', $codigos)
+            ->where('activa', true)
+            ->get(['id', 'codigo'])
+            ->keyBy('codigo');
+
+        $monedaPrincipalId = $monedaRows[$principal]->id ?? $cuenta->moneda_id;
+        $aceptadasIds = $codigos
+            ? array_values(array_filter(array_map(fn ($c) => $monedaRows[$c]->id ?? null, $codigos)))
+            : [$monedaPrincipalId];
+
+        return response()->json([
+            'ok' => true,
+            'data' => [
+                'cuenta_bancaria_id' => $cuenta->id,
+                'principal' => $principal,
+                'principal_id' => $monedaPrincipalId,
+                'aceptadas' => $codigos,
+                'aceptadas_ids' => $aceptadasIds,
+                'es_monomoneda' => $esMono,
+            ],
+        ]);
+    }
+
     public function cajas(Request $request): JsonResponse
     {
         $empresaId = $this->empresaIdFromRequest($request);

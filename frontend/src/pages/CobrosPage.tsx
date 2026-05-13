@@ -213,27 +213,56 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
     setSeleccionPend(new Set());
   };
 
-  // v1.15 ampliación (D-TS-3) — auto-derivar moneda según el medio elegido.
-  // Si la cuenta bancaria o caja del primer medio tiene moneda definida y
-  // la moneda del header está vacía, autocompletarla.
+  // v1.15 ampliación (D-TS-3) + v1.18 Sprint T (bimoneda) — auto-derivar
+  // moneda según el medio + cuenta bancaria. Si la cuenta es bimoneda,
+  // restringir el dropdown a las monedas aceptadas. Si es monomoneda,
+  // setear la moneda y deshabilitar el dropdown.
+  const [monedasAceptadas, setMonedasAceptadas] = useState<{ ids: number[]; esMono: boolean } | null>(null);
   useEffect(() => {
-    if (form.moneda_id) return; // ya elegida — no pisar
     const primerMedio = mediosLista[0];
-    if (!primerMedio?.medio_pago_id) return;
+    if (!primerMedio?.medio_pago_id) {
+      setMonedasAceptadas(null);
+      return;
+    }
     const medio = (medios ?? []).find((mp) => String(mp.id) === primerMedio.medio_pago_id);
     if (!medio) return;
-    let monedaId: number | null = null;
-    if (medio.afecta_banco && primerMedio.cuenta_bancaria_id) {
-      const cta = (ctasBanco ?? []).find((c) => String(c.id) === primerMedio.cuenta_bancaria_id);
-      monedaId = cta?.moneda?.id ?? cta?.moneda_id ?? null;
-    } else if (medio.afecta_caja && primerMedio.caja_id) {
+
+    // Caja → moneda directa (caja siempre monomoneda en este modelo).
+    if (medio.afecta_caja && primerMedio.caja_id) {
       const c = (cajas ?? []).find((x) => String(x.id) === primerMedio.caja_id);
-      monedaId = c?.moneda?.id ?? c?.moneda_id ?? null;
+      const id = c?.moneda?.id ?? c?.moneda_id;
+      if (id) {
+        setMonedasAceptadas({ ids: [id], esMono: true });
+        if (!form.moneda_id) setForm((f) => ({ ...f, moneda_id: String(id) }));
+      }
+      return;
     }
-    if (monedaId) {
-      setForm((f) => ({ ...f, moneda_id: String(monedaId) }));
+
+    // Cuenta bancaria → consultar endpoint bimoneda.
+    if (medio.afecta_banco && primerMedio.cuenta_bancaria_id) {
+      const ctaId = Number(primerMedio.cuenta_bancaria_id);
+      api.get<{ data: { principal_id: number; aceptadas_ids: number[]; es_monomoneda: boolean } }>(
+        `/api/erp/cuentas-bancarias/${ctaId}/monedas-aceptadas`,
+      ).then((r) => {
+        const ids = r.data.aceptadas_ids.length ? r.data.aceptadas_ids : [r.data.principal_id];
+        setMonedasAceptadas({ ids, esMono: r.data.es_monomoneda });
+        // Setear principal si no había moneda elegida o si la actual no está en aceptadas.
+        const currentId = Number(form.moneda_id);
+        if (!form.moneda_id || !ids.includes(currentId)) {
+          setForm((f) => ({ ...f, moneda_id: String(r.data.principal_id) }));
+        }
+      }).catch(() => {
+        // Fallback al snapshot del catálogo si el endpoint falla.
+        const cta = (ctasBanco ?? []).find((c) => String(c.id) === primerMedio.cuenta_bancaria_id);
+        const id = cta?.moneda?.id ?? cta?.moneda_id;
+        if (id) {
+          setMonedasAceptadas({ ids: [id], esMono: true });
+          if (!form.moneda_id) setForm((f) => ({ ...f, moneda_id: String(id) }));
+        }
+      });
     }
-  }, [mediosLista, medios, ctasBanco, cajas, form.moneda_id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediosLista[0]?.medio_pago_id, mediosLista[0]?.caja_id, mediosLista[0]?.cuenta_bancaria_id]);
 
   const submit = () => {
     m.mutate({
@@ -290,9 +319,16 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setForm({ ...form, auxiliar_id: e.target.value })}
             options={(auxiliares ?? []).map((a) => ({ value: a.id, label: `${a.codigo} ${a.nombre}` }))}
             placeholder="Elegí…" />
+          {/* v1.18 Sprint T — bimoneda: si el primer medio es cuenta bancaria
+              monomoneda, el dropdown queda disabled. Si es bimoneda, solo
+              muestra las aceptadas. Si no hay medio elegido, todas las opciones. */}
           <SelectField label="Moneda" required value={form.moneda_id}
             onChange={(e) => setForm({ ...form, moneda_id: e.target.value })}
-            options={(monedas ?? []).map((mv) => ({ value: mv.id, label: mv.codigo }))}
+            options={(monedas ?? [])
+              .filter((mv) => !monedasAceptadas || monedasAceptadas.ids.includes(mv.id))
+              .map((mv) => ({ value: mv.id, label: mv.codigo }))}
+            disabled={monedasAceptadas?.esMono ?? false}
+            hint={monedasAceptadas?.esMono ? 'Derivada del medio (monomoneda)' : undefined}
             placeholder="—" />
         </div>
         <Field label="Concepto" value={form.concepto}
@@ -317,30 +353,44 @@ function NuevoCobroModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <div className="space-y-2">
-            {items.map((it, idx) => (
-              <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                <SelectField containerClassName="col-span-3" value={it.tipo_item}
-                  placeholder={null}
-                  onChange={(e) => {
-                    const nu = [...items]; nu[idx].tipo_item = e.target.value; setItems(nu);
-                  }}
-                  options={[
-                    { value: 'FACTURA_VENTA', label: 'Factura' },
-                    { value: 'NOTA_DEBITO', label: 'Nota débito' },
-                    { value: 'SEÑA', label: 'Seña' },
-                    { value: 'OTRO', label: 'Otro' },
-                  ]} />
-                <Field containerClassName="col-span-7" placeholder="Concepto…" value={it.concepto}
-                  onChange={(e) => {
-                    const nu = [...items]; nu[idx].concepto = e.target.value; setItems(nu);
-                  }} />
-                <Field containerClassName="col-span-2" type="number" step="0.01" placeholder="Importe"
-                  value={it.importe}
-                  onChange={(e) => {
-                    const nu = [...items]; nu[idx].importe = e.target.value; setItems(nu);
-                  }} />
-              </div>
-            ))}
+            {items.map((it, idx) => {
+              // v1.18 S2: items que vienen de "Cargar pendientes" tienen factura_id —
+              // mostramos label read-only con la info del comprobante.
+              const desdeCargar = it.factura_id != null;
+              return (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+                  {desdeCargar ? (
+                    <div className="col-span-10 flex items-center gap-2 bg-surface-row border border-line rounded-md px-2 py-1.5 text-[12px]">
+                      <Badge variant="info">{it.tipo_item === 'NOTA_DEBITO' ? 'ND' : 'FB'}</Badge>
+                      <span className="flex-1 font-medium">{it.concepto}</span>
+                    </div>
+                  ) : (
+                    <>
+                      <SelectField containerClassName="col-span-3" value={it.tipo_item}
+                        placeholder={null}
+                        onChange={(e) => {
+                          const nu = [...items]; nu[idx].tipo_item = e.target.value; setItems(nu);
+                        }}
+                        options={[
+                          { value: 'FACTURA_VENTA', label: 'Factura' },
+                          { value: 'NOTA_DEBITO', label: 'Nota débito' },
+                          { value: 'SEÑA', label: 'Seña' },
+                          { value: 'OTRO', label: 'Otro' },
+                        ]} />
+                      <Field containerClassName="col-span-7" placeholder="Concepto…" value={it.concepto}
+                        onChange={(e) => {
+                          const nu = [...items]; nu[idx].concepto = e.target.value; setItems(nu);
+                        }} />
+                    </>
+                  )}
+                  <Field containerClassName="col-span-2" type="number" step="0.01" placeholder="Importe"
+                    value={it.importe}
+                    onChange={(e) => {
+                      const nu = [...items]; nu[idx].importe = e.target.value; setItems(nu);
+                    }} />
+                </div>
+              );
+            })}
           </div>
         </div>
 

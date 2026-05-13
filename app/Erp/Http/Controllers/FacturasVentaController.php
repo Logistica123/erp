@@ -231,6 +231,7 @@ class FacturasVentaController extends Controller
             ->select([
                 'f.id', 'f.numero', 'f.cae', 'f.fecha_vto_cae', 'f.fecha_emision',
                 'f.imp_neto_gravado', 'f.imp_iva', 'f.imp_total', 'f.origen', 'f.estado',
+                'f.verificada_arca', // v1.18 U6
                 'f.es_fce', 'f.created_at',
                 'tc.codigo_interno as tipo_codigo', 'tc.nombre as tipo_nombre', 'tc.letra',
                 'tc.clase as tipo_clase', 'tc.signo as tipo_signo',

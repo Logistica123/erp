@@ -18,6 +18,7 @@ class CuentaBancaria extends Model
 
     protected $fillable = [
         'empresa_id', 'banco_id', 'cuenta_contable_id', 'moneda_id',
+        'monedas_aceptadas', // v1.18 Sprint T
         'codigo', 'nombre', 'tipo',
         'numero_cuenta', 'cbu', 'cvu', 'alias_cbu',
         'saldo_actual', 'saldo_moneda_origen', 'fecha_ultimo_movimiento',
@@ -25,6 +26,7 @@ class CuentaBancaria extends Model
     ];
 
     protected $casts = [
+        'monedas_aceptadas' => 'array', // v1.18 Sprint T — JSON ['ARS','USD']
         'saldo_actual' => 'decimal:2',
         'saldo_moneda_origen' => 'decimal:2',
         'fecha_ultimo_movimiento' => 'date',

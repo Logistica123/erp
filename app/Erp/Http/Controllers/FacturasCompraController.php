@@ -38,7 +38,7 @@ class FacturasCompraController extends Controller
                 'f.id', 'f.numero', 'f.cae', 'f.fecha_emision', 'f.fecha_vencimiento',
                 'f.fecha_imputacion', 'f.periodo_id', 'f.imputacion_diferida',
                 'f.imp_neto_gravado', 'f.imp_iva', 'f.imp_total',
-                'f.origen', 'f.estado', 'f.constatacion_estado',
+                'f.origen', 'f.verificada_arca', 'f.estado', 'f.constatacion_estado',
                 'tc.codigo_interno as tipo_codigo', 'tc.letra', 'tc.clase as tipo_clase',
                 'f.punto_venta',
                 'a.id as proveedor_id', 'a.nombre as proveedor_nombre', 'a.cuit as proveedor_cuit',

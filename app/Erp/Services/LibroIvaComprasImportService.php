@@ -181,10 +181,14 @@ class LibroIvaComprasImportService
         Storage::disk('local')->put($rutaStorage, file_get_contents($pathTemporal));
 
         $errores = [];
+        $warnings = []; // v1.22 D-22-3
         $clientesNoMapeados = [];
         $tomadas = 0; $noTomadas = 0; $skipped = 0;
         $proveedoresCreados = 0;
 
+        // v1.22 D-22-2 — atomicidad TODO-O-NADA. Si cualquier fila falla por
+        // error real, hacemos rollback total y NO insertamos nada. El upload
+        // queda registrado con estado=ERROR_TOTAL para auditoría.
         DB::beginTransaction();
         try {
             foreach ($rows as $idx => $rowRaw) {
@@ -204,30 +208,46 @@ class LibroIvaComprasImportService
                     } else {
                         $tomadas++;
                     }
+                    if (! empty($r['warning'])) {
+                        $warnings[] = ['row' => $rowNum, 'motivo' => $r['warning']];
+                    }
                 } catch (\Throwable $e) {
                     $errores[] = ['row' => $rowNum, 'motivo' => $e->getMessage()];
                 }
             }
 
-            $import->update([
-                'filas_totales' => $tomadas + $noTomadas,
-                'filas_tomadas' => $tomadas,
-                'filas_no_tomadas' => $noTomadas,
-                'filas_skipped' => $skipped,
-                'filas_error' => count($errores),
-                'errores_detalle' => $errores,
-                'clientes_no_mapeados' => $clientesNoMapeados,
-                'proveedores_creados' => $proveedoresCreados,
-                'estado' => count($errores) === 0
-                    ? LibroIvaComprasImport::ESTADO_COMPLETO
-                    : LibroIvaComprasImport::ESTADO_PARCIAL,
-            ]);
-
-            DB::commit();
+            if (count($errores) > 0) {
+                // Rollback TODO-O-NADA: ninguna factura/asiento queda persistido.
+                DB::rollBack();
+            } else {
+                DB::commit();
+            }
         } catch (\Throwable $e) {
             DB::rollBack();
             throw $e;
         }
+
+        // Persistir resumen del upload (fuera de transaction → autocommit).
+        // Si hubo rollback los counts de filas insertadas son 0.
+        $estado = count($errores) > 0
+            ? LibroIvaComprasImport::ESTADO_ERROR_TOTAL
+            : (count($warnings) > 0
+                ? LibroIvaComprasImport::ESTADO_OK_CON_WARNINGS
+                : LibroIvaComprasImport::ESTADO_COMPLETO);
+
+        $import->update([
+            'filas_totales' => count($errores) > 0 ? 0 : ($tomadas + $noTomadas),
+            'filas_tomadas' => count($errores) > 0 ? 0 : $tomadas,
+            'filas_no_tomadas' => count($errores) > 0 ? 0 : $noTomadas,
+            'filas_skipped' => $skipped,
+            'filas_error' => count($errores),
+            'warnings_count' => count($warnings),
+            'errores_detalle' => $errores,
+            'warnings_detalle' => $warnings,
+            'clientes_no_mapeados' => count($errores) > 0 ? [] : $clientesNoMapeados,
+            'proveedores_creados' => count($errores) > 0 ? 0 : $proveedoresCreados,
+            'estado' => $estado,
+        ]);
 
         $this->audit->logEvento(
             accion: 'IMPORT_LIBRO_IVA_COMPRAS',
@@ -241,18 +261,21 @@ class LibroIvaComprasImportService
 
         return [
             'import_id' => $import->id,
+            'estado' => $estado, // v1.22 — para que el frontend muestre el banner correcto
             'stats' => [
-                'totales' => $tomadas + $noTomadas,
-                'tomadas' => $tomadas,
-                'no_tomadas' => $noTomadas,
+                'totales' => count($errores) > 0 ? 0 : ($tomadas + $noTomadas),
+                'tomadas' => count($errores) > 0 ? 0 : $tomadas,
+                'no_tomadas' => count($errores) > 0 ? 0 : $noTomadas,
                 'skipped' => $skipped,
                 'errores' => count($errores),
-                'proveedores_creados' => $proveedoresCreados,
-                'clientes_mapeados' => $tomadas + $noTomadas - count($clientesNoMapeados),
-                'clientes_no_mapeados' => count($clientesNoMapeados),
+                'warnings' => count($warnings), // v1.22
+                'proveedores_creados' => count($errores) > 0 ? 0 : $proveedoresCreados,
+                'clientes_mapeados' => count($errores) > 0 ? 0 : ($tomadas + $noTomadas - count($clientesNoMapeados)),
+                'clientes_no_mapeados' => count($errores) > 0 ? 0 : count($clientesNoMapeados),
             ],
             'errores' => $errores,
-            'clientes_no_mapeados' => $clientesNoMapeados,
+            'warnings' => $warnings, // v1.22
+            'clientes_no_mapeados' => count($errores) > 0 ? [] : $clientesNoMapeados,
         ];
     }
 
@@ -445,6 +468,46 @@ class LibroIvaComprasImportService
      * Devuelve `null` solo si el input está vacío. Si el formato es inválido
      * o la fecha es imposible, lanza DomainException con código prefijado.
      */
+    /**
+     * v1.22 D-22-1 — fecha_imputacion según relación con el período.
+     *
+     *   - emisión DENTRO del período  → imputacion = fecha_emision (sin warning)
+     *   - emisión ANTERIOR al período → imputacion = inicio del período (sin warning, "factura atrasada")
+     *   - emisión POSTERIOR al período → error FECHA_POSTERIOR_AL_PERIODO
+     *
+     * Nota: el addendum sugería warning para el caso POSTERIOR pero el CHECK
+     * constraint `fecha_imputacion >= fecha_emision` lo impide a nivel BD —
+     * tocarlo no entra en este sprint. El error es claro y le dice al operador
+     * que eligió el período equivocado (o que la factura no corresponde a este
+     * archivo).
+     *
+     * @return array{fecha:string, warning:?string}
+     * @throws DomainException si la emisión es posterior al fin del período
+     */
+    private function calcularFechaImputacion(string $fechaEmision, object $periodo): array
+    {
+        $inicio = $periodo->fecha_inicio instanceof \DateTimeInterface
+            ? $periodo->fecha_inicio->format('Y-m-d')
+            : (string) $periodo->fecha_inicio;
+        $fin = $periodo->fecha_fin instanceof \DateTimeInterface
+            ? $periodo->fecha_fin->format('Y-m-d')
+            : (string) $periodo->fecha_fin;
+
+        if ($fechaEmision < $inicio) {
+            // Factura atrasada — emitida ANTES del período elegido.
+            return ['fecha' => $inicio, 'warning' => null];
+        }
+        if ($fechaEmision > $fin) {
+            $periodoNombre = sprintf('%02d/%d', (int) $periodo->mes, (int) $periodo->anio);
+            throw new DomainException(
+                "FECHA_POSTERIOR_AL_PERIODO: factura del {$fechaEmision} es posterior al fin del período {$periodoNombre} ({$fin}). "
+                . 'Elegí el período correspondiente a la fecha de emisión.'
+            );
+        }
+        // Dentro del período.
+        return ['fecha' => $fechaEmision, 'warning' => null];
+    }
+
     private function parsearFecha($v, string $campo = 'fecha'): ?string
     {
         if ($v === null) return null;
@@ -524,15 +587,22 @@ class LibroIvaComprasImportService
         $impExento = $this->parsearFloat($this->get($r, $headerMap, 'importe exento'));
         $impIva = $this->parsearFloat($this->get($r, $headerMap, 'total iva'));
 
-        // Imputación: si tomada=NO, fecha_imputacion = fecha_emision (sin asiento).
+        // v1.22 D-22-1 — fecha_imputacion inteligente (reemplaza el bug del v1.13
+        // que forzaba primer día del período y rebotaba toda fecha_emision > día 1).
+        //   - emisión DENTRO del período  → fecha_imputacion = fecha_emision
+        //   - emisión ANTERIOR al período → fecha_imputacion = inicio del período (factura atrasada, sin warning)
+        //   - emisión POSTERIOR al período → fecha_imputacion = fin del período + warning (no error)
         if ($tomada) {
+            $fechaImputacion = $this->calcularFechaImputacion($fechaEmision, $periodo);
             $imp = $this->facturaSvc->resolverImputacion(
                 $fechaEmision,
-                Carbon::create($periodo->anio, $periodo->mes, 1)->toDateString(),
+                $fechaImputacion['fecha'],
                 $usuario, $empresaId,
             );
+            $warningFila = $fechaImputacion['warning']; // null si no aplica
         } else {
             $imp = ['fecha_imputacion' => $fechaEmision, 'periodo_id' => null, 'imputacion_diferida' => 0];
+            $warningFila = null;
         }
 
         // Período trabajado, jurisdicción y tipo (extras del contador).
@@ -665,6 +735,7 @@ class LibroIvaComprasImportService
             'no_tomada' => ! $tomada,
             'cliente_no_mapeado' => $clienteNoMapeado,
             'proveedor_creado' => $proveedorCreado,
+            'warning' => $warningFila ?? null, // v1.22 D-22-3
         ];
     }
 

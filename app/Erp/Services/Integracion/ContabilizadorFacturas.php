@@ -289,6 +289,26 @@ class ContabilizadorFacturas
         $impTotal = (float) $f->imp_total;
         $esNC = ($f->cbte_signo ?? 1) < 0;
 
+        // v1.22 D-22-4 — comprobantes sin IVA discriminado (Factura C tipo 11,
+        // NC C tipo 13, comprobantes de monotributistas). El neto y el IVA
+        // vienen en 0 pero el total NO. Para que el asiento tenga al menos 2
+        // líneas (regla de partida doble), forzamos la línea de gasto al total
+        // y omitimos la línea de IVA Crédito Fiscal.
+        $sinIvaDiscriminado = $netoSinIva == 0.0 && $impIva == 0.0 && $impTotal != 0.0;
+        if ($sinIvaDiscriminado) {
+            $netoSinIva = abs($impTotal);
+            $impIva = 0.0;
+        }
+
+        // v1.22 D-22-5 — para NC el CSV trae importes negativos. El CHECK
+        // `chk_mov_signo` de erp_movimientos_asiento exige debe/haber >= 0,
+        // así que normalizamos a positivo: el signo se expresa por la rama
+        // ($esNC) que swappea debe y haber.
+        $netoSinIva = abs($netoSinIva);
+        $impIva = abs($impIva);
+        $impRet = abs($impRet);
+        $impTotal = abs($impTotal);
+
         // ADDENDUM v1.9 — fecha del asiento = fecha_imputacion (no emisión).
         // Glosa enriquecida si la imputación es diferida.
         $fechaEmision = $f->fecha_emision instanceof \DateTimeInterface
@@ -314,6 +334,8 @@ class ContabilizadorFacturas
                 $movs[] = [
                     'cuenta_id' => (int) $cuentaGasto,
                     'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
+                    // v1.22 D-22-6 — propagar auxiliar del proveedor si la cuenta lo exige.
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaGasto) ? $f->auxiliar_id : null,
                     'debe' => $netoSinIva,
                     'haber' => 0,
                     'glosa' => 'Gastos / servicios',
@@ -362,6 +384,8 @@ class ContabilizadorFacturas
                 $movs[] = [
                     'cuenta_id' => (int) $cuentaGasto,
                     'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
+                    // v1.22 D-22-6 — mismo fix para reverso gasto (NC).
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaGasto) ? $f->auxiliar_id : null,
                     'debe' => 0,
                     'haber' => $netoSinIva,
                     'glosa' => 'Reverso gasto',

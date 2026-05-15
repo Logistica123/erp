@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus } from 'lucide-react';
+import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2 } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -9,8 +9,8 @@ import { DataTable, fmtMoney, fmtDate, type Column } from '@/components/ui/DataT
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Field, SelectField, FormError } from '@/components/ui/Field';
-import { api } from '@/lib/api';
-import { useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
+import { api, ApiError } from '@/lib/api';
+import { useApi, useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 
 type FacturaCompra = {
@@ -117,8 +117,55 @@ export function FacturasCompraPage() {
   const [controlOpen, setControlOpen] = useState<FacturaCompra | null>(null);
   const [observarOpen, setObservarOpen] = useState<FacturaCompra | null>(null);
   const [rechazarOpen, setRechazarOpen] = useState<FacturaCompra | null>(null);
+  // v1.22 §13 — bulk select.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [borrarMasivoOpen, setBorrarMasivoOpen] = useState(false);
+
+  // v1.22 §13 — chequeo de permiso `compras.facturas.borrar_masivo`.
+  const { data: misPermisos } = useApi<Array<{ codigo: string; sensible: boolean }>>(
+    ['mi-permisos'],
+    '/api/erp/mi-permisos',
+  );
+  const puedeBorrarMasivo = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.borrar_masivo');
+
+  const filas = data?.data ?? [];
+  const todoSeleccionado = filas.length > 0 && filas.every((r) => selectedIds.has(r.id));
+  const toggleFila = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const toggleTodos = () => {
+    if (todoSeleccionado) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filas.map((r) => r.id)));
+    }
+  };
+  const seleccionadasObj = filas.filter((r) => selectedIds.has(r.id));
 
   const columns: Column<FacturaCompra>[] = [
+    ...(puedeBorrarMasivo ? [{
+      key: 'select' as const, width: '40px', align: 'center' as const,
+      header: (
+        <input
+          type="checkbox"
+          aria-label="Seleccionar todas"
+          checked={todoSeleccionado}
+          onChange={toggleTodos}
+        />
+      ),
+      render: (r: FacturaCompra) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(r.id)}
+          onChange={(e) => { e.stopPropagation(); toggleFila(r.id); }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ),
+    }] : []),
     { key: 'fecha_emision', header: 'Fecha', width: '90px', render: (r) => fmtDate(r.fecha_emision) },
     { key: 'imputado', header: 'Imputado', width: '110px',
       render: (r) => {
@@ -257,7 +304,25 @@ export function FacturasCompraPage() {
               containerClassName="w-[120px]" />
           </div>
           {error && <FormError error={errorMessage(error)} />}
-          <DataTable columns={columns} rows={data?.data ?? []} loading={isLoading}
+
+          {/* v1.22 §13 — barra de acción cuando hay selección. */}
+          {puedeBorrarMasivo && selectedIds.size > 0 && (
+            <div className="flex items-center justify-between border border-warning/40 bg-warning-bg/30 rounded-md px-3 py-2 text-[12px]">
+              <span className="text-warning font-medium">
+                {selectedIds.size} factura{selectedIds.size === 1 ? '' : 's'} seleccionada{selectedIds.size === 1 ? '' : 's'}
+              </span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => setSelectedIds(new Set())}>
+                  Limpiar
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => setBorrarMasivoOpen(true)}>
+                  <Trash2 className="w-3 h-3" /> Borrar {selectedIds.size}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <DataTable columns={columns} rows={filas} loading={isLoading}
             onRowClick={(r) => setVerId(r.id)} empty="Sin facturas en el filtro" />
         </CardBody>
       </Card>
@@ -266,7 +331,134 @@ export function FacturasCompraPage() {
       {controlOpen && <ControlarConfirm factura={controlOpen} onClose={() => setControlOpen(null)} />}
       {observarOpen && <MotivoModal factura={observarOpen} action="observar" onClose={() => setObservarOpen(null)} />}
       {rechazarOpen && <MotivoModal factura={rechazarOpen} action="rechazar" onClose={() => setRechazarOpen(null)} />}
+      {borrarMasivoOpen && (
+        <BorrarMasivoModal
+          facturas={seleccionadasObj}
+          onClose={() => setBorrarMasivoOpen(false)}
+          onDone={() => { setSelectedIds(new Set()); setBorrarMasivoOpen(false); }}
+        />
+      )}
     </div>
+  );
+}
+
+function BorrarMasivoModal({
+  facturas, onClose, onDone,
+}: {
+  facturas: FacturaCompra[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [motivo, setMotivo] = useState('');
+  const toast = useToast();
+  const invalidate = useInvalidate(['facturas-compra']);
+  const importsInvalidate = useInvalidate(['libro-iva-compras-imports']);
+
+  const importeTotal = facturas.reduce((sum, f) => sum + Number(f.imp_total || 0), 0);
+  const conAsiento = facturas.filter((f) => f.asiento_id).length;
+
+  const m = useApiMutation<unknown, { ids: number[]; motivo?: string }>(
+    (body) => api.post('/api/erp/facturas-compra/borrar-masivo', body),
+    {
+      onSuccess: () => {
+        toast.success('Facturas borradas',
+          `${facturas.length} factura${facturas.length === 1 ? '' : 's'} eliminada${facturas.length === 1 ? '' : 's'}`);
+        invalidate();
+        importsInvalidate();
+        onDone();
+      },
+      onError: (e) => {
+        if (e instanceof ApiError && e.status === 422) {
+          const payload = e.payload as { error?: { code?: string; message?: string } };
+          const code = payload.error?.code;
+          if (code === 'PERIODO_CERRADO_EN_SELECCION') {
+            toast.error('Período cerrado',
+              'Algunas facturas seleccionadas están en períodos cerrados. Desmarcalas o reabrí el período.');
+            return;
+          }
+          if (code === 'FACTURA_CONCILIADA') {
+            toast.error('Factura conciliada',
+              'Algunas facturas tienen pagos asociados. Desconciliá primero desde Tesorería.');
+            return;
+          }
+        }
+        toast.error('Error al borrar', errorMessage(e));
+      },
+    },
+  );
+
+  return (
+    <Modal open onClose={onClose} title="Borrar facturas de compra masivamente" size="lg">
+      <div className="space-y-3 text-[12px]">
+        <div className="text-ink-muted">
+          Vas a borrar <strong>{facturas.length}</strong> factura{facturas.length === 1 ? '' : 's'}.
+        </div>
+
+        <dl className="grid grid-cols-[140px_1fr] gap-y-1 gap-x-2 text-[11.5px] bg-azure-soft/30 rounded p-2">
+          <dt className="text-ink-muted">Importe total</dt>
+          <dd className="font-semibold tabular-nums">{fmtMoney(importeTotal)}</dd>
+          <dt className="text-ink-muted">Con asiento</dt>
+          <dd>{conAsiento}</dd>
+        </dl>
+
+        <details className="text-[11px]">
+          <summary className="cursor-pointer text-ink-muted">
+            Ver primeras {Math.min(20, facturas.length)} facturas
+          </summary>
+          <ul className="mt-2 space-y-0.5 max-h-[180px] overflow-y-auto pl-3">
+            {facturas.slice(0, 20).map((f) => (
+              <li key={f.id} className="font-mono text-[10.5px]">
+                {f.letra} {f.tipo_codigo} {String(f.punto_venta).padStart(5, '0')}-
+                {String(f.numero).padStart(8, '0')} · {f.razon_social_emisor || f.proveedor_nombre || f.cuit_emisor} · {fmtMoney(Number(f.imp_total))}
+              </li>
+            ))}
+            {facturas.length > 20 && (
+              <li className="text-ink-muted italic">… y {facturas.length - 20} más</li>
+            )}
+          </ul>
+        </details>
+
+        <div className="bg-red-50 border border-red-200 rounded p-2 text-[11px]">
+          <div className="flex items-start gap-1.5">
+            <AlertTriangle className="w-3 h-3 text-red-700 mt-[2px] flex-shrink-0" />
+            <div>
+              <strong>Acción irreversible.</strong> Los asientos contabilizados se borran físicamente
+              (no se generan reversas). Solo aplica en período <strong>ABIERTO</strong>. Si las facturas
+              vinieron de un import del Libro IVA y el import queda sin facturas, también se borra
+              (libera el hash).
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">
+            Motivo del borrado (opcional)
+          </label>
+          <textarea
+            rows={2}
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            maxLength={500}
+            placeholder="Ej: Limpieza de tests del import"
+            className="w-full text-[12px] border border-azure-soft rounded px-2 py-1 focus:outline-none focus:border-azure"
+          />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose} disabled={m.isPending}>Cancelar</Button>
+          <Button
+            variant="danger"
+            onClick={() => m.mutate({
+              ids: facturas.map((f) => f.id),
+              ...(motivo.trim() ? { motivo: motivo.trim() } : {}),
+            })}
+            disabled={m.isPending}
+          >
+            <Trash2 className="w-3 h-3" /> Borrar {facturas.length} factura{facturas.length === 1 ? '' : 's'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

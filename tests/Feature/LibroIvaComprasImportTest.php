@@ -226,6 +226,60 @@ class LibroIvaComprasImportTest extends TestCase
         return $ref->invoke($this->svc, $v, 'Fecha de Emisión');
     }
 
+    /**
+     * v1.22 FI-01 — fecha_emision dentro del período → imputacion = emision.
+     */
+    public function test_v22_fecha_imputacion_dentro_del_periodo(): void
+    {
+        $periodo = (object) ['anio' => 2026, 'mes' => 4, 'fecha_inicio' => '2026-04-01', 'fecha_fin' => '2026-04-30'];
+        $r = $this->callCalcularFechaImputacion('2026-04-15', $periodo);
+        $this->assertSame('2026-04-15', $r['fecha']);
+        $this->assertNull($r['warning']);
+    }
+
+    /**
+     * v1.22 FI-04 — factura atrasada (emisión antes del período) → inicio del período.
+     */
+    public function test_v22_fecha_emision_anterior_imputacion_al_inicio(): void
+    {
+        $periodo = (object) ['anio' => 2026, 'mes' => 4, 'fecha_inicio' => '2026-04-01', 'fecha_fin' => '2026-04-30'];
+        $r = $this->callCalcularFechaImputacion('2026-01-15', $periodo);
+        $this->assertSame('2026-04-01', $r['fecha']);
+        $this->assertNull($r['warning']);
+    }
+
+    /**
+     * v1.22 FI-06 — factura posterior al período → error (no warning, por CHECK constraint).
+     * Divergencia justificada del addendum: se documenta en memory addendum-v1-22-cerrado.
+     */
+    public function test_v22_fecha_emision_posterior_lanza_error(): void
+    {
+        $periodo = (object) ['anio' => 2026, 'mes' => 4, 'fecha_inicio' => '2026-04-01', 'fecha_fin' => '2026-04-30'];
+        try {
+            $this->callCalcularFechaImputacion('2026-05-15', $periodo);
+            $this->fail('Se esperaba DomainException FECHA_POSTERIOR_AL_PERIODO');
+        } catch (\DomainException $e) {
+            $this->assertStringStartsWith('FECHA_POSTERIOR_AL_PERIODO', $e->getMessage());
+        }
+    }
+
+    /**
+     * v1.22 FI-02/FI-03 — bordes del período (último día y primer día).
+     */
+    public function test_v22_fecha_imputacion_bordes_del_periodo(): void
+    {
+        $periodo = (object) ['anio' => 2026, 'mes' => 4, 'fecha_inicio' => '2026-04-01', 'fecha_fin' => '2026-04-30'];
+        $this->assertSame('2026-04-01', $this->callCalcularFechaImputacion('2026-04-01', $periodo)['fecha']);
+        $this->assertSame('2026-04-30', $this->callCalcularFechaImputacion('2026-04-30', $periodo)['fecha']);
+    }
+
+    private function callCalcularFechaImputacion(string $fechaEmision, object $periodo): array
+    {
+        $ref = new \ReflectionMethod($this->svc, 'calcularFechaImputacion');
+        $ref->setAccessible(true);
+        return $ref->invoke($this->svc, $fechaEmision, $periodo);
+    }
+
     public function test_v19_preview_csv_UTF8_con_BOM(): void
     {
         // Crear un CSV UTF-8 con BOM para verificar que se descarta correctamente.

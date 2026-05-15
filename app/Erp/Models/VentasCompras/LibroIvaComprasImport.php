@@ -25,10 +25,13 @@ class LibroIvaComprasImport extends Model
     protected $table = 'erp_libros_iva_compras_import';
     public $timestamps = false;
 
-    public const ESTADO_PROCESANDO = 'PROCESANDO';
-    public const ESTADO_COMPLETO   = 'COMPLETO';
-    public const ESTADO_PARCIAL    = 'PARCIAL';
-    public const ESTADO_ERROR      = 'ERROR';
+    public const ESTADO_PROCESANDO       = 'PROCESANDO';
+    public const ESTADO_COMPLETO         = 'COMPLETO'; // legacy alias de OK (sin warnings)
+    public const ESTADO_PARCIAL          = 'PARCIAL';  // legacy (pre-v1.22, no se asigna nuevo)
+    public const ESTADO_ERROR            = 'ERROR';    // legacy
+    // v1.22 D-22-8.
+    public const ESTADO_OK_CON_WARNINGS  = 'OK_CON_WARNINGS';
+    public const ESTADO_ERROR_TOTAL      = 'ERROR_TOTAL';
 
     protected $fillable = [
         'empresa_id', 'archivo_nombre', 'archivo_hash',
@@ -36,6 +39,7 @@ class LibroIvaComprasImport extends Model
         'periodo_afip', 'periodo_imputacion_id',
         'filas_totales', 'filas_tomadas', 'filas_no_tomadas',
         'filas_skipped', 'filas_error',
+        'warnings_count', 'warnings_detalle', // v1.22
         'errores_detalle', 'clientes_no_mapeados',
         'proveedores_creados',
         'importado_por', 'importado_at', 'estado',
@@ -43,6 +47,7 @@ class LibroIvaComprasImport extends Model
 
     protected $casts = [
         'errores_detalle' => 'array',
+        'warnings_detalle' => 'array', // v1.22
         'clientes_no_mapeados' => 'array',
         'importado_at' => 'datetime',
     ];

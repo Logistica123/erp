@@ -30,7 +30,9 @@ type Import = {
   filas_no_tomadas: number;
   filas_skipped: number;
   filas_error: number;
-  estado: 'OK' | 'ERROR' | 'PARCIAL';
+  warnings_count?: number; // v1.22
+  // v1.22 sumó OK_CON_WARNINGS y ERROR_TOTAL; PARCIAL queda legacy en uploads viejos.
+  estado: 'OK' | 'ERROR' | 'PARCIAL' | 'COMPLETO' | 'PROCESANDO' | 'OK_CON_WARNINGS' | 'ERROR_TOTAL';
   importado_at: string;
   // v1.20 — derivados por el backend para el render condicional del 🗑️.
   facturas_count?: number;
@@ -51,9 +53,11 @@ type PreviewResp = {
 
 type ConfirmResp = {
   import_id: number;
+  estado?: string; // v1.22 — OK/COMPLETO/OK_CON_WARNINGS/ERROR_TOTAL
   stats: {
     totales: number; tomadas: number; no_tomadas: number; skipped: number;
-    errores: number; proveedores_creados: number;
+    errores: number; warnings?: number; // v1.22
+    proveedores_creados: number;
     clientes_mapeados: number; clientes_no_mapeados: number;
   };
   // El backend devuelve { row, motivo }. Mantenemos los aliases por compat.
@@ -62,6 +66,7 @@ type ConfirmResp = {
     motivo?: string; mensaje?: string; codigo?: string; detalle?: string;
     numero?: number;
   }>;
+  warnings?: Array<{ row?: number; motivo?: string }>; // v1.22
   clientes_no_mapeados: Array<{ valor: string; filas: number[] }>;
 };
 
@@ -76,7 +81,13 @@ const EXTRAS_OBLIGATORIAS = [
 ];
 
 const ESTADO_BADGES: Record<Import['estado'], 'success' | 'danger' | 'warning'> = {
-  OK: 'success', ERROR: 'danger', PARCIAL: 'warning',
+  OK: 'success',
+  COMPLETO: 'success', // v1.22 — equivalente a OK
+  PROCESANDO: 'warning',
+  ERROR: 'danger',
+  PARCIAL: 'warning', // legacy
+  OK_CON_WARNINGS: 'warning', // v1.22
+  ERROR_TOTAL: 'danger',      // v1.22
 };
 
 export function LibroIvaComprasImportPage() {
@@ -132,25 +143,17 @@ export function LibroIvaComprasImportPage() {
       key: 'acciones', header: '', width: '60px', align: 'center',
       render: (r) => {
         const tieneFacturas = (r.facturas_count ?? 0) > 0;
-        if (r.puede_borrar) {
+        // v1.22 §13: si tiene facturas + permiso, el botón sigue clickeable y
+        // el modal ofrece la opción de cascada.
+        if (r.puede_borrar || tieneFacturas) {
           return (
             <button
               type="button"
               onClick={() => setBorrarTarget(r)}
               className="text-red-600 hover:text-red-800 p-1 rounded transition"
-              title="Borrar upload"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          );
-        }
-        if (tieneFacturas) {
-          return (
-            <button
-              type="button"
-              disabled
-              className="text-ink-muted/40 p-1 cursor-not-allowed"
-              title={`Este import generó ${r.facturas_count} facturas. Anulalas o desvinculalas primero.`}
+              title={tieneFacturas
+                ? `Este import generó ${r.facturas_count} facturas. El modal te ofrece borrarlas en cascada.`
+                : 'Borrar upload'}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -210,22 +213,44 @@ export function LibroIvaComprasImportPage() {
 
 function BorrarImportModal({ imp, onClose }: { imp: Import; onClose: () => void }) {
   const [motivo, setMotivo] = useState('');
+  // v1.22 §13 — si el import tiene facturas, requerir checkbox para cascada.
+  const tieneFacturas = (imp.facturas_count ?? 0) > 0;
+  const [cascada, setCascada] = useState(false);
   const toast = useToast();
   const invalidate = useInvalidate(['libro-iva-compras-imports']);
+  const facturasInvalidate = useInvalidate(['facturas-compra']);
 
   const deleteMut = useApiMutation<unknown, { motivo?: string }>(
-    (body) => api.delete(`/api/erp/libro-iva-compras/imports/${imp.id}`, body),
+    (body) => {
+      const qs = tieneFacturas && cascada ? '?cascada=true' : '';
+      return api.delete(`/api/erp/libro-iva-compras/imports/${imp.id}${qs}`, body);
+    },
     {
       onSuccess: () => {
-        toast.success('Upload borrado', `#${imp.id} (${imp.archivo_nombre})`);
+        toast.success('Upload borrado',
+          `#${imp.id} (${imp.archivo_nombre})${tieneFacturas && cascada ? ` + ${imp.facturas_count} facturas` : ''}`);
         invalidate();
+        if (tieneFacturas && cascada) facturasInvalidate();
         onClose();
       },
       onError: (e) => {
         if (e instanceof ApiError && e.status === 409) {
           toast.error('No se puede borrar',
-            'El import tiene facturas vinculadas. Anulalas primero desde el Libro Diario.');
+            'El import tiene facturas vinculadas. Marcá "cascada" para borrar todo, o desvinculalas primero.');
           return;
+        }
+        if (e instanceof ApiError && e.status === 422) {
+          const payload = e.payload as { error?: { code?: string } };
+          if (payload.error?.code === 'PERIODO_CERRADO_EN_SELECCION') {
+            toast.error('Período cerrado',
+              'Hay facturas en período cerrado. Reabrí el período antes de borrar.');
+            return;
+          }
+          if (payload.error?.code === 'FACTURA_CONCILIADA') {
+            toast.error('Factura conciliada',
+              'Hay facturas con pagos asociados. Desconciliá primero.');
+            return;
+          }
         }
         toast.error('Error al borrar', errorMessage(e));
       },
@@ -258,13 +283,36 @@ function BorrarImportModal({ imp, onClose }: { imp: Import; onClose: () => void 
           <dd>{fmtDate(imp.importado_at)}</dd>
         </dl>
 
+        {tieneFacturas && (
+          // v1.22 §13 — checkbox de cascada cuando hay facturas vinculadas.
+          <div className="border border-warning/40 bg-warning-bg/30 rounded p-2 text-[11px] space-y-2">
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 text-warning mt-[2px] flex-shrink-0" />
+              <div>
+                Este import tiene <strong>{imp.facturas_count}</strong> facturas con asientos.
+                Para borrar todo en cascada (facturas + asientos + upload), marcá la opción de abajo.
+                Solo aplica en período <strong>ABIERTO</strong>.
+              </div>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={cascada}
+                onChange={(e) => setCascada(e.target.checked)}
+              />
+              <span>Borrar en cascada (anular facturas + asientos)</span>
+            </label>
+          </div>
+        )}
+
         <div className="bg-red-50 border border-red-200 rounded p-2 text-[11px] space-y-1">
           <div className="flex items-start gap-1.5">
             <AlertTriangle className="w-3 h-3 text-red-700 mt-[2px] flex-shrink-0" />
             <div>
-              <strong>Esta acción es irreversible.</strong> Se borra el upload junto con su
-              detalle de errores. El audit log registra el evento de manera inmutable.
-              El hash queda liberado y podrás re-subir el mismo archivo.
+              <strong>Esta acción es irreversible.</strong> El audit log registra el evento
+              de manera inmutable. {tieneFacturas && cascada
+                ? <>Los asientos se borran <strong>físicamente</strong> (no se generan reversas).</>
+                : <>El hash queda liberado y podrás re-subir el mismo archivo.</>}
             </div>
           </div>
         </div>
@@ -278,7 +326,7 @@ function BorrarImportModal({ imp, onClose }: { imp: Import; onClose: () => void 
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
             maxLength={500}
-            placeholder="Ej: Re-import post-fix encoding v1.19"
+            placeholder="Ej: Limpieza de tests del import"
             className="w-full text-[12px] border border-azure-soft rounded px-2 py-1 focus:outline-none focus:border-azure"
           />
         </div>
@@ -290,9 +338,12 @@ function BorrarImportModal({ imp, onClose }: { imp: Import; onClose: () => void 
           <Button
             variant="danger"
             onClick={() => deleteMut.mutate(motivo.trim() ? { motivo: motivo.trim() } : {})}
-            disabled={deleteMut.isPending}
+            disabled={deleteMut.isPending || (tieneFacturas && !cascada)}
           >
-            <Trash2 className="w-3 h-3" /> Borrar definitivamente
+            <Trash2 className="w-3 h-3" />
+            {tieneFacturas && cascada
+              ? `Borrar todo (cascada)`
+              : 'Borrar definitivamente'}
           </Button>
         </div>
       </div>
@@ -352,8 +403,17 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
         setResultado(r);
         setStep(3);
         invalidate();
-        toast.success('Import procesado',
-          `${r.stats.tomadas} tomadas / ${r.stats.no_tomadas} no_tomadas / ${r.stats.errores} errores`);
+        // v1.22 — distinguir OK / OK_CON_WARNINGS / ERROR_TOTAL en el toast.
+        if (r.estado === 'ERROR_TOTAL' || r.stats.errores > 0) {
+          toast.error('Import rechazado',
+            `${r.stats.errores} errores. Ninguna fila fue importada (atomicidad TODO-O-NADA).`);
+        } else if (r.stats.warnings && r.stats.warnings > 0) {
+          toast.success('Import procesado con warnings',
+            `${r.stats.tomadas} tomadas / ${r.stats.no_tomadas} no_tomadas · ${r.stats.warnings} warnings`);
+        } else {
+          toast.success('Import procesado',
+            `${r.stats.tomadas} tomadas / ${r.stats.no_tomadas} no_tomadas`);
+        }
       },
       onError: (e) => {
         const apiErr = e as ApiError;
@@ -548,9 +608,9 @@ function Step2({
 
 function Step3({ resultado, encodingDetectado }: { resultado: ConfirmResp; encodingDetectado: string | null }) {
   const { stats, errores, clientes_no_mapeados } = resultado;
-  // v1.19 D-19-6: si 100% filas fallan, banner rojo + diagnóstico específico.
-  const totalProcesado = stats.tomadas + stats.no_tomadas;
-  const todoFallido = stats.errores > 0 && totalProcesado === 0;
+  const warnings = resultado.warnings ?? [];
+  // v1.22 — con atomicidad TODO-O-NADA, si hay errores > 0 → nada se importó.
+  const rollbackTotal = stats.errores > 0;
   const descargarCsvErrores = () => {
     const url = `/api/erp/libro-iva-compras/imports/${resultado.import_id}/errores.csv`;
     const token = auth.getToken();
@@ -565,22 +625,32 @@ function Step3({ resultado, encodingDetectado }: { resultado: ConfirmResp; encod
   };
   return (
     <div className="space-y-4">
-      {todoFallido ? (
-        // v1.19 D-19-6: banner rojo prominente cuando 100% filas fallan.
+      {rollbackTotal ? (
+        // v1.22 D-22-2: atomicidad TODO-O-NADA — si hay errores, nada se importó.
         <div className="border border-danger/40 bg-danger-bg/30 rounded-md p-4 space-y-2">
           <div className="flex items-center gap-2 text-[14px] font-bold text-danger">
             <AlertTriangle className="w-4 h-4" />
-            Ninguna fila pudo procesarse
+            Import rechazado — ninguna fila fue importada
           </div>
           <div className="text-[12px] text-ink">
-            Causa probable: encoding del archivo o headers incompatibles. Verificá
-            que las columnas obligatorias estén presentes y el archivo sea CSV/Excel
-            válido.
+            El archivo tiene <strong>{stats.errores}</strong> errores. Por seguridad contable, el
+            sistema NO importa parcialmente: o entran todas las filas o ninguna. Revisá los
+            errores abajo, corregí el archivo y re-subí.
             {encodingDetectado && encodingDetectado !== 'UTF-8' && encodingDetectado !== 'XLSX' && (
-              <> El archivo fue interpretado como <strong>{encodingDetectado}</strong>.
-                Si los errores siguen, revisá las columnas obligatorias contra la
-                plantilla AFIP.</>
+              <> El archivo fue interpretado como <strong>{encodingDetectado}</strong>.</>
             )}
+          </div>
+        </div>
+      ) : warnings.length > 0 ? (
+        // v1.22 — OK_CON_WARNINGS: facturas importadas + advertencias no bloqueantes.
+        <div className="border border-warning/40 bg-warning-bg/30 rounded-md p-4 space-y-2">
+          <div className="flex items-center gap-2 text-[14px] font-bold text-warning">
+            <AlertTriangle className="w-4 h-4" />
+            ✓ Import #{resultado.import_id} procesado con {warnings.length} warning{warnings.length === 1 ? '' : 's'}
+          </div>
+          <div className="text-[12px] text-ink">
+            Todas las filas se importaron correctamente. Revisá los warnings abajo —
+            son advertencias no bloqueantes (ej: fechas en el borde del período).
           </div>
         </div>
       ) : (
@@ -633,6 +703,31 @@ function Step3({ resultado, encodingDetectado }: { resultado: ConfirmResp; encod
             ))}
             {clientes_no_mapeados.length > 30 && (
               <li className="text-ink-muted">… y {clientes_no_mapeados.length - 30} más</li>
+            )}
+          </ul>
+        </div>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3 space-y-2">
+          <div className="text-[12px] font-semibold text-warning">
+            Warnings ({warnings.length})
+          </div>
+          <ul className="text-[11.5px] space-y-0.5 max-h-[180px] overflow-y-auto">
+            {warnings.slice(0, 20).map((w, i) => {
+              const rawMsg = (w.motivo ?? '').trim();
+              const m = rawMsg.match(/^([A-Z_][A-Z0-9_]*):\s*(.+)$/);
+              const codigo = m?.[1] ?? '';
+              const msg = m?.[2] ?? rawMsg;
+              return (
+                <li key={i}>
+                  <strong>Fila {w.row ?? '?'}:</strong> {msg || '—'}
+                  {codigo && <code className="ml-2 text-[10.5px] bg-warning/10 px-1 rounded">[{codigo}]</code>}
+                </li>
+              );
+            })}
+            {warnings.length > 20 && (
+              <li className="text-ink-muted italic">… {warnings.length - 20} más</li>
             )}
           </ul>
         </div>

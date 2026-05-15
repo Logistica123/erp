@@ -475,6 +475,9 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.fv.show');
 
         // Facturación (compra) — SPEC 03 §6.3
+        // v1.22 §13 — borrado masivo de facturas de compra (super_admin).
+        Route::post('/facturas-compra/borrar-masivo', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'borrarMasivo'])
+            ->name('erp.facturas-compra.borrar-masivo');
         Route::get('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'index'])
             ->name('erp.fc.index');
         Route::post('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'store'])

@@ -2,8 +2,11 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Models\Asiento;
 use App\Erp\Models\VentasCompras\FacturaCompra;
+use App\Erp\Models\VentasCompras\LibroIvaComprasImport;
 use App\Erp\Services\FacturaCompraService;
+use App\Erp\Support\AuditLogger;
 use App\Http\Controllers\Controller;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -23,7 +26,10 @@ use Illuminate\Support\Facades\DB;
  */
 class FacturasCompraController extends Controller
 {
-    public function __construct(private readonly FacturaCompraService $service) {}
+    public function __construct(
+        private readonly FacturaCompraService $service,
+        private readonly AuditLogger $audit,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -284,6 +290,181 @@ class FacturasCompraController extends Controller
             'ok' => true,
             'data' => ['nota_credito' => $nc, 'factura_original_id' => $id],
         ], 201);
+    }
+
+    /**
+     * v1.22 §13 — POST /api/erp/facturas-compra/borrar-masivo
+     *
+     * Borra facturas de compra masivamente con sus asientos asociados. Pensado
+     * para limpieza de uploads de testing donde el botón 🗑️ del v1.20 no sirve
+     * (porque las facturas tienen asientos generados → 409 IMPORT_TIENE_ASIENTOS).
+     *
+     * Bloqueos (D-22-12, D-22-17):
+     *   - 403 si falta permiso `compras.facturas.borrar_masivo` (solo super_admin)
+     *   - 422 PERIODO_CERRADO_EN_SELECCION si alguna factura está en período CERRADO/BLOQUEADO
+     *   - 422 FACTURA_CONCILIADA si alguna factura está vinculada a una OP o pago a empleado
+     *
+     * Procedimiento (D-22-13, D-22-14, D-22-15):
+     *   1. Audit log snapshot ANTES del DELETE.
+     *   2. NULL-ear asiento_id en facturas (rompe la FK).
+     *   3. forceDelete de asientos (cascade movimientos_asiento por FK).
+     *   4. forceDelete de facturas (cascade items/iva/tributos/asociadas/constatacion).
+     *   5. Liberar uploads del Libro IVA que queden sin facturas vinculadas.
+     */
+    public function borrarMasivo(Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'compras.facturas.borrar_masivo');
+
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:500'],
+            'ids.*' => ['integer'],
+            'motivo' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $ids = array_values(array_unique(array_map('intval', $data['ids'])));
+        $motivo = trim((string) ($data['motivo'] ?? ''));
+
+        $facturas = FacturaCompra::with(['periodo:id,anio,mes,estado'])
+            ->where('empresa_id', $empresaId)
+            ->whereIn('id', $ids)
+            ->get();
+
+        if ($facturas->count() !== count($ids)) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'FACTURAS_NO_ENCONTRADAS',
+                'message' => sprintf('Se pidieron %d IDs pero solo %d existen en la empresa.', count($ids), $facturas->count()),
+            ]], 422);
+        }
+
+        $cerradas = $facturas->filter(
+            fn ($f) => $f->periodo && in_array($f->periodo->estado, ['CERRADO', 'BLOQUEADO'], true)
+        );
+        if ($cerradas->isNotEmpty()) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'PERIODO_CERRADO_EN_SELECCION',
+                'message' => 'Hay facturas en períodos cerrados o bloqueados. Reabrí el período o desmarcalas.',
+                'facturas_bloqueadas' => $cerradas->map(fn ($f) => [
+                    'id' => $f->id,
+                    'comprobante' => sprintf('%d-%05d-%08d', $f->tipo_comprobante_id, $f->punto_venta, $f->numero),
+                    'periodo' => sprintf('%02d/%d', $f->periodo->mes, $f->periodo->anio),
+                ])->values(),
+            ]], 422);
+        }
+
+        $idsLista = $facturas->pluck('id')->all();
+        $conciliadasOp = DB::table('erp_op_items')
+            ->whereIn('comprobante_id', $idsLista)
+            ->where('tipo_item', 'FACTURA_COMPRA')
+            ->pluck('comprobante_id')->unique()->values();
+        $conciliadasEmp = DB::table('erp_emp_pagos')
+            ->whereIn('factura_compra_id', $idsLista)
+            ->pluck('factura_compra_id')->unique()->values();
+        $conciliadas = $conciliadasOp->concat($conciliadasEmp)->unique()->values();
+        if ($conciliadas->isNotEmpty()) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'FACTURA_CONCILIADA',
+                'message' => 'Hay facturas conciliadas con órdenes de pago o pagos a empleados. Desconciliá primero.',
+                'facturas_bloqueadas' => $conciliadas->all(),
+            ]], 422);
+        }
+
+        $borradas = $this->borrarMasivoInterno($facturas, $motivo);
+
+        return response()->json(['ok' => true, 'data' => ['borradas' => $borradas]], 200);
+    }
+
+    /**
+     * v1.22 §13 — núcleo del borrado masivo, reusable desde
+     * LibroIvaComprasImportController cuando se llama con ?cascada=true.
+     *
+     * Asume que las validaciones de período y conciliación ya pasaron.
+     * Devuelve cantidad borrada.
+     */
+    public function borrarMasivoInterno($facturas, string $motivo = ''): int
+    {
+        if ($facturas->isEmpty()) {
+            return 0;
+        }
+
+        $snapshot = [
+            'count' => $facturas->count(),
+            'importe_total' => (float) $facturas->sum('imp_total'),
+            'asientos_ids' => $facturas->pluck('asiento_id')->filter()->unique()->values()->all(),
+            'import_ids' => $facturas->pluck('import_id')->filter()->unique()->values()->all(),
+            'comprobantes' => $facturas->map(fn ($f) => [
+                'id' => $f->id,
+                'tipo' => $f->tipo_comprobante_id,
+                'pv' => $f->punto_venta,
+                'numero' => $f->numero,
+                'cuit' => $f->cuit_emisor,
+                'razon_social' => $f->razon_social_emisor,
+                'fecha_emision' => $f->fecha_emision?->toDateString(),
+                'imp_total' => (float) $f->imp_total,
+            ])->values()->all(),
+            'motivo' => $motivo !== '' ? $motivo : null,
+        ];
+        $descripcion = $motivo !== ''
+            ? sprintf('Borrado masivo de %d facturas de compra. Motivo: %s', $facturas->count(), $motivo)
+            : sprintf('Borrado masivo de %d facturas de compra.', $facturas->count());
+
+        // Snapshot al audit log usando la primera factura como modelo "ancla"
+        // (la cadena de hashes es por empresa, no por entidad puntual).
+        $this->audit->log('borrado_masivo', $facturas->first(), $snapshot, null, $descripcion);
+
+        $asientoIds = $facturas->pluck('asiento_id')->filter()->unique()->values()->all();
+        $facturaIds = $facturas->pluck('id')->all();
+        $importIds = $facturas->pluck('import_id')->filter()->unique()->values()->all();
+
+        DB::transaction(function () use ($facturaIds, $asientoIds) {
+            // Tablas que referencian factura con FK NO ACTION — limpiar primero.
+            DB::table('erp_libro_iva_detalle')->whereIn('factura_compra_id', $facturaIds)->delete();
+            DB::table('erp_iibb_jurisdiccion_mov')->whereIn('factura_compra_id', $facturaIds)->delete();
+            DB::table('erp_percepciones_sufridas')->whereIn('factura_compra_id', $facturaIds)->delete();
+            DB::table('erp_retenciones_practicadas')->whereIn('factura_compra_id', $facturaIds)->delete();
+
+            // Romper FK factura → asiento antes de borrar el asiento.
+            DB::table('erp_facturas_compra')->whereIn('id', $facturaIds)->update(['asiento_id' => null]);
+
+            if (! empty($asientoIds)) {
+                // erp_movimientos_asiento se borra por CASCADE.
+                Asiento::whereIn('id', $asientoIds)->forceDelete();
+            }
+
+            // forceDelete porque erp_facturas_compra usa SoftDeletes (queremos
+            // borrado físico para liberar el UNIQUE de tipo+pv+numero y permitir
+            // re-importar el mismo CSV).
+            FacturaCompra::whereIn('id', $facturaIds)->forceDelete();
+        });
+
+        // D-22-14: si algún import quedó sin facturas, borrar el upload (libera el hash).
+        foreach ($importIds as $importId) {
+            $quedan = FacturaCompra::where('import_id', $importId)->count();
+            if ($quedan === 0) {
+                $imp = LibroIvaComprasImport::find($importId);
+                if ($imp) {
+                    $this->audit->log('eliminado_por_cascada', $imp,
+                        ['archivo_hash' => $imp->archivo_hash, 'archivo_nombre' => $imp->archivo_nombre],
+                        null,
+                        sprintf('Upload Libro IVA #%d borrado tras vaciarse por borrado_masivo de facturas.', $imp->id),
+                    );
+                    $imp->delete();
+                }
+            }
+        }
+
+        return $facturas->count();
+    }
+
+    private function mustHave(Request $request, string $codigo): void
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso($codigo)) {
+            abort(response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => "Falta permiso {$codigo}",
+            ]], 403));
+        }
     }
 
     private function domainError(DomainException $e): JsonResponse

@@ -167,21 +167,71 @@ class LibroIvaComprasImportController
      */
     public function destroy(Request $request, int $id): JsonResponse
     {
-        $this->mustHave($request, 'compras.libro_iva.borrar_import');
+        // v1.22 §13 — cascada=true requiere otro permiso más amplio (borra
+        // también facturas + asientos generados por este import).
+        $cascada = $request->boolean('cascada');
+        $this->mustHave(
+            $request,
+            $cascada ? 'compras.facturas.borrar_masivo' : 'compras.libro_iva.borrar_import',
+        );
 
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $imp = LibroIvaComprasImport::where('empresa_id', $empresaId)->findOrFail($id);
 
-        $facturasCount = FacturaCompra::where('import_id', $imp->id)->count();
-        if ($facturasCount > 0) {
+        $facturas = FacturaCompra::where('import_id', $imp->id)->get();
+        $facturasCount = $facturas->count();
+
+        if ($facturasCount > 0 && ! $cascada) {
             return response()->json(['ok' => false, 'error' => [
-                'code' => 'IMPORT_TIENE_ASIENTOS',
-                'message' => "Este import generó {$facturasCount} facturas vinculadas. "
-                    . 'Anulalas o desvinculalas primero desde el Libro Diario para poder borrar el upload.',
+                'code' => 'IMPORT_TIENE_FACTURAS',
+                'message' => "Este import generó {$facturasCount} facturas con asientos. "
+                    . "Para borrar todo (incluyendo asientos) marcá 'cascada' en el modal — solo si el período está ABIERTO.",
             ]], 409);
         }
 
         $motivo = trim((string) $request->input('motivo', ''));
+
+        // v1.22 §13 — si cascada, primero borramos masivamente las facturas
+        // (con sus asientos) reusando la lógica de FacturasCompraController.
+        // Las validaciones de período cerrado / conciliación las hace el helper.
+        if ($cascada && $facturasCount > 0) {
+            // Cargar con período para validación.
+            $facturasConPeriodo = FacturaCompra::with(['periodo:id,anio,mes,estado'])
+                ->where('import_id', $imp->id)->get();
+
+            $cerradas = $facturasConPeriodo->filter(
+                fn ($f) => $f->periodo && in_array($f->periodo->estado, ['CERRADO', 'BLOQUEADO'], true)
+            );
+            if ($cerradas->isNotEmpty()) {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'PERIODO_CERRADO_EN_SELECCION',
+                    'message' => 'Hay facturas en períodos cerrados o bloqueados. Reabrí el período primero.',
+                ]], 422);
+            }
+            $facturaIds = $facturasConPeriodo->pluck('id')->all();
+            $conciliadasOp = DB::table('erp_op_items')
+                ->whereIn('comprobante_id', $facturaIds)
+                ->where('tipo_item', 'FACTURA_COMPRA')
+                ->exists();
+            $conciliadasEmp = DB::table('erp_emp_pagos')
+                ->whereIn('factura_compra_id', $facturaIds)
+                ->exists();
+            if ($conciliadasOp || $conciliadasEmp) {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'FACTURA_CONCILIADA',
+                    'message' => 'Hay facturas conciliadas con órdenes de pago o pagos. Desconciliá primero.',
+                ]], 422);
+            }
+
+            // El helper borra facturas + asientos + libera uploads vacíos.
+            // Como las facturas son TODAS del mismo import, el import se va a
+            // borrar automáticamente vía D-22-14.
+            $facturasCtrl = app(\App\Erp\Http\Controllers\FacturasCompraController::class);
+            $facturasCtrl->borrarMasivoInterno($facturasConPeriodo,
+                $motivo !== '' ? "[cascada upload #{$imp->id}] {$motivo}" : "[cascada upload #{$imp->id}]");
+
+            return response()->json(null, 204);
+        }
 
         DB::transaction(function () use ($imp, $motivo) {
             // Snapshot completo antes del DELETE (D-20-5: audit log inmutable).

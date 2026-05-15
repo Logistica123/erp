@@ -117,6 +117,7 @@ class LibroIvaComprasImportService
         return [
             'hash' => $hash,
             'archivo_nombre' => $nombreArchivo,
+            'encoding_detectado' => $this->lastEncoding, // v1.19
             'filas_totales' => $tomadasSi + $tomadasNo,
             'filas_con_tomado_si' => $tomadasSi,
             'filas_con_tomado_no' => $tomadasNo,
@@ -144,29 +145,18 @@ class LibroIvaComprasImportService
             throw new DomainException('ARCHIVO_DUPLICADO: este archivo ya fue importado.');
         }
 
-        // Validar período: si está cerrado/bloqueado, requiere permiso.
+        // v1.19 RN-19-3 / D-19-3 — bloqueo total de imputación a período cerrado.
+        // Antes había bypass via permiso `compras.imputar_periodo_cerrado` + checkbox
+        // de confirmación. Pedido explícito de Sebastián: si está cerrado, NO se imputa.
+        // Circuito correcto: Contabilidad → Períodos → Reabrir → Importar → Cerrar.
         $periodo = DB::table('erp_periodos')->where('id', $periodoImputacionId)->first();
         if (! $periodo) {
             throw new DomainException('PERIODO_NO_ENCONTRADO');
         }
         if (in_array($periodo->estado, ['CERRADO', 'BLOQUEADO'], true)) {
-            $permiso = DB::table('erp_rol_permiso as rp')
-                ->join('erp_permisos as p', 'p.id', '=', 'rp.permiso_id')
-                ->join('erp_usuario_rol as ur', 'ur.rol_id', '=', 'rp.rol_id')
-                ->join('erp_usuario_perfil as up', 'up.id', '=', 'ur.usuario_perfil_id')
-                ->where('up.user_id', $usuario->id)
-                ->where('p.codigo', 'compras.imputar_periodo_cerrado')
-                ->exists();
-            if (! $permiso) {
-                throw new DomainException(
-                    'PERIODO_CERRADO_SIN_PERMISO: el período de imputación está cerrado y no tenés permiso compras.imputar_periodo_cerrado.'
-                );
-            }
-            if (! $confirmarPeriodoCerrado) {
-                throw new DomainException(
-                    'CONFIRMACION_REQUERIDA: el período está cerrado. Marcá la confirmación para continuar.'
-                );
-            }
+            throw new DomainException(
+                'PERIODO_CERRADO: el período de imputación está cerrado. Para importar, reabrilo desde Contabilidad → Períodos.'
+            );
         }
 
         $rows = $this->leerArchivo($pathTemporal);
@@ -177,6 +167,8 @@ class LibroIvaComprasImportService
             'empresa_id' => $empresaId,
             'archivo_nombre' => $nombreArchivo,
             'archivo_hash' => $hash,
+            // v1.19 — persistimos el encoding detectado para diagnóstico.
+            'encoding_detectado' => $this->lastEncoding,
             'periodo_afip' => $this->detectarPeriodoNombre($nombreArchivo),
             'periodo_imputacion_id' => $periodoImputacionId,
             'importado_por' => $usuario->id,
@@ -307,26 +299,68 @@ class LibroIvaComprasImportService
 
     // ---------- Helpers privados ----------
 
+    /** Encoding detectado en la última llamada a leerArchivo(). v1.19. */
+    private ?string $lastEncoding = null;
+
+    public function getLastEncoding(): ?string
+    {
+        return $this->lastEncoding;
+    }
+
     private function leerArchivo(string $path): array
     {
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION) ?: 'csv');
         if ($ext === 'xlsx' || $ext === 'xls') {
+            $this->lastEncoding = 'XLSX'; // PhpSpreadsheet ya entrega strings UTF-8.
             $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
             $reader->setReadDataOnly(true);
             $sheet = $reader->load($path)->getActiveSheet();
             return $sheet->toArray(null, true, false, false);
         }
-        // CSV con encoding latin1, separador ;
-        $rows = [];
-        $h = fopen($path, 'r');
-        if ($h === false) throw new DomainException('FORMATO_INVALIDO: no se pudo abrir el archivo');
-        while (($r = fgetcsv($h, 0, ';')) !== false) {
-            $rows[] = array_map(
-                fn ($v) => $v === null ? null : @mb_convert_encoding((string) $v, 'UTF-8', self::CSV_ENCODING),
-                $r,
-            );
+
+        // v1.19 RN-19-1: auto-detección de encoding del CSV.
+        // AFIP entrega los CSV en ISO-8859-1 (Latin-1) por default — antes el
+        // parser asumía siempre ISO-8859-1 hardcodeado, lo que rompía con archivos
+        // UTF-8 o Windows-1252.
+        $contenido = file_get_contents($path);
+        if ($contenido === false) {
+            throw new DomainException('FORMATO_INVALIDO: no se pudo abrir el archivo');
         }
-        fclose($h);
+
+        // Descartar BOM UTF-8 si está presente.
+        $encoding = null;
+        if (substr($contenido, 0, 3) === "\xEF\xBB\xBF") {
+            $contenido = substr($contenido, 3);
+            $encoding = 'UTF-8';
+        } else {
+            $detectado = mb_detect_encoding(
+                $contenido,
+                ['UTF-8', 'ISO-8859-1', 'Windows-1252', 'ASCII'],
+                true
+            );
+            $encoding = $detectado !== false ? $detectado : 'ISO-8859-1';
+        }
+        $this->lastEncoding = $encoding;
+
+        \Illuminate\Support\Facades\Log::info('LibroIvaCompras::leerArchivo', [
+            'evento' => 'CSV_ENCODING_DETECTADO',
+            'ruta' => basename($path),
+            'encoding_detectado' => $encoding,
+            'size_bytes' => strlen($contenido),
+        ]);
+
+        // Convertir todo a UTF-8 antes del parseo CSV.
+        if ($encoding !== 'UTF-8') {
+            $contenido = mb_convert_encoding($contenido, 'UTF-8', $encoding);
+        }
+
+        // Parsear CSV en memoria (str_getcsv) para no depender de fgetcsv que
+        // a veces tiene comportamiento raro con CRLF mixto.
+        $rows = [];
+        foreach (preg_split("/\r\n|\n|\r/", (string) $contenido) as $linea) {
+            if ($linea === '') continue;
+            $rows[] = str_getcsv($linea, ';');
+        }
         return $rows;
     }
 

@@ -362,6 +362,9 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.livc.confirmar');
         Route::get('/libro-iva-compras/imports', [LibroIvaComprasImportController::class, 'imports'])
             ->name('erp.livc.imports');
+        // v1.19 — descarga CSV de errores del import.
+        Route::get('/libro-iva-compras/imports/{id}/errores.csv', [LibroIvaComprasImportController::class, 'descargarErrores'])
+            ->whereNumber('id')->name('erp.livc.import-errores-csv');
         Route::get('/libro-iva-compras/imports/{id}', [LibroIvaComprasImportController::class, 'importDetalle'])
             ->whereNumber('id')->name('erp.livc.import-detalle');
         Route::get('/libro-iva-compras/no-tomadas', [LibroIvaComprasImportController::class, 'noTomadas'])

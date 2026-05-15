@@ -125,4 +125,39 @@ class LibroIvaComprasImportTest extends TestCase
         $this->assertSame(0.0, $ref->invoke($svc, ''));
         $this->assertSame(0.0, $ref->invoke($svc, null));
     }
+
+    /**
+     * v1.19 ENC-03 — el archivo real de Sebastián (período 202604) viene
+     * en ISO-8859-1. Antes rompía el parser. Ahora se detecta automáticamente
+     * y todas las filas se procesan.
+     */
+    public function test_v19_preview_csv_ISO_8859_1_real_AFIP_202604(): void
+    {
+        $fixture = base_path('tests/Fixtures/libro_iva_compras/comprobantes_periodo_202604_compras_AFIP_real.csv');
+        $this->assertFileExists($fixture);
+
+        $r = $this->svc->preview($fixture, 'comprobantes_periodo_202604_compras_AFIP_real.csv', $this->empresaId);
+
+        $this->assertSame('ISO-8859-1', $r['encoding_detectado'],
+            'El parser debe detectar el encoding del archivo real de AFIP como ISO-8859-1');
+        // 464 filas reales (el wc-l incluye el header).
+        $this->assertGreaterThan(400, $r['filas_totales'],
+            'Debe contar más de 400 filas — el archivo real tiene 464');
+        // El archivo trae columna Tomado, todas SI por default si está vacía.
+        $this->assertContains('tomado', $r['columnas_extras_detectadas']);
+    }
+
+    public function test_v19_preview_csv_UTF8_con_BOM(): void
+    {
+        // Crear un CSV UTF-8 con BOM para verificar que se descarta correctamente.
+        $tmp = tempnam(sys_get_temp_dir(), 'utf8_bom_').'.csv';
+        $content = "\xEF\xBB\xBF\"Fecha de Emisión\";\"Tipo de Comprobante\";\"Punto de Venta\";\"Número de Comprobante\";\"Importe Total\"\r\n"
+            . "2026-04-15;1;1;100;1000,00\r\n";
+        file_put_contents($tmp, $content);
+
+        $r = $this->svc->preview($tmp, 'utf8_bom.csv', $this->empresaId);
+        $this->assertSame('UTF-8', $r['encoding_detectado']);
+        $this->assertSame(1, $r['filas_totales']);
+        @unlink($tmp);
+    }
 }

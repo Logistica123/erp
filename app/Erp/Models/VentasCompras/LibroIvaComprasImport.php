@@ -32,6 +32,7 @@ class LibroIvaComprasImport extends Model
 
     protected $fillable = [
         'empresa_id', 'archivo_nombre', 'archivo_hash',
+        'encoding_detectado', // v1.19
         'periodo_afip', 'periodo_imputacion_id',
         'filas_totales', 'filas_tomadas', 'filas_no_tomadas',
         'filas_skipped', 'filas_error',

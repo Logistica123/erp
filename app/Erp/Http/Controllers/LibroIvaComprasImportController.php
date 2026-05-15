@@ -94,6 +94,46 @@ class LibroIvaComprasImportController
         return response()->json(['ok' => true, 'data' => $rows]);
     }
 
+    /**
+     * GET /api/erp/libro-iva-compras/imports/{id}/errores.csv — v1.19.
+     *
+     * Devuelve CSV con todos los errores del import para diagnóstico offline.
+     * Útil cuando el wizard reporta muchos errores y el contador quiere
+     * analizar en Excel.
+     */
+    public function descargarErrores(Request $request, int $id): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $imp = LibroIvaComprasImport::where('empresa_id', $empresaId)->findOrFail($id);
+        $errores = (array) ($imp->errores_detalle ?? []);
+
+        $filename = sprintf('errores_import_%d_%s.csv', $imp->id, now()->format('Ymd_His'));
+
+        return response()->stream(function () use ($errores) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF"); // BOM UTF-8 para que abra limpio en Excel
+            fputcsv($out, ['fila', 'codigo_error', 'mensaje'], ';');
+            foreach ($errores as $e) {
+                $msg = (string) ($e['motivo'] ?? $e['mensaje'] ?? '');
+                // Extraer código si vino prefijado tipo "CUENTA_X: mensaje".
+                $codigo = '';
+                if (preg_match('/^([A-Z_][A-Z0-9_]*):\s*(.+)$/', $msg, $m)) {
+                    $codigo = $m[1];
+                    $msg = $m[2];
+                }
+                fputcsv($out, [
+                    $e['row'] ?? $e['fila'] ?? '',
+                    $codigo,
+                    $msg,
+                ], ';');
+            }
+            fclose($out);
+        }, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+        ]);
+    }
+
     public function tomarFacturas(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -119,6 +159,10 @@ class LibroIvaComprasImportController
         $code = explode(':', $e->getMessage(), 2)[0];
         $status = match ($code) {
             'ARCHIVO_DUPLICADO' => 409,
+            // v1.19 D-19-3: PERIODO_CERRADO ahora es 422 sin bypass.
+            // Los códigos viejos (PERIODO_CERRADO_SIN_PERMISO + CONFIRMACION_REQUERIDA)
+            // se mantienen por backward-compat con audit logs históricos.
+            'PERIODO_CERRADO' => 422,
             'PERIODO_CERRADO_SIN_PERMISO' => 403,
             'CONFIRMACION_REQUERIDA' => 422,
             'PERIODO_NO_ENCONTRADO' => 404,

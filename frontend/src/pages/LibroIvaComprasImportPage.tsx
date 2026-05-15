@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { SelectField, FormError } from '@/components/ui/Field';
 import { DataTable, fmtDate, type Column } from '@/components/ui/DataTable';
 import { api, ApiError } from '@/lib/api';
+import { auth } from '@/lib/auth';
 import { useApi, useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 
@@ -36,6 +37,7 @@ type Import = {
 type PreviewResp = {
   hash: string;
   archivo_nombre: string;
+  encoding_detectado?: string | null; // v1.19
   filas_totales: number;
   filas_con_tomado_si: number;
   filas_con_tomado_no: number;
@@ -51,7 +53,12 @@ type ConfirmResp = {
     errores: number; proveedores_creados: number;
     clientes_mapeados: number; clientes_no_mapeados: number;
   };
-  errores: Array<{ fila: number; numero?: number; codigo: string; detalle: string }>;
+  // El backend devuelve { row, motivo }. Mantenemos los aliases por compat.
+  errores: Array<{
+    row?: number; fila?: number;
+    motivo?: string; mensaje?: string; codigo?: string; detalle?: string;
+    numero?: number;
+  }>;
   clientes_no_mapeados: Array<{ valor: string; filas: number[] }>;
 };
 
@@ -154,7 +161,8 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewResp | null>(null);
   const [periodoId, setPeriodoId] = useState('');
-  const [confirmarCerrado, setConfirmarCerrado] = useState(false);
+  // v1.19 D-19-3: checkbox de bypass eliminado. Si el período es cerrado,
+  // el botón Confirmar queda disabled + mensaje claro.
   const [resultado, setResultado] = useState<ConfirmResp | null>(null);
 
   const toast = useToast();
@@ -222,7 +230,7 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
     const fd = new FormData();
     fd.append('archivo', archivo);
     fd.append('periodo_imputacion_id', periodoId);
-    if (periodoCerrado && confirmarCerrado) fd.append('confirmar_periodo_cerrado', '1');
+    // v1.19: no se envía confirmar_periodo_cerrado — el bypass se eliminó.
     confirmMut.mutate(fd);
   };
 
@@ -252,7 +260,7 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
             )}
             {step === 2 && (
               <Button variant="primary"
-                disabled={!periodoId || (periodoCerrado && !confirmarCerrado) || confirmMut.isPending}
+                disabled={!periodoId || periodoCerrado || confirmMut.isPending}
                 onClick={submitConfirmar}>
                 {confirmMut.isPending ? 'Importando…' : 'Confirmar e importar'}
               </Button>
@@ -269,12 +277,10 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
           periodoId={periodoId}
           setPeriodoId={setPeriodoId}
           periodoCerrado={periodoCerrado}
-          confirmarCerrado={confirmarCerrado}
-          setConfirmarCerrado={setConfirmarCerrado}
           error={confirmMut.error}
         />
       )}
-      {step === 3 && resultado && <Step3 resultado={resultado} />}
+      {step === 3 && resultado && <Step3 resultado={resultado} encodingDetectado={preview?.encoding_detectado ?? null} />}
     </Modal>
   );
 }
@@ -313,15 +319,13 @@ function Step1({ archivo, setArchivo, error }: {
 
 function Step2({
   preview, periodos, periodoId, setPeriodoId,
-  periodoCerrado, confirmarCerrado, setConfirmarCerrado, error,
+  periodoCerrado, error,
 }: {
   preview: PreviewResp;
   periodos: Periodo[];
   periodoId: string;
   setPeriodoId: (s: string) => void;
   periodoCerrado: boolean;
-  confirmarCerrado: boolean;
-  setConfirmarCerrado: (v: boolean) => void;
   error: ApiError | null;
 }) {
   const opciones = periodos.map((p) => ({
@@ -378,20 +382,18 @@ function Step2({
         hint="Todas las facturas con Tomado=SI se imputarán a este período."
         containerClassName="w-full" />
 
+      {/* v1.19 D-19-3: el bypass se eliminó. Si el período está cerrado, el
+          botón Confirmar queda disabled y se muestra el camino correcto. */}
       {periodoCerrado && (
-        <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3 space-y-2">
+        <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3 space-y-1">
           <div className="flex items-center gap-1 text-[12px] font-semibold text-warning">
             <AlertTriangle className="w-3.5 h-3.5" /> El período está cerrado
           </div>
           <div className="text-[11.5px] text-ink">
-            Importar a un período cerrado requiere permiso especial y queda en el audit log.
-            Marcá la casilla para confirmar:
+            Para importar, primero <strong>reabrilo</strong> desde{' '}
+            <code>Contabilidad → Períodos → Reabrir</code>. Una vez terminado el import,
+            podés cerrarlo de nuevo. Cada paso queda en audit log.
           </div>
-          <label className="flex items-center gap-2 text-[12px] cursor-pointer">
-            <input type="checkbox" checked={confirmarCerrado}
-              onChange={(e) => setConfirmarCerrado(e.target.checked)} />
-            <span>Confirmo que quiero imputar a un período cerrado</span>
-          </label>
         </div>
       )}
 
@@ -400,15 +402,55 @@ function Step2({
   );
 }
 
-function Step3({ resultado }: { resultado: ConfirmResp }) {
+function Step3({ resultado, encodingDetectado }: { resultado: ConfirmResp; encodingDetectado: string | null }) {
   const { stats, errores, clientes_no_mapeados } = resultado;
+  // v1.19 D-19-6: si 100% filas fallan, banner rojo + diagnóstico específico.
+  const totalProcesado = stats.tomadas + stats.no_tomadas;
+  const todoFallido = stats.errores > 0 && totalProcesado === 0;
+  const descargarCsvErrores = () => {
+    const url = `/api/erp/libro-iva-compras/imports/${resultado.import_id}/errores.csv`;
+    const token = auth.getToken();
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `errores_import_${resultado.import_id}.csv`;
+        a.click();
+      });
+  };
   return (
     <div className="space-y-4">
-      <div className="border border-success/30 bg-success-bg/20 rounded-md p-3 text-center">
-        <div className="text-[14px] font-semibold text-success">
-          ✓ Import #{resultado.import_id} procesado
+      {todoFallido ? (
+        // v1.19 D-19-6: banner rojo prominente cuando 100% filas fallan.
+        <div className="border border-danger/40 bg-danger-bg/30 rounded-md p-4 space-y-2">
+          <div className="flex items-center gap-2 text-[14px] font-bold text-danger">
+            <AlertTriangle className="w-4 h-4" />
+            Ninguna fila pudo procesarse
+          </div>
+          <div className="text-[12px] text-ink">
+            Causa probable: encoding del archivo o headers incompatibles. Verificá
+            que las columnas obligatorias estén presentes y el archivo sea CSV/Excel
+            válido.
+            {encodingDetectado && encodingDetectado !== 'UTF-8' && encodingDetectado !== 'XLSX' && (
+              <> El archivo fue interpretado como <strong>{encodingDetectado}</strong>.
+                Si los errores siguen, revisá las columnas obligatorias contra la
+                plantilla AFIP.</>
+            )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="border border-success/30 bg-success-bg/20 rounded-md p-3 text-center">
+          <div className="text-[14px] font-semibold text-success">
+            ✓ Import #{resultado.import_id} procesado
+          </div>
+          {encodingDetectado && encodingDetectado !== 'UTF-8' && encodingDetectado !== 'XLSX' && (
+            <div className="text-[11px] text-ink-muted mt-1">
+              Archivo leído como <code>{encodingDetectado}</code>, convertido a UTF-8 para procesar.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-2 text-[12px]">
         <Stat label="Totales" value={stats.totales} />
@@ -453,18 +495,40 @@ function Step3({ resultado }: { resultado: ConfirmResp }) {
       )}
 
       {errores.length > 0 && (
-        <div className="border border-danger/30 bg-danger-bg/20 rounded-md p-3 space-y-1">
-          <div className="text-[12px] font-semibold text-danger">
-            Errores por fila ({errores.length})
+        <div className="border border-danger/30 bg-danger-bg/20 rounded-md p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[12px] font-semibold text-danger">
+              Errores por fila ({errores.length})
+            </div>
+            {errores.length > 20 && (
+              <Button variant="outline" size="sm" onClick={descargarCsvErrores}>
+                Descargar CSV con los {errores.length} errores
+              </Button>
+            )}
           </div>
-          <ul className="text-[11.5px] space-y-0.5 max-h-[200px] overflow-y-auto">
-            {errores.slice(0, 50).map((e, i) => (
-              <li key={i}>
-                Fila {e.fila}{e.numero ? ` (nro ${e.numero})` : ''} — <strong>{e.codigo}</strong>: {e.detalle}
-              </li>
-            ))}
-            {errores.length > 50 && (
-              <li className="text-ink-muted">… y {errores.length - 50} más</li>
+          <ul className="text-[11.5px] space-y-0.5 max-h-[240px] overflow-y-auto">
+            {errores.slice(0, 20).map((e, i) => {
+              // v1.19 D-19-5: render robusto que soporta los aliases del backend
+              // ({row, motivo}) y los del frontend antiguo ({fila, codigo, detalle}).
+              const fila = e.row ?? e.fila ?? '?';
+              const rawMsg = (e.motivo ?? e.mensaje ?? e.detalle ?? '').trim();
+              // Extraer código prefijado tipo "CUENTA_X: mensaje".
+              let codigo = e.codigo ?? '';
+              let msg = rawMsg;
+              if (! codigo) {
+                const m = rawMsg.match(/^([A-Z_][A-Z0-9_]*):\s*(.+)$/);
+                if (m) { codigo = m[1]; msg = m[2]; }
+              }
+              return (
+                <li key={i}>
+                  <strong>Fila {fila}:</strong>
+                  {e.numero ? ` (nro ${e.numero})` : ''} {msg || '—'}
+                  {codigo && <code className="ml-2 text-[10.5px] bg-danger/10 px-1 rounded">[{codigo}]</code>}
+                </li>
+              );
+            })}
+            {errores.length > 20 && (
+              <li className="text-ink-muted italic">… {errores.length - 20} más en el CSV de descarga</li>
             )}
           </ul>
         </div>

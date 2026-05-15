@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Upload, ScrollText, FileSpreadsheet, Check, AlertTriangle, ArrowRight, ArrowLeft, Plus } from 'lucide-react';
+import { Upload, ScrollText, FileSpreadsheet, Check, AlertTriangle, ArrowRight, ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -32,6 +32,9 @@ type Import = {
   filas_error: number;
   estado: 'OK' | 'ERROR' | 'PARCIAL';
   importado_at: string;
+  // v1.20 — derivados por el backend para el render condicional del 🗑️.
+  facturas_count?: number;
+  puede_borrar?: boolean;
 };
 
 type PreviewResp = {
@@ -78,10 +81,19 @@ const ESTADO_BADGES: Record<Import['estado'], 'success' | 'danger' | 'warning'> 
 
 export function LibroIvaComprasImportPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
+  // v1.20 — modal de borrado: target del 🗑️ (null = cerrado).
+  const [borrarTarget, setBorrarTarget] = useState<Import | null>(null);
 
   const { data: imports, isLoading, error } = useApi<Import[]>(
     ['libro-iva-compras-imports'],
     '/api/erp/libro-iva-compras/imports'
+  );
+
+  // El backend marca puede_borrar=true solo si el user tiene
+  // `compras.libro_iva.borrar_import` (super_admin). Si nadie en el listado
+  // lo tiene, escondemos la columna entera.
+  const mostrarAcciones = (imports ?? []).some(
+    (r) => r.puede_borrar !== undefined,
   );
 
   const cols: Column<Import>[] = [
@@ -114,6 +126,40 @@ export function LibroIvaComprasImportPage() {
     { key: 'importado_at', header: 'Importado', width: '120px',
       render: (r) => fmtDate(r.importado_at) },
   ];
+
+  if (mostrarAcciones) {
+    cols.push({
+      key: 'acciones', header: '', width: '60px', align: 'center',
+      render: (r) => {
+        const tieneFacturas = (r.facturas_count ?? 0) > 0;
+        if (r.puede_borrar) {
+          return (
+            <button
+              type="button"
+              onClick={() => setBorrarTarget(r)}
+              className="text-red-600 hover:text-red-800 p-1 rounded transition"
+              title="Borrar upload"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          );
+        }
+        if (tieneFacturas) {
+          return (
+            <button
+              type="button"
+              disabled
+              className="text-ink-muted/40 p-1 cursor-not-allowed"
+              title={`Este import generó ${r.facturas_count} facturas. Anulalas o desvinculalas primero.`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          );
+        }
+        return null;
+      },
+    });
+  }
 
   return (
     <div className="p-6 space-y-4">
@@ -152,7 +198,105 @@ export function LibroIvaComprasImportPage() {
       </Card>
 
       {wizardOpen && <ImportWizardModal onClose={() => setWizardOpen(false)} />}
+      {borrarTarget && (
+        <BorrarImportModal
+          imp={borrarTarget}
+          onClose={() => setBorrarTarget(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function BorrarImportModal({ imp, onClose }: { imp: Import; onClose: () => void }) {
+  const [motivo, setMotivo] = useState('');
+  const toast = useToast();
+  const invalidate = useInvalidate(['libro-iva-compras-imports']);
+
+  const deleteMut = useApiMutation<unknown, { motivo?: string }>(
+    (body) => api.delete(`/api/erp/libro-iva-compras/imports/${imp.id}`, body),
+    {
+      onSuccess: () => {
+        toast.success('Upload borrado', `#${imp.id} (${imp.archivo_nombre})`);
+        invalidate();
+        onClose();
+      },
+      onError: (e) => {
+        if (e instanceof ApiError && e.status === 409) {
+          toast.error('No se puede borrar',
+            'El import tiene facturas vinculadas. Anulalas primero desde el Libro Diario.');
+          return;
+        }
+        toast.error('Error al borrar', errorMessage(e));
+      },
+    },
+  );
+
+  return (
+    <Modal open onClose={onClose} title="Borrar import del Libro IVA Compras">
+      <div className="space-y-3 text-[12px]">
+        <div className="text-ink-muted">
+          Vas a borrar definitivamente el upload <code>#{imp.id}</code>.
+        </div>
+
+        <dl className="grid grid-cols-[120px_1fr] gap-y-1 gap-x-2 text-[11px] bg-azure-soft/30 rounded p-2">
+          <dt className="text-ink-muted">Archivo</dt>
+          <dd>{imp.archivo_nombre}</dd>
+          <dt className="text-ink-muted">Hash</dt>
+          <dd className="font-mono">{imp.archivo_hash.slice(0, 16)}…</dd>
+          <dt className="text-ink-muted">Período AFIP</dt>
+          <dd>{imp.periodo_afip ?? <span className="text-ink-muted">—</span>}</dd>
+          <dt className="text-ink-muted">Filas totales</dt>
+          <dd>{imp.filas_totales}</dd>
+          <dt className="text-ink-muted">Errores</dt>
+          <dd>{imp.filas_error}</dd>
+          <dt className="text-ink-muted">Facturas vinculadas</dt>
+          <dd>{imp.facturas_count ?? 0}</dd>
+          <dt className="text-ink-muted">Estado</dt>
+          <dd><Badge variant={ESTADO_BADGES[imp.estado]}>{imp.estado}</Badge></dd>
+          <dt className="text-ink-muted">Importado el</dt>
+          <dd>{fmtDate(imp.importado_at)}</dd>
+        </dl>
+
+        <div className="bg-red-50 border border-red-200 rounded p-2 text-[11px] space-y-1">
+          <div className="flex items-start gap-1.5">
+            <AlertTriangle className="w-3 h-3 text-red-700 mt-[2px] flex-shrink-0" />
+            <div>
+              <strong>Esta acción es irreversible.</strong> Se borra el upload junto con su
+              detalle de errores. El audit log registra el evento de manera inmutable.
+              El hash queda liberado y podrás re-subir el mismo archivo.
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">
+            Motivo del borrado (opcional)
+          </label>
+          <textarea
+            rows={2}
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            maxLength={500}
+            placeholder="Ej: Re-import post-fix encoding v1.19"
+            className="w-full text-[12px] border border-azure-soft rounded px-2 py-1 focus:outline-none focus:border-azure"
+          />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose} disabled={deleteMut.isPending}>
+            Cancelar
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => deleteMut.mutate(motivo.trim() ? { motivo: motivo.trim() } : {})}
+            disabled={deleteMut.isPending}
+          >
+            <Trash2 className="w-3 h-3" /> Borrar definitivamente
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

@@ -367,6 +367,9 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.livc.import-errores-csv');
         Route::get('/libro-iva-compras/imports/{id}', [LibroIvaComprasImportController::class, 'importDetalle'])
             ->whereNumber('id')->name('erp.livc.import-detalle');
+        // v1.20 — borrar upload (super_admin solamente, sin facturas vinculadas).
+        Route::delete('/libro-iva-compras/imports/{id}', [LibroIvaComprasImportController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.livc.import-destroy');
         Route::get('/libro-iva-compras/no-tomadas', [LibroIvaComprasImportController::class, 'noTomadas'])
             ->name('erp.livc.no-tomadas');
         Route::post('/libro-iva-compras/no-tomadas/tomar', [LibroIvaComprasImportController::class, 'tomarFacturas'])

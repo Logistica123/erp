@@ -5,9 +5,11 @@ namespace App\Erp\Http\Controllers;
 use App\Erp\Models\VentasCompras\FacturaCompra;
 use App\Erp\Models\VentasCompras\LibroIvaComprasImport;
 use App\Erp\Services\LibroIvaComprasImportService;
+use App\Erp\Support\AuditLogger;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * ADDENDUM v1.9 — endpoints del wizard de import del Libro IVA Compras.
@@ -21,7 +23,10 @@ use Illuminate\Http\Request;
  */
 class LibroIvaComprasImportController
 {
-    public function __construct(private readonly LibroIvaComprasImportService $svc) {}
+    public function __construct(
+        private readonly LibroIvaComprasImportService $svc,
+        private readonly AuditLogger $audit,
+    ) {}
 
     public function preview(Request $request): JsonResponse
     {
@@ -66,11 +71,20 @@ class LibroIvaComprasImportController
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $rows = LibroIvaComprasImport::where('empresa_id', $empresaId)
+            ->withCount('facturas') // v1.20 — agrega facturas_count
             ->orderByDesc('importado_at')
             ->limit(100)
             ->get(['id', 'archivo_nombre', 'archivo_hash', 'periodo_afip',
                 'filas_totales', 'filas_tomadas', 'filas_no_tomadas',
                 'filas_skipped', 'filas_error', 'estado', 'importado_at']);
+
+        // v1.20 — derivar puede_borrar para que el frontend renderice condicional
+        // sin tener que cruzar con /mi-permisos. El permiso solo lo tiene super_admin.
+        $puedePermiso = $request->user()?->erpPerfil?->tienePermiso('compras.libro_iva.borrar_import') ?? false;
+        $rows->each(function ($r) use ($puedePermiso) {
+            $r->puede_borrar = $puedePermiso && (int) $r->facturas_count === 0;
+        });
+
         return response()->json(['ok' => true, 'data' => $rows]);
     }
 
@@ -134,6 +148,74 @@ class LibroIvaComprasImportController
         ]);
     }
 
+    /**
+     * DELETE /api/erp/libro-iva-compras/imports/{id} — v1.20.
+     *
+     * Borra un upload del Libro IVA Compras. Requiere permiso
+     * `compras.libro_iva.borrar_import` (solo super_admin).
+     *
+     * Bloqueos:
+     *   - 403 si falta el permiso.
+     *   - 404 si el import no existe en la empresa.
+     *   - 409 IMPORT_TIENE_ASIENTOS si tiene facturas vinculadas (la FK
+     *     `erp_facturas_compra.import_id` con DELETE_RULE=NO ACTION
+     *     bloquearía igual; lo detectamos antes para devolver mensaje útil).
+     *
+     * Borrado físico (D-20-3): libera el hash SHA256 para permitir re-subir
+     * el mismo archivo después de un fix. El histórico queda en audit log
+     * inmutable (hash-chain), con snapshot completo del upload + motivo.
+     */
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'compras.libro_iva.borrar_import');
+
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $imp = LibroIvaComprasImport::where('empresa_id', $empresaId)->findOrFail($id);
+
+        $facturasCount = FacturaCompra::where('import_id', $imp->id)->count();
+        if ($facturasCount > 0) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'IMPORT_TIENE_ASIENTOS',
+                'message' => "Este import generó {$facturasCount} facturas vinculadas. "
+                    . 'Anulalas o desvinculalas primero desde el Libro Diario para poder borrar el upload.',
+            ]], 409);
+        }
+
+        $motivo = trim((string) $request->input('motivo', ''));
+
+        DB::transaction(function () use ($imp, $motivo) {
+            // Snapshot completo antes del DELETE (D-20-5: audit log inmutable).
+            $snapshot = [
+                'id' => $imp->id,
+                'empresa_id' => $imp->empresa_id,
+                'archivo_nombre' => $imp->archivo_nombre,
+                'archivo_hash' => $imp->archivo_hash,
+                'encoding_detectado' => $imp->encoding_detectado,
+                'periodo_afip' => $imp->periodo_afip,
+                'periodo_imputacion_id' => $imp->periodo_imputacion_id,
+                'filas_totales' => $imp->filas_totales,
+                'filas_tomadas' => $imp->filas_tomadas,
+                'filas_no_tomadas' => $imp->filas_no_tomadas,
+                'filas_skipped' => $imp->filas_skipped,
+                'filas_error' => $imp->filas_error,
+                'errores_detalle' => $imp->errores_detalle,
+                'clientes_no_mapeados' => $imp->clientes_no_mapeados,
+                'proveedores_creados' => $imp->proveedores_creados,
+                'importado_por' => $imp->importado_por,
+                'importado_at' => $imp->importado_at?->toIso8601String(),
+                'estado' => $imp->estado,
+            ];
+            $descripcion = $motivo !== ''
+                ? "Borrado upload Libro IVA Compras #{$imp->id} ({$imp->archivo_nombre}). Motivo: {$motivo}"
+                : "Borrado upload Libro IVA Compras #{$imp->id} ({$imp->archivo_nombre}).";
+
+            $this->audit->log('eliminado', $imp, $snapshot, null, $descripcion);
+            $imp->delete();
+        });
+
+        return response()->json(null, 204);
+    }
+
     public function tomarFacturas(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -151,6 +233,17 @@ class LibroIvaComprasImportController
             return response()->json(['ok' => true, 'data' => ['tomadas' => $tomadas]]);
         } catch (DomainException $e) {
             return $this->errorDomain($e);
+        }
+    }
+
+    private function mustHave(Request $request, string $codigo): void
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso($codigo)) {
+            abort(response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => "Falta permiso {$codigo}",
+            ]], 403));
         }
     }
 

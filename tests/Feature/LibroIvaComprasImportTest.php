@@ -147,6 +147,85 @@ class LibroIvaComprasImportTest extends TestCase
         $this->assertContains('tomado', $r['columnas_extras_detectadas']);
     }
 
+    /**
+     * v1.21 FX-01 — día > 12 (lo que rompía con Carbon::parse).
+     */
+    public function test_v21_parsear_fecha_dia_mayor_12_se_guarda_correctamente(): void
+    {
+        $r = $this->callParsearFecha('13/04/2026');
+        $this->assertSame('2026-04-13', $r);
+    }
+
+    /**
+     * v1.21 FX-02 — día ≤ 12 (donde el bug A era silencioso: invertía día/mes).
+     */
+    public function test_v21_parsear_fecha_dia_menor_o_igual_12_no_se_invierte(): void
+    {
+        // 02/04/2026 = 2 de abril, NO 4 de febrero.
+        $this->assertSame('2026-04-02', $this->callParsearFecha('02/04/2026'));
+        // 03/04/2026 = 3 de abril, NO 4 de marzo.
+        $this->assertSame('2026-04-03', $this->callParsearFecha('03/04/2026'));
+    }
+
+    /**
+     * v1.21 FX-03 — día imposible para el mes (createFromFormat castea silencioso).
+     */
+    public function test_v21_parsear_fecha_31_abril_falla_con_codigo(): void
+    {
+        try {
+            $this->callParsearFecha('31/04/2026');
+            $this->fail('Se esperaba DomainException por fecha inválida');
+        } catch (\DomainException $e) {
+            $this->assertStringStartsWith('FECHA_INVALIDA', $e->getMessage());
+        }
+    }
+
+    /**
+     * v1.21 FX-04 — 29 de febrero en año no bisiesto.
+     */
+    public function test_v21_parsear_fecha_29_feb_no_bisiesto_falla(): void
+    {
+        try {
+            $this->callParsearFecha('29/02/2027'); // 2027 no es bisiesto
+            $this->fail('Se esperaba DomainException');
+        } catch (\DomainException $e) {
+            $this->assertStringStartsWith('FECHA_INVALIDA', $e->getMessage());
+        }
+    }
+
+    /**
+     * v1.21 FX-05/FX-06 — formato distinto de dd/mm/yyyy.
+     */
+    public function test_v21_parsear_fecha_formato_invalido_falla(): void
+    {
+        foreach (['2026-04-13', '13-04-2026', '4/13/2026', '13.04.2026'] as $bad) {
+            try {
+                $this->callParsearFecha($bad);
+                $this->fail("Se esperaba DomainException para '{$bad}'");
+            } catch (\DomainException $e) {
+                $this->assertStringStartsWith('FECHA_FORMATO_INVALIDO', $e->getMessage(),
+                    "Para '{$bad}' se esperaba prefijo FECHA_FORMATO_INVALIDO");
+            }
+        }
+    }
+
+    /**
+     * v1.21 FX-07 — vacío/null devuelve null (no excepción).
+     */
+    public function test_v21_parsear_fecha_vacio_devuelve_null(): void
+    {
+        $this->assertNull($this->callParsearFecha(''));
+        $this->assertNull($this->callParsearFecha(null));
+        $this->assertNull($this->callParsearFecha('   '));
+    }
+
+    private function callParsearFecha($v): ?string
+    {
+        $ref = new \ReflectionMethod($this->svc, 'parsearFecha');
+        $ref->setAccessible(true);
+        return $ref->invoke($this->svc, $v, 'Fecha de Emisión');
+    }
+
     public function test_v19_preview_csv_UTF8_con_BOM(): void
     {
         // Crear un CSV UTF-8 con BOM para verificar que se descarta correctamente.

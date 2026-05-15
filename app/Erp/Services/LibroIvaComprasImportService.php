@@ -428,14 +428,54 @@ class LibroIvaComprasImportService
         return (float) $s;
     }
 
-    private function parsearFecha($v): ?string
+    /**
+     * v1.21 — Parser estricto de fechas en formato AFIP (dd/mm/yyyy).
+     *
+     * Antes usaba Carbon::parse() que interpreta ambiguamente: con `02/04/2026`
+     * podía producir tanto `2026-02-04` (4 feb, día/mes invertidos) como
+     * `2026-04-02` (2 abr). Con día > 12 (ej: `13/04/2026`) directamente
+     * fallaba el parseo y devolvía null → la fila se rebotaba con
+     * FECHA_IMPUTACION_INVALIDA en lugar de un mensaje claro.
+     *
+     * Ahora: validación de formato regex + createFromFormat estricto +
+     * verificación de que los componentes no fueron "casteados" (ej:
+     * 31/02/2026 → Carbon castea silencioso a 03/03/2026 — lo detectamos
+     * comparando día/mes/año originales contra el Carbon resultante).
+     *
+     * Devuelve `null` solo si el input está vacío. Si el formato es inválido
+     * o la fecha es imposible, lanza DomainException con código prefijado.
+     */
+    private function parsearFecha($v, string $campo = 'fecha'): ?string
     {
-        if ($v === null || $v === '') return null;
-        try {
-            return Carbon::parse(trim((string) $v))->toDateString();
-        } catch (\Throwable) {
-            return null;
+        if ($v === null) return null;
+        $s = trim((string) $v);
+        if ($s === '') return null;
+
+        if (! preg_match('/^(\d{2})\/(\d{2})\/(\d{4})$/', $s, $m)) {
+            throw new DomainException(
+                "FECHA_FORMATO_INVALIDO: '{$campo}' = '{$s}' no tiene formato dd/mm/yyyy esperado por AFIP."
+            );
         }
+        [$_, $d, $mo, $y] = $m;
+
+        try {
+            $carbon = Carbon::createFromFormat('!d/m/Y', $s);
+        } catch (\Throwable $e) {
+            throw new DomainException(
+                "FECHA_PARSE_ERROR: '{$campo}' = '{$s}' no se puede parsear: {$e->getMessage()}"
+            );
+        }
+
+        // createFromFormat acepta 31/02/2026 y lo castea silencioso a 03/03/2026.
+        // Verificar que los componentes no cambiaron — rechaza 31/02, 29/02 no
+        // bisiesto, 30/04, etc.
+        if ($carbon->day !== (int) $d || $carbon->month !== (int) $mo || $carbon->year !== (int) $y) {
+            throw new DomainException(
+                "FECHA_INVALIDA: '{$campo}' = '{$s}' no es una fecha calendario válida (ej: 31 de febrero, 29 de febrero en año no bisiesto)."
+            );
+        }
+
+        return $carbon->toDateString();
     }
 
     /**
@@ -448,8 +488,13 @@ class LibroIvaComprasImportService
     ): array {
         $tomada = $this->leerTomado($r, $headerMap);
 
-        $fechaEmision = $this->parsearFecha($this->get($r, $headerMap, 'fecha de emision'));
-        if (! $fechaEmision) throw new DomainException("fecha de emision inválida");
+        $fechaEmision = $this->parsearFecha(
+            $this->get($r, $headerMap, 'fecha de emision'),
+            'Fecha de Emisión',
+        );
+        if (! $fechaEmision) {
+            throw new DomainException('MISSING_FECHA_EMISION: la columna "Fecha de Emisión" está vacía.');
+        }
 
         $tipoCbteCod = (int) ($this->get($r, $headerMap, 'tipo de comprobante') ?: 0);
         $tipo = DB::table('erp_tipos_comprobante')->where('id', $tipoCbteCod)->first();
@@ -583,6 +628,10 @@ class LibroIvaComprasImportService
             'tipo_comprobante_id' => $tipoCbteCod,
             'punto_venta' => $puntoVenta, 'numero' => $numero,
             'fecha_emision' => $fechaEmision,
+            // v1.21 D-21-4: la columna fecha_recepcion es NOT NULL sin DEFAULT.
+            // Para imports del Libro IVA asumimos recepción = emisión (FCE u otros
+            // casos especiales se cargan por el form manual).
+            'fecha_recepcion' => $fechaEmision,
             'fecha_imputacion' => $imp['fecha_imputacion'],
             'periodo_id' => $imp['periodo_id'],
             'imputacion_diferida' => $imp['imputacion_diferida'],

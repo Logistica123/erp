@@ -277,47 +277,75 @@ class ContabilizadorFacturas
             ?? DB::table('erp_centros_costo')->where('empresa_id', $empresaId)->where('codigo', 'CENTRAL')->value('id');
 
         $cuentaProv = $this->cuentaId($empresaId, self::CUENTA_PROVEEDORES);
-        $cuentaIvaCf = $this->cuentaId($empresaId, self::CUENTA_IVA_CF);
-        // v1.23 — percepciones IVA y retenciones IVA van a cuentas dedicadas
-        // del plan estándar. Si alguna no existe, fallback al IVA CF para no
-        // bloquear el asiento (caso de plan de cuentas reducido).
-        $cuentaPercIva = $this->cuentaIdOptional($empresaId, self::CUENTA_PERCEPCIONES_IVA_SUFRIDAS) ?? $cuentaIvaCf;
-        $cuentaRetIva = $this->cuentaIdOptional($empresaId, self::CUENTA_RETENCIONES_IVA_SUFRIDAS) ?? $cuentaIvaCf;
+        // v1.24 — mapeo concepto AFIP → cuenta contable cargado de
+        // erp_configuracion_iva_mapeo (super_admin/contador pueden ajustarlo
+        // desde la pantalla `/erp/contabilidad/configuracion-iva`).
+        $mapeo = $this->cargarMapeoIva($empresaId);
+        $cuentaIvaCfFallback = $this->cuentaIdOptional($empresaId, self::CUENTA_IVA_CF) ?? null;
+        $cuentaRetIva = $this->cuentaIdOptional($empresaId, self::CUENTA_RETENCIONES_IVA_SUFRIDAS) ?? $cuentaIvaCfFallback;
         $cuentaGasto = $this->resolverCuentaGasto($empresaId, $f->centro_costo_id, $f->auxiliar_id);
 
         $netoSinIva = round(
             (float) $f->imp_neto_gravado + (float) $f->imp_no_gravado + (float) $f->imp_exento, 2
         );
-        // v1.23 — IVA "puro" (sin sumar percepciones, que van aparte).
-        $impIva = (float) $f->imp_iva;
-        $impPerc = (float) ($f->imp_percepciones ?? 0);
+        // v1.24 — desglose por alícuota IVA si vienen las columnas detalladas.
+        $impIvaPorAlicuota = [
+            'iva_credito_21'   => (float) ($f->imp_iva_21 ?? 0),
+            'iva_credito_10_5' => (float) ($f->imp_iva_10_5 ?? 0),
+            'iva_credito_27'   => (float) ($f->imp_iva_27 ?? 0),
+            'iva_credito_2_5'  => (float) ($f->imp_iva_2_5 ?? 0),
+            'iva_credito_5'    => (float) ($f->imp_iva_5 ?? 0),
+        ];
+        $impIvaTotal = (float) $f->imp_iva;
+        $sumaAlicuotas = array_sum($impIvaPorAlicuota);
+
+        // Fallback: facturas históricas o cargas manuales sin desglose por alícuota.
+        // Si vinieron en 0 las columnas detalladas pero hay imp_iva > 0, todo a 21%.
+        if ($sumaAlicuotas == 0.0 && $impIvaTotal > 0) {
+            $impIvaPorAlicuota['iva_credito_21'] = $impIvaTotal;
+        }
+
+        // v1.24 — percepciones e impuestos detallados.
+        $impPercIva     = (float) ($f->imp_percepciones_iva ?? 0);
+        $impPercIibb    = (float) ($f->imp_percepciones_iibb ?? 0);
+        $impPercOtrosNac= (float) ($f->imp_percepciones_otros_nac ?? 0);
+        $impMunicipales = (float) ($f->imp_municipales ?? 0);
+        $impInternos    = (float) ($f->imp_internos ?? 0);
+        $impOtrosTrib   = (float) ($f->imp_otros_tributos ?? 0);
+        // Fallback: facturas viejas con imp_percepciones agregado y sin desglose.
+        $sumaPerc = $impPercIva + $impPercIibb + $impPercOtrosNac;
+        if ($sumaPerc == 0.0 && (float) ($f->imp_percepciones ?? 0) > 0) {
+            $impPercIva = (float) $f->imp_percepciones; // todo a Per IVA por compat
+        }
+
         $impRet = (float) ($f->imp_retenciones ?? 0);
         $impTotal = (float) $f->imp_total;
         $esNC = ($f->cbte_signo ?? 1) < 0;
 
         // v1.22 D-22-4 — comprobantes sin IVA discriminado (Factura C tipo 11,
         // NC C tipo 13, comprobantes de monotributistas). El neto y el IVA
-        // vienen en 0 pero el total NO. Para que el asiento tenga al menos 2
-        // líneas (regla de partida doble), forzamos la línea de gasto al total
-        // y omitimos la línea de IVA Crédito Fiscal.
-        $sinIvaDiscriminado = $netoSinIva == 0.0 && $impIva == 0.0 && $impTotal != 0.0;
+        // vienen en 0 pero el total NO. Forzamos línea de gasto al total y
+        // omitimos toda la línea de IVA.
+        $sinIvaDiscriminado = $netoSinIva == 0.0 && $impIvaTotal == 0.0 && $impTotal != 0.0;
         if ($sinIvaDiscriminado) {
             $netoSinIva = abs($impTotal);
-            $impIva = 0.0;
+            $impIvaPorAlicuota = array_map(fn () => 0.0, $impIvaPorAlicuota);
         }
 
-        // v1.22 D-22-5 — para NC el CSV trae importes negativos. El CHECK
-        // `chk_mov_signo` de erp_movimientos_asiento exige debe/haber >= 0,
-        // así que normalizamos a positivo: el signo se expresa por la rama
-        // ($esNC) que swappea debe y haber.
+        // v1.22 D-22-5 — abs para CHECK chk_mov_signo. El signo de NC se aplica
+        // al final invirtiendo debe/haber.
         $netoSinIva = abs($netoSinIva);
-        $impIva = abs($impIva);
-        $impPerc = abs($impPerc);
+        $impIvaPorAlicuota = array_map('abs', $impIvaPorAlicuota);
+        $impPercIva = abs($impPercIva);
+        $impPercIibb = abs($impPercIibb);
+        $impPercOtrosNac = abs($impPercOtrosNac);
+        $impMunicipales = abs($impMunicipales);
+        $impInternos = abs($impInternos);
+        $impOtrosTrib = abs($impOtrosTrib);
         $impRet = abs($impRet);
         $impTotal = abs($impTotal);
 
         // ADDENDUM v1.9 — fecha del asiento = fecha_imputacion (no emisión).
-        // Glosa enriquecida si la imputación es diferida.
         $fechaEmision = $f->fecha_emision instanceof \DateTimeInterface
             ? $f->fecha_emision->format('Y-m-d') : (string) $f->fecha_emision;
         $fechaImputacion = ! empty($f->fecha_imputacion)
@@ -334,113 +362,124 @@ class ContabilizadorFacturas
                 date('d/m/Y', strtotime($fechaImputacion)),
             );
         }
-        $movs = [];
 
-        if (! $esNC) {
-            if ($netoSinIva > 0) {
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaGasto,
-                    'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
-                    // v1.22 D-22-6 — propagar auxiliar del proveedor si la cuenta lo exige.
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaGasto) ? $f->auxiliar_id : null,
-                    'debe' => $netoSinIva,
-                    'haber' => 0,
-                    'glosa' => 'Gastos / servicios',
-                ];
-            }
-            if ($impIva > 0) {
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaIvaCf,
-                    'centro_costo_id' => $this->admiteCc($cuentaIvaCf) ? $ccGeneral : null,
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaIvaCf) ? $f->auxiliar_id : null,
-                    'debe' => $impIva,
-                    'haber' => 0,
-                    'glosa' => 'IVA Crédito Fiscal',
-                ];
-            }
-            // v1.23 — percepciones IVA sufridas a cuenta dedicada (1.1.6.04).
-            if ($impPerc > 0) {
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaPercIva,
-                    'centro_costo_id' => $this->admiteCc($cuentaPercIva) ? $ccGeneral : null,
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaPercIva) ? $f->auxiliar_id : null,
-                    'debe' => $impPerc,
-                    'haber' => 0,
-                    'glosa' => 'Percepciones IVA sufridas',
-                ];
-            }
-            if ($impRet > 0) {
-                // v1.23 — retenciones IVA sufridas a cuenta dedicada (1.1.6.05).
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaRetIva,
-                    'centro_costo_id' => $this->admiteCc($cuentaRetIva) ? $ccGeneral : null,
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaRetIva) ? $f->auxiliar_id : null,
-                    'debe' => $impRet,
-                    'haber' => 0,
-                    'glosa' => 'Retenciones IVA sufridas',
-                ];
-            }
-            // Contrapartida única: Proveedores (total)
+        // v1.24 — armamos las líneas como "factura normal" (debe = monto del
+        // concepto, haber = 0 para los créditos fiscales / gastos; haber para
+        // la contrapartida proveedor). Al final, si es NC invertimos todo.
+        $movs = [];
+        $idxLineaGastoPrincipal = null; // para ajuste de redondeo D-23-2
+
+        if ($netoSinIva > 0) {
             $movs[] = [
-                'cuenta_id' => (int) $cuentaProv,
-                'centro_costo_id' => $this->admiteCc($cuentaProv) ? $ccGeneral : null,
-                'auxiliar_id' => $this->admiteAuxiliar($cuentaProv) ? $f->auxiliar_id : null,
-                'debe' => 0,
-                'haber' => $impTotal,
-                'glosa' => 'Deuda con proveedor',
-            ];
-        } else {
-            // NC recibida: invertido.
-            $movs[] = [
-                'cuenta_id' => (int) $cuentaProv,
-                'centro_costo_id' => $this->admiteCc($cuentaProv) ? $ccGeneral : null,
-                'auxiliar_id' => $this->admiteAuxiliar($cuentaProv) ? $f->auxiliar_id : null,
-                'debe' => $impTotal,
+                'cuenta_id' => (int) $cuentaGasto,
+                'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
+                'auxiliar_id' => $this->admiteAuxiliar($cuentaGasto) ? $f->auxiliar_id : null,
+                'debe' => $netoSinIva,
                 'haber' => 0,
-                'glosa' => 'Reverso deuda por NC',
+                'glosa' => 'Gastos / servicios',
             ];
-            if ($netoSinIva > 0) {
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaGasto,
-                    'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
-                    // v1.22 D-22-6 — mismo fix para reverso gasto (NC).
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaGasto) ? $f->auxiliar_id : null,
-                    'debe' => 0,
-                    'haber' => $netoSinIva,
-                    'glosa' => 'Reverso gasto',
-                ];
+            $idxLineaGastoPrincipal = array_key_last($movs);
+        }
+
+        // v1.24 — 5 líneas de IVA CF por alícuota (solo las que tienen monto).
+        $glosaAlicuota = [
+            'iva_credito_21' => 'IVA Crédito Fiscal 21%',
+            'iva_credito_10_5' => 'IVA Crédito Fiscal 10,5%',
+            'iva_credito_27' => 'IVA Crédito Fiscal 27%',
+            'iva_credito_2_5' => 'IVA Crédito Fiscal 2,5%',
+            'iva_credito_5' => 'IVA Crédito Fiscal 5%',
+        ];
+        foreach ($impIvaPorAlicuota as $concepto => $monto) {
+            if ($monto <= 0) continue;
+            $cuentaId = $this->cuentaPorMapeo($mapeo, $concepto, $cuentaIvaCfFallback);
+            $movs[] = [
+                'cuenta_id' => $cuentaId,
+                'centro_costo_id' => $this->admiteCc($cuentaId) ? $ccGeneral : null,
+                'auxiliar_id' => $this->admiteAuxiliar($cuentaId) ? $f->auxiliar_id : null,
+                'debe' => $monto,
+                'haber' => 0,
+                'glosa' => $glosaAlicuota[$concepto],
+            ];
+        }
+
+        // v1.24 — percepciones IVA / IIBB / Otros Imp Nacionales.
+        $conceptosPerc = [
+            ['percepciones_iva',       $impPercIva,     'Percepciones IVA sufridas'],
+            ['percepciones_iibb',      $impPercIibb,    'Percepciones IIBB sufridas'],
+            ['percepciones_otros_nac', $impPercOtrosNac, 'Percepciones Otros Imp. Nacionales'],
+        ];
+        foreach ($conceptosPerc as [$concepto, $monto, $glosaConcepto]) {
+            if ($monto <= 0) continue;
+            $cuentaId = $this->cuentaPorMapeo($mapeo, $concepto, $cuentaIvaCfFallback);
+            $movs[] = [
+                'cuenta_id' => $cuentaId,
+                'centro_costo_id' => $this->admiteCc($cuentaId) ? $ccGeneral : null,
+                'auxiliar_id' => $this->admiteAuxiliar($cuentaId) ? $f->auxiliar_id : null,
+                'debe' => $monto,
+                'haber' => 0,
+                'glosa' => $glosaConcepto,
+            ];
+        }
+
+        // v1.24 — impuestos como gasto (Municipales / Internos / Otros Tributos).
+        $conceptosImp = [
+            ['imp_municipales', $impMunicipales, 'Impuestos Municipales'],
+            ['imp_internos',    $impInternos,    'Impuestos Internos'],
+            ['otros_tributos',  $impOtrosTrib,   'Otros Tributos'],
+        ];
+        foreach ($conceptosImp as [$concepto, $monto, $glosaConcepto]) {
+            if ($monto <= 0) continue;
+            $cuentaId = $this->cuentaPorMapeo($mapeo, $concepto, $cuentaGasto);
+            $movs[] = [
+                'cuenta_id' => $cuentaId,
+                'centro_costo_id' => $this->admiteCc($cuentaId) ? ($f->centro_costo_id ?: $ccGeneral) : null,
+                'auxiliar_id' => $this->admiteAuxiliar($cuentaId) ? $f->auxiliar_id : null,
+                'debe' => $monto,
+                'haber' => 0,
+                'glosa' => $glosaConcepto,
+            ];
+        }
+
+        if ($impRet > 0 && $cuentaRetIva) {
+            $movs[] = [
+                'cuenta_id' => (int) $cuentaRetIva,
+                'centro_costo_id' => $this->admiteCc($cuentaRetIva) ? $ccGeneral : null,
+                'auxiliar_id' => $this->admiteAuxiliar($cuentaRetIva) ? $f->auxiliar_id : null,
+                'debe' => $impRet,
+                'haber' => 0,
+                'glosa' => 'Retenciones IVA sufridas',
+            ];
+        }
+
+        // Contrapartida: Proveedores por el total.
+        $movs[] = [
+            'cuenta_id' => (int) $cuentaProv,
+            'centro_costo_id' => $this->admiteCc($cuentaProv) ? $ccGeneral : null,
+            'auxiliar_id' => $this->admiteAuxiliar($cuentaProv) ? $f->auxiliar_id : null,
+            'debe' => 0,
+            'haber' => $impTotal,
+            'glosa' => 'Deuda con proveedor',
+        ];
+
+        // v1.24 D-23-1 + D-23-2 — tolerancia de redondeo $1. Los CSV de AFIP
+        // traen totales por alícuota redondeados que pueden diferir del total
+        // de la factura por unos centavos. Si |debe - haber| ≤ 1 ajustamos la
+        // línea de gasto principal; si supera, dejamos el desbalance para que
+        // la validación posterior tire ASIENTO_DESBALANCEADO con detalle.
+        $movs = $this->ajustarRedondeo($movs, $idxLineaGastoPrincipal);
+
+        if ($esNC) {
+            // v1.22 RN-22-4 — invertir todas las líneas para que el asiento
+            // contable de la NC sea opuesto a la factura original.
+            foreach ($movs as &$linea) {
+                $tmp = $linea['debe'];
+                $linea['debe'] = $linea['haber'];
+                $linea['haber'] = $tmp;
+                if (isset($linea['glosa'])) {
+                    $linea['glosa'] = 'Reverso · ' . $linea['glosa'];
+                }
             }
-            if ($impIva > 0) {
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaIvaCf,
-                    'centro_costo_id' => $this->admiteCc($cuentaIvaCf) ? $ccGeneral : null,
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaIvaCf) ? $f->auxiliar_id : null,
-                    'debe' => 0,
-                    'haber' => $impIva,
-                    'glosa' => 'Reverso IVA CF',
-                ];
-            }
-            // v1.23 — mismo desglose para NC: percepciones y retenciones aparte.
-            if ($impPerc > 0) {
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaPercIva,
-                    'centro_costo_id' => $this->admiteCc($cuentaPercIva) ? $ccGeneral : null,
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaPercIva) ? $f->auxiliar_id : null,
-                    'debe' => 0,
-                    'haber' => $impPerc,
-                    'glosa' => 'Reverso percepciones IVA',
-                ];
-            }
-            if ($impRet > 0) {
-                $movs[] = [
-                    'cuenta_id' => (int) $cuentaRetIva,
-                    'centro_costo_id' => $this->admiteCc($cuentaRetIva) ? $ccGeneral : null,
-                    'auxiliar_id' => $this->admiteAuxiliar($cuentaRetIva) ? $f->auxiliar_id : null,
-                    'debe' => 0,
-                    'haber' => $impRet,
-                    'glosa' => 'Reverso retenciones IVA',
-                ];
-            }
+            unset($linea);
         }
 
         $payload = [
@@ -542,5 +581,90 @@ class ContabilizadorFacturas
     private function admiteAuxiliar(int $cuentaId): bool
     {
         return (bool) DB::table('erp_cuentas_contables')->where('id', $cuentaId)->value('admite_auxiliar');
+    }
+
+    /**
+     * v1.24 — Carga el mapeo concepto AFIP → cuenta_contable_id desde
+     * `erp_configuracion_iva_mapeo`. Cacheado por request (no por minutos)
+     * para que un PUT al mapeo se refleje inmediatamente en el siguiente
+     * import sin invalidación explícita.
+     *
+     * @return array<string,int>  concepto_csv => cuenta_contable_id
+     */
+    private array $mapeoCache = [];
+    private function cargarMapeoIva(int $empresaId): array
+    {
+        if (isset($this->mapeoCache[$empresaId])) {
+            return $this->mapeoCache[$empresaId];
+        }
+        $rows = DB::table('erp_configuracion_iva_mapeo')
+            ->where('empresa_id', $empresaId)->where('activo', 1)
+            ->pluck('cuenta_contable_id', 'concepto_csv')->all();
+        return $this->mapeoCache[$empresaId] = array_map('intval', $rows);
+    }
+
+    /**
+     * v1.24 — Obtiene la cuenta del mapeo o un fallback.
+     * Si el mapeo no tiene el concepto y no hay fallback, lanza error claro
+     * (D-23-8: la falta de mapeo es bug del setup, no silenciar).
+     */
+    private function cuentaPorMapeo(array $mapeo, string $concepto, ?int $fallback = null): int
+    {
+        if (isset($mapeo[$concepto])) {
+            return $mapeo[$concepto];
+        }
+        if ($fallback !== null) {
+            return $fallback;
+        }
+        throw new \RuntimeException(
+            "MAPEO_IVA_FALTANTE: falta mapeo para '{$concepto}' en erp_configuracion_iva_mapeo. "
+            . 'Configurá la cuenta en Contabilidad → Configuración IVA.'
+        );
+    }
+
+    /**
+     * v1.24 D-23-1 + D-23-2 — Ajuste de redondeo $1.
+     *
+     * Los CSV de AFIP traen totales por alícuota redondeados que pueden diferir
+     * del Importe Total por unos centavos. Si |debe - haber| ≤ 1 ajustamos la
+     * línea de gasto principal (la mayor); si supera, devolvemos el array sin
+     * tocar y la validación posterior tira ASIENTO_DESBALANCEADO con detalle.
+     */
+    private function ajustarRedondeo(array $movs, ?int $idxGastoPrincipal): array
+    {
+        $debe = 0.0; $haber = 0.0;
+        foreach ($movs as $m) {
+            $debe  += (float) $m['debe'];
+            $haber += (float) $m['haber'];
+        }
+        $diff = round($debe - $haber, 2);
+        if (abs($diff) < 0.005) return $movs; // ya cuadra (menos de medio centavo)
+        if (abs($diff) > 1.0) return $movs;   // > $1 → no se ajusta, dejará error
+
+        // Buscar línea para ajustar: idx pasado explícito, o la línea con mayor
+        // 'debe' (gasto principal). Si el ajuste sumara negativo a debe, no
+        // podemos restar más que el monto existente — en ese caso, agregar al
+        // haber del proveedor (caso edge muy raro).
+        $idx = $idxGastoPrincipal;
+        if ($idx === null) {
+            $maxDebe = 0.0;
+            foreach ($movs as $i => $m) {
+                if ((float) $m['debe'] > $maxDebe) {
+                    $maxDebe = (float) $m['debe'];
+                    $idx = $i;
+                }
+            }
+        }
+        if ($idx === null) return $movs;
+
+        // Si debe > haber → restar a la línea de debe.
+        // Si haber > debe → sumar a la línea de debe.
+        $movs[$idx]['debe'] = round((float) $movs[$idx]['debe'] - $diff, 2);
+        if ($movs[$idx]['debe'] < 0) {
+            // Edge raro: el ajuste haría negativa la línea. Revertir y dejar
+            // que la validación posterior reporte el error.
+            $movs[$idx]['debe'] = round((float) $movs[$idx]['debe'] + $diff, 2);
+        }
+        return $movs;
     }
 }

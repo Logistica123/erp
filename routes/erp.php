@@ -20,6 +20,7 @@ use App\Erp\Http\Controllers\EcheqController;
 use App\Erp\Http\Controllers\ExtractosController;
 use App\Erp\Http\Controllers\LibroDiarioController;
 use App\Erp\Http\Controllers\RevaluacionController;
+use App\Erp\Http\Controllers\ConfiguracionIvaMapeoController;
 use App\Erp\Http\Controllers\RolesPermisosController;
 use App\Erp\Http\Controllers\TransferenciasInternasController;
 use App\Erp\Http\Controllers\UsuariosController;
@@ -315,6 +316,12 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/roles', [RolesPermisosController::class, 'rolesIndex'])->name('erp.roles.index');
         Route::get('/permisos', [RolesPermisosController::class, 'permisosIndex'])->name('erp.permisos.index');
         Route::get('/mi-permisos', [RolesPermisosController::class, 'misPermisos'])->name('erp.mi-permisos');
+
+        // v1.24 — ABM del mapeo concepto AFIP → cuenta contable (importer Libro IVA).
+        Route::get('/contabilidad/iva-mapeo', [ConfiguracionIvaMapeoController::class, 'index'])
+            ->name('erp.contabilidad.iva-mapeo.index');
+        Route::put('/contabilidad/iva-mapeo/{concepto}', [ConfiguracionIvaMapeoController::class, 'update'])
+            ->name('erp.contabilidad.iva-mapeo.update');
 
         Route::get('/config', [ConfigController::class, 'index'])->name('erp.config.index');
         Route::patch('/config/{clave}', [ConfigController::class, 'update'])

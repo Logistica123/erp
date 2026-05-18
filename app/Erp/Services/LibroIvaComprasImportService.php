@@ -587,6 +587,22 @@ class LibroIvaComprasImportService
         $impExento = $this->parsearFloat($this->get($r, $headerMap, 'importe exento'));
         $impIva = $this->parsearFloat($this->get($r, $headerMap, 'total iva'));
 
+        // v1.24 — desglose por alícuota IVA (5 alícuotas estándar AFIP).
+        // El CSV trae el detalle; antes se ignoraba y se usaba sólo Total IVA.
+        $impIva21  = $this->parsearFloat($this->get($r, $headerMap, 'importe iva 21%'));
+        $impIva10  = $this->parsearFloat($this->get($r, $headerMap, 'importe iva 10,5%'));
+        $impIva27  = $this->parsearFloat($this->get($r, $headerMap, 'importe iva 27%'));
+        $impIva2   = $this->parsearFloat($this->get($r, $headerMap, 'importe iva 2,5%'));
+        $impIva5   = $this->parsearFloat($this->get($r, $headerMap, 'importe iva 5%'));
+
+        // v1.24 — percepciones e impuestos como conceptos separados.
+        $impPercIva     = $this->parsearFloat($this->get($r, $headerMap, 'importe de percepciones o pagos a cuenta de iva'));
+        $impPercIibb    = $this->parsearFloat($this->get($r, $headerMap, 'importe de percepciones de ingresos brutos'));
+        $impPercOtrosNac = $this->parsearFloat($this->get($r, $headerMap, 'importe de per. o pagos a cta. de otros imp. nac.'));
+        $impMunicipales = $this->parsearFloat($this->get($r, $headerMap, 'importe de impuestos municipales'));
+        $impInternos    = $this->parsearFloat($this->get($r, $headerMap, 'importe de impuestos internos'));
+        $impOtrosTrib   = $this->parsearFloat($this->get($r, $headerMap, 'importe otros tributos'));
+
         // v1.22 D-22-1 — fecha_imputacion inteligente (reemplaza el bug del v1.13
         // que forzaba primer día del período y rebotaba toda fecha_emision > día 1).
         //   - emisión DENTRO del período  → fecha_imputacion = fecha_emision
@@ -712,6 +728,15 @@ class LibroIvaComprasImportService
             'moneda_id' => 1, 'cotizacion' => 1.0,
             'imp_neto_gravado' => $impNetoGravado, 'imp_no_gravado' => $impNoGravado,
             'imp_exento' => $impExento, 'imp_iva' => $impIva,
+            // v1.24 — desglose detallado.
+            'imp_iva_21' => $impIva21, 'imp_iva_10_5' => $impIva10, 'imp_iva_27' => $impIva27,
+            'imp_iva_2_5' => $impIva2, 'imp_iva_5' => $impIva5,
+            'imp_percepciones_iva' => $impPercIva,
+            'imp_percepciones_iibb' => $impPercIibb,
+            'imp_percepciones_otros_nac' => $impPercOtrosNac,
+            'imp_municipales' => $impMunicipales,
+            'imp_internos' => $impInternos,
+            'imp_otros_tributos' => $impOtrosTrib,
             'imp_total' => $impTotal,
             'origen' => 'LIBRO_IVA_IMPORT',
             'estado' => $tomada ? FacturaCompraService::ESTADO_RECIBIDA : FacturaCompraService::ESTADO_RECIBIDA,

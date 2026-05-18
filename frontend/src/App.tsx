@@ -56,6 +56,7 @@ import { ReportesAnaliticosPage } from './pages/ReportesAnaliticosPage';
 import { ImputarNcPage } from './pages/ImputarNcPage';
 import { AsientoDetallePage } from './pages/AsientoDetallePage';
 import { CentrosCostoPage } from './pages/CentrosCostoPage';
+import { ConfiguracionIvaPage } from './pages/ConfiguracionIvaPage';
 import { FacturaVentaManualPage } from './pages/FacturaVentaManualPage';
 import { FacturaCompraManualPage } from './pages/FacturaCompraManualPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
@@ -114,6 +115,8 @@ export default function App() {
               <Route path="/erp/periodos" element={<PeriodosPage />} handle={{ crumb: 'Períodos' }} />
               {/* v1.14 ampliación — ABM de Centros de Costo */}
               <Route path="/erp/centros-costo" element={<CentrosCostoPage />} handle={{ crumb: 'Centros de Costo' }} />
+              {/* v1.24 — ABM del mapeo concepto AFIP → cuenta contable */}
+              <Route path="/erp/contabilidad/configuracion-iva" element={<ConfiguracionIvaPage />} handle={{ crumb: 'Configuración IVA' }} />
               <Route path="/erp/estados-contables" element={<EstadosContablesPage />} handle={{ crumb: 'Estados Contables' }} />
               <Route path="/erp/facturacion" element={<FacturacionPage />} handle={{ crumb: 'Facturación' }} />
               <Route path="/erp/facturacion/nueva" element={<NuevaFacturaPage />} handle={{ crumb: 'Nueva factura' }} />

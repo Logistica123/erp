@@ -28,6 +28,10 @@ class FacturaCompra extends Model
         'moneda_id', 'cotizacion',
         'imp_neto_gravado', 'imp_no_gravado', 'imp_exento',
         'imp_iva', 'imp_tributos', 'imp_percepciones', 'imp_retenciones', 'imp_total',
+        // v1.24 — desglose por alícuota IVA + tipo de percepción + impuestos como gasto
+        'imp_iva_21', 'imp_iva_10_5', 'imp_iva_27', 'imp_iva_2_5', 'imp_iva_5',
+        'imp_percepciones_iva', 'imp_percepciones_iibb', 'imp_percepciones_otros_nac',
+        'imp_municipales', 'imp_internos', 'imp_otros_tributos',
         'origen', 'estado', 'constatacion_estado',
         'observaciones', 'motivo_observacion', 'adjunto_url',
         'centro_costo_id', 'asiento_id',

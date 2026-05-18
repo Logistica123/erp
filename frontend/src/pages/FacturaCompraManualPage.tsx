@@ -70,6 +70,13 @@ export function FacturaCompraManualPage() {
     imp_no_gravado: 0,
     imp_exento: 0,
     imp_iva: 0,
+    // v1.25 — desglose por alícuota (3 visibles + 2 ocultas para alícuotas raras).
+    imp_neto_gravado_21: 0,
+    imp_neto_gravado_10_5: 0,
+    imp_neto_gravado_27: 0,
+    imp_iva_21: 0,
+    imp_iva_10_5: 0,
+    imp_iva_27: 0,
     imp_total: 0,
     cae: '',
     tomado: true,
@@ -90,14 +97,36 @@ export function FacturaCompraManualPage() {
     }
   }, [tipos, periodoAbierto, form.tipo_comprobante_id, form.periodo_id]);
 
-  // Auto-calcular total.
+  // v1.25 — Auto-calcular agregados (imp_neto_gravado, imp_iva) y total a
+  // partir de los desgloses por alícuota + no gravado + exento.
   useEffect(() => {
-    const total = Number(form.imp_neto_gravado || 0) + Number(form.imp_iva || 0) +
-      Number(form.imp_no_gravado || 0) + Number(form.imp_exento || 0);
-    if (Math.abs(total - form.imp_total) > 0.005) {
-      setForm((f) => ({ ...f, imp_total: +total.toFixed(2) }));
-    }
-  }, [form.imp_neto_gravado, form.imp_iva, form.imp_no_gravado, form.imp_exento, form.imp_total]);
+    const neto = Number(form.imp_neto_gravado_21 || 0)
+      + Number(form.imp_neto_gravado_10_5 || 0)
+      + Number(form.imp_neto_gravado_27 || 0);
+    const iva = Number(form.imp_iva_21 || 0)
+      + Number(form.imp_iva_10_5 || 0)
+      + Number(form.imp_iva_27 || 0);
+    const total = neto + iva + Number(form.imp_no_gravado || 0) + Number(form.imp_exento || 0);
+
+    setForm((f) => {
+      // Solo actualizar si cambió algo (evita loop infinito).
+      if (Math.abs(neto - f.imp_neto_gravado) < 0.005
+        && Math.abs(iva - f.imp_iva) < 0.005
+        && Math.abs(total - f.imp_total) < 0.005) {
+        return f;
+      }
+      return {
+        ...f,
+        imp_neto_gravado: +neto.toFixed(2),
+        imp_iva: +iva.toFixed(2),
+        imp_total: +total.toFixed(2),
+      };
+    });
+  }, [
+    form.imp_neto_gravado_21, form.imp_neto_gravado_10_5, form.imp_neto_gravado_27,
+    form.imp_iva_21, form.imp_iva_10_5, form.imp_iva_27,
+    form.imp_no_gravado, form.imp_exento,
+  ]);
 
   // Buscar proveedor por CUIT cuando se escribe.
   const proveedorLookup = useMutation<{ data: { id: number; nombre: string } }, ApiError, string>({
@@ -126,6 +155,13 @@ export function FacturaCompraManualPage() {
       imp_no_gravado: form.imp_no_gravado,
       imp_exento: form.imp_exento,
       imp_iva: form.imp_iva,
+      // v1.25 — desglose por alícuota
+      imp_neto_gravado_21: form.imp_neto_gravado_21,
+      imp_neto_gravado_10_5: form.imp_neto_gravado_10_5,
+      imp_neto_gravado_27: form.imp_neto_gravado_27,
+      imp_iva_21: form.imp_iva_21,
+      imp_iva_10_5: form.imp_iva_10_5,
+      imp_iva_27: form.imp_iva_27,
       imp_total: form.imp_total,
       cae: form.cae || undefined,
       tomado: form.tomado,
@@ -278,16 +314,48 @@ export function FacturaCompraManualPage() {
 
           <div className="border-t border-line pt-3">
             <h3 className="text-[12px] font-semibold text-navy-800 uppercase tracking-wide mb-2">Importes</h3>
-            <div className="grid grid-cols-4 gap-3">
-              <Field label="Neto gravado" type="number" step="0.01" value={String(form.imp_neto_gravado)}
-                onChange={(e) => setForm({ ...form, imp_neto_gravado: +e.target.value })} />
-              <Field label="IVA" type="number" step="0.01" value={String(form.imp_iva)}
-                onChange={(e) => setForm({ ...form, imp_iva: +e.target.value })} />
+            <div className="text-[11px] text-ink-muted mb-2">
+              Cargá el neto y el IVA por alícuota. El total se calcula solo.
+            </div>
+
+            {/* v1.25 — desglose por alícuota (10,5% / 21% / 27%). */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-end">
+                <div className="text-[11px] text-ink-muted font-medium pb-2">IVA 21%</div>
+                <Field label="Neto gravado" type="number" step="0.01"
+                  value={String(form.imp_neto_gravado_21)}
+                  onChange={(e) => setForm({ ...form, imp_neto_gravado_21: +e.target.value })} />
+                <Field label="IVA" type="number" step="0.01"
+                  value={String(form.imp_iva_21)}
+                  onChange={(e) => setForm({ ...form, imp_iva_21: +e.target.value })} />
+              </div>
+              <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-end">
+                <div className="text-[11px] text-ink-muted font-medium pb-2">IVA 10,5%</div>
+                <Field label="Neto gravado" type="number" step="0.01"
+                  value={String(form.imp_neto_gravado_10_5)}
+                  onChange={(e) => setForm({ ...form, imp_neto_gravado_10_5: +e.target.value })} />
+                <Field label="IVA" type="number" step="0.01"
+                  value={String(form.imp_iva_10_5)}
+                  onChange={(e) => setForm({ ...form, imp_iva_10_5: +e.target.value })} />
+              </div>
+              <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-end">
+                <div className="text-[11px] text-ink-muted font-medium pb-2">IVA 27%</div>
+                <Field label="Neto gravado" type="number" step="0.01"
+                  value={String(form.imp_neto_gravado_27)}
+                  onChange={(e) => setForm({ ...form, imp_neto_gravado_27: +e.target.value })} />
+                <Field label="IVA" type="number" step="0.01"
+                  value={String(form.imp_iva_27)}
+                  onChange={(e) => setForm({ ...form, imp_iva_27: +e.target.value })} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-3">
               <Field label="No gravado" type="number" step="0.01" value={String(form.imp_no_gravado)}
                 onChange={(e) => setForm({ ...form, imp_no_gravado: +e.target.value })} />
               <Field label="Exento" type="number" step="0.01" value={String(form.imp_exento)}
                 onChange={(e) => setForm({ ...form, imp_exento: +e.target.value })} />
             </div>
+
             <div className="mt-3 flex justify-between items-center bg-surface-row border border-line rounded-md px-3 py-2">
               <span className="text-[12px] font-semibold">Total</span>
               <span className="text-[15px] font-bold tabular text-navy-800">{fmtMoney(form.imp_total)}</span>

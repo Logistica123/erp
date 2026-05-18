@@ -202,6 +202,17 @@ class FacturasManualController
             'imp_no_gravado' => ['nullable', 'numeric'],
             'imp_exento' => ['nullable', 'numeric'],
             'imp_iva' => ['nullable', 'numeric'],
+            // v1.25 — desglose por alícuota.
+            'imp_neto_gravado_21' => ['nullable', 'numeric'],
+            'imp_neto_gravado_10_5' => ['nullable', 'numeric'],
+            'imp_neto_gravado_27' => ['nullable', 'numeric'],
+            'imp_neto_gravado_2_5' => ['nullable', 'numeric'],
+            'imp_neto_gravado_5' => ['nullable', 'numeric'],
+            'imp_iva_21' => ['nullable', 'numeric'],
+            'imp_iva_10_5' => ['nullable', 'numeric'],
+            'imp_iva_27' => ['nullable', 'numeric'],
+            'imp_iva_2_5' => ['nullable', 'numeric'],
+            'imp_iva_5' => ['nullable', 'numeric'],
             'imp_total' => ['required', 'numeric'],
             'cae' => ['nullable', 'string', 'max:20'],
             'tomado' => ['nullable', 'boolean'],
@@ -212,6 +223,26 @@ class FacturasManualController
         ]);
 
         $empresaId = $this->empresaId($request);
+
+        // v1.25 — si vienen los netos/IVA por alícuota, derivamos los agregados.
+        $netos = [
+            (float) ($data['imp_neto_gravado_21'] ?? 0),
+            (float) ($data['imp_neto_gravado_10_5'] ?? 0),
+            (float) ($data['imp_neto_gravado_27'] ?? 0),
+            (float) ($data['imp_neto_gravado_2_5'] ?? 0),
+            (float) ($data['imp_neto_gravado_5'] ?? 0),
+        ];
+        $ivas = [
+            (float) ($data['imp_iva_21'] ?? 0),
+            (float) ($data['imp_iva_10_5'] ?? 0),
+            (float) ($data['imp_iva_27'] ?? 0),
+            (float) ($data['imp_iva_2_5'] ?? 0),
+            (float) ($data['imp_iva_5'] ?? 0),
+        ];
+        $sumaNetos = array_sum($netos);
+        $sumaIvas = array_sum($ivas);
+        if ($sumaNetos > 0) $data['imp_neto_gravado'] = round($sumaNetos, 2);
+        if ($sumaIvas > 0)  $data['imp_iva'] = round($sumaIvas, 2);
 
         // Unicidad por (tipo, PV, numero, cuit_emisor).
         $existe = DB::table('erp_facturas_compra')
@@ -282,6 +313,17 @@ class FacturasManualController
             'imp_no_gravado' => $data['imp_no_gravado'] ?? 0,
             'imp_exento' => $data['imp_exento'] ?? 0,
             'imp_iva' => $data['imp_iva'] ?? 0,
+            // v1.25 — desglose por alícuota
+            'imp_neto_gravado_21' => $data['imp_neto_gravado_21'] ?? 0,
+            'imp_neto_gravado_10_5' => $data['imp_neto_gravado_10_5'] ?? 0,
+            'imp_neto_gravado_27' => $data['imp_neto_gravado_27'] ?? 0,
+            'imp_neto_gravado_2_5' => $data['imp_neto_gravado_2_5'] ?? 0,
+            'imp_neto_gravado_5' => $data['imp_neto_gravado_5'] ?? 0,
+            'imp_iva_21' => $data['imp_iva_21'] ?? 0,
+            'imp_iva_10_5' => $data['imp_iva_10_5'] ?? 0,
+            'imp_iva_27' => $data['imp_iva_27'] ?? 0,
+            'imp_iva_2_5' => $data['imp_iva_2_5'] ?? 0,
+            'imp_iva_5' => $data['imp_iva_5'] ?? 0,
             'imp_total' => $data['imp_total'],
             'origen' => 'MANUAL',
             'estado' => 'RECIBIDA',

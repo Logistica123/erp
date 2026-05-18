@@ -32,6 +32,9 @@ class FacturaCompra extends Model
         'imp_iva_21', 'imp_iva_10_5', 'imp_iva_27', 'imp_iva_2_5', 'imp_iva_5',
         'imp_percepciones_iva', 'imp_percepciones_iibb', 'imp_percepciones_otros_nac',
         'imp_municipales', 'imp_internos', 'imp_otros_tributos',
+        // v1.25 — neto gravado por alícuota IVA (par a los `imp_iva_*` del v1.24)
+        'imp_neto_gravado_21', 'imp_neto_gravado_10_5', 'imp_neto_gravado_27',
+        'imp_neto_gravado_2_5', 'imp_neto_gravado_5',
         'origen', 'estado', 'constatacion_estado',
         'observaciones', 'motivo_observacion', 'adjunto_url',
         'centro_costo_id', 'asiento_id',

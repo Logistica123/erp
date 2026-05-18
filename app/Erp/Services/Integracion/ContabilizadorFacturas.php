@@ -39,8 +39,14 @@ class ContabilizadorFacturas
     private const CUENTA_IVA_DF = '2.1.3.01';
     // Compras
     private const CUENTA_PROVEEDORES = '2.1.1.01';
-    private const CUENTA_IVA_CF = '1.1.4.01.02';  // preferido; fallback 1.1.4.01 si no existe
-    private const CUENTA_IVA_CF_FALLBACK = '1.1.4.01';
+    // v1.23 — el fallback histórico apuntaba a `1.1.4.01` (Deudores por Ventas),
+    // cuenta del lado activo de ventas que admite_auxiliar=Cliente. Eso rebotaba
+    // 67/309 facturas reales con AUXILIAR_REQUERIDO al armar la línea IVA CF.
+    // El plan de cuentas argentino estándar ya tiene `1.1.6.01 IVA Crédito Fiscal`
+    // imputable + sin auxiliar — esa es la cuenta correcta.
+    private const CUENTA_IVA_CF = '1.1.6.01';
+    private const CUENTA_PERCEPCIONES_IVA_SUFRIDAS = '1.1.6.04';
+    private const CUENTA_RETENCIONES_IVA_SUFRIDAS = '1.1.6.05';
     private const CUENTA_GASTO_DEFAULT = '5.1.01';  // Gastos generales; fallback busca prefijo '5.1'
 
     /**
@@ -271,20 +277,20 @@ class ContabilizadorFacturas
             ?? DB::table('erp_centros_costo')->where('empresa_id', $empresaId)->where('codigo', 'CENTRAL')->value('id');
 
         $cuentaProv = $this->cuentaId($empresaId, self::CUENTA_PROVEEDORES);
-        $cuentaIvaCf = DB::table('erp_cuentas_contables')
-            ->where('empresa_id', $empresaId)
-            ->whereIn('codigo', [self::CUENTA_IVA_CF, self::CUENTA_IVA_CF_FALLBACK])
-            ->orderByRaw("FIELD(codigo, ?, ?)", [self::CUENTA_IVA_CF, self::CUENTA_IVA_CF_FALLBACK])
-            ->value('id');
-        if (! $cuentaIvaCf) {
-            throw new \RuntimeException('Cuenta IVA Crédito Fiscal no existe');
-        }
+        $cuentaIvaCf = $this->cuentaId($empresaId, self::CUENTA_IVA_CF);
+        // v1.23 — percepciones IVA y retenciones IVA van a cuentas dedicadas
+        // del plan estándar. Si alguna no existe, fallback al IVA CF para no
+        // bloquear el asiento (caso de plan de cuentas reducido).
+        $cuentaPercIva = $this->cuentaIdOptional($empresaId, self::CUENTA_PERCEPCIONES_IVA_SUFRIDAS) ?? $cuentaIvaCf;
+        $cuentaRetIva = $this->cuentaIdOptional($empresaId, self::CUENTA_RETENCIONES_IVA_SUFRIDAS) ?? $cuentaIvaCf;
         $cuentaGasto = $this->resolverCuentaGasto($empresaId, $f->centro_costo_id, $f->auxiliar_id);
 
         $netoSinIva = round(
             (float) $f->imp_neto_gravado + (float) $f->imp_no_gravado + (float) $f->imp_exento, 2
         );
-        $impIva = round((float) $f->imp_iva + (float) ($f->imp_percepciones ?? 0), 2);
+        // v1.23 — IVA "puro" (sin sumar percepciones, que van aparte).
+        $impIva = (float) $f->imp_iva;
+        $impPerc = (float) ($f->imp_percepciones ?? 0);
         $impRet = (float) ($f->imp_retenciones ?? 0);
         $impTotal = (float) $f->imp_total;
         $esNC = ($f->cbte_signo ?? 1) < 0;
@@ -306,6 +312,7 @@ class ContabilizadorFacturas
         // ($esNC) que swappea debe y haber.
         $netoSinIva = abs($netoSinIva);
         $impIva = abs($impIva);
+        $impPerc = abs($impPerc);
         $impRet = abs($impRet);
         $impTotal = abs($impTotal);
 
@@ -345,20 +352,32 @@ class ContabilizadorFacturas
                 $movs[] = [
                     'cuenta_id' => (int) $cuentaIvaCf,
                     'centro_costo_id' => $this->admiteCc($cuentaIvaCf) ? $ccGeneral : null,
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaIvaCf) ? $f->auxiliar_id : null,
                     'debe' => $impIva,
                     'haber' => 0,
                     'glosa' => 'IVA Crédito Fiscal',
                 ];
             }
-            if ($impRet > 0) {
-                // Retenciones sufridas: impactan activo por cobrar al fisco (1.1.4.xx).
-                // Asiento contra cuenta de retenciones + resta del total a pagar ya refleja en proveedor.
+            // v1.23 — percepciones IVA sufridas a cuenta dedicada (1.1.6.04).
+            if ($impPerc > 0) {
                 $movs[] = [
-                    'cuenta_id' => (int) $cuentaIvaCf, // usar IVA CF como fallback
-                    'centro_costo_id' => $ccGeneral,
+                    'cuenta_id' => (int) $cuentaPercIva,
+                    'centro_costo_id' => $this->admiteCc($cuentaPercIva) ? $ccGeneral : null,
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaPercIva) ? $f->auxiliar_id : null,
+                    'debe' => $impPerc,
+                    'haber' => 0,
+                    'glosa' => 'Percepciones IVA sufridas',
+                ];
+            }
+            if ($impRet > 0) {
+                // v1.23 — retenciones IVA sufridas a cuenta dedicada (1.1.6.05).
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaRetIva,
+                    'centro_costo_id' => $this->admiteCc($cuentaRetIva) ? $ccGeneral : null,
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaRetIva) ? $f->auxiliar_id : null,
                     'debe' => $impRet,
                     'haber' => 0,
-                    'glosa' => 'Retenciones sufridas',
+                    'glosa' => 'Retenciones IVA sufridas',
                 ];
             }
             // Contrapartida única: Proveedores (total)
@@ -395,9 +414,31 @@ class ContabilizadorFacturas
                 $movs[] = [
                     'cuenta_id' => (int) $cuentaIvaCf,
                     'centro_costo_id' => $this->admiteCc($cuentaIvaCf) ? $ccGeneral : null,
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaIvaCf) ? $f->auxiliar_id : null,
                     'debe' => 0,
                     'haber' => $impIva,
                     'glosa' => 'Reverso IVA CF',
+                ];
+            }
+            // v1.23 — mismo desglose para NC: percepciones y retenciones aparte.
+            if ($impPerc > 0) {
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaPercIva,
+                    'centro_costo_id' => $this->admiteCc($cuentaPercIva) ? $ccGeneral : null,
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaPercIva) ? $f->auxiliar_id : null,
+                    'debe' => 0,
+                    'haber' => $impPerc,
+                    'glosa' => 'Reverso percepciones IVA',
+                ];
+            }
+            if ($impRet > 0) {
+                $movs[] = [
+                    'cuenta_id' => (int) $cuentaRetIva,
+                    'centro_costo_id' => $this->admiteCc($cuentaRetIva) ? $ccGeneral : null,
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaRetIva) ? $f->auxiliar_id : null,
+                    'debe' => 0,
+                    'haber' => $impRet,
+                    'glosa' => 'Reverso retenciones IVA',
                 ];
             }
         }
@@ -482,6 +523,15 @@ class ContabilizadorFacturas
             throw new \RuntimeException("Cuenta {$codigo} no existe");
         }
         return (int) $id;
+    }
+
+    /** v1.23 — variante que devuelve null en lugar de tirar excepción. */
+    private function cuentaIdOptional(int $empresaId, string $codigo): ?int
+    {
+        $id = DB::table('erp_cuentas_contables')
+            ->where('empresa_id', $empresaId)->where('codigo', $codigo)
+            ->value('id');
+        return $id ? (int) $id : null;
     }
 
     private function admiteCc(int $cuentaId): bool

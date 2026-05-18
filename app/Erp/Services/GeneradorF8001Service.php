@@ -225,7 +225,16 @@ class GeneradorF8001Service
         // cantAlic = cantidad real de filas de alícuotas (0 para monotributo/exento).
         $cantAlic = (string) count($alicuotas);
         $codOp = ' ';
-        $creditoFiscal = $this->moneda((float) $f->imp_iva);
+        // v1.30 — el crédito fiscal del CBTE debe coincidir con la suma de
+        // las alícuotas reportadas en ALICUOTAS.txt. AFIP redondea cada
+        // alícuota independientemente, por lo que `imp_iva` (agregado) puede
+        // diferir de la suma de las alícuotas detalladas por unos centavos.
+        // Usamos la suma de las alícuotas para garantizar coherencia entre
+        // ambos archivos.
+        $sumaIva = ! empty($alicuotas)
+            ? array_sum(array_column($alicuotas, 'iva'))
+            : (float) $f->imp_iva;
+        $creditoFiscal = $this->moneda($sumaIva);
         // v1.28 — usar imp_otros_tributos (campo detallado del v1.24) con
         // fallback a imp_tributos (agregado legacy) si está poblado.
         $otrosTrib    = $this->moneda((float) ($f->imp_otros_tributos ?? $f->imp_tributos ?? 0));
@@ -369,14 +378,24 @@ class GeneradorF8001Service
                     'codigo' => 'TIPO_NO_CATALOGADO', 'detalle' => "tipo {$f->tipo_comprobante_id}"];
             }
 
-            // Suma de alícuotas vs imp_iva total
+            // v1.30 — Suma de alícuotas vs imp_iva total. AFIP redondea cada
+            // alícuota independientemente en el CSV, así que el agregado
+            // `imp_iva` puede no coincidir exacto con la suma de las
+            // alícuotas detalladas por unos centavos (típico 0.02-0.05).
+            // Tolerancia $0.10 captura todos los redondeos AFIP sin tapar
+            // errores reales (>= $1).
+            //
+            // Importante: el archivo F.8001 final usa la SUMA DE LAS ALÍCUOTAS
+            // como crédito fiscal (ver `lineaCbte`), no el `imp_iva` agregado.
+            // Por eso esta validación es solo informativa.
             $alicuotas = $this->extraerAlicuotas($f);
             if (! empty($alicuotas)) {
                 $sumaIva = array_sum(array_column($alicuotas, 'iva'));
-                if (abs($sumaIva - (float) $f->imp_iva) > 0.01) {
+                if (abs($sumaIva - (float) $f->imp_iva) > 0.10) {
                     $errores[] = ['factura_id' => $f->id, 'numero' => $f->numero,
                         'codigo' => 'IVA_DESBALANCEADO',
-                        'detalle' => sprintf('suma alícuotas %.2f ≠ imp_iva %.2f', $sumaIva, (float) $f->imp_iva)];
+                        'detalle' => sprintf('suma alícuotas %.2f ≠ imp_iva %.2f (diff %.2f > $0.10)',
+                            $sumaIva, (float) $f->imp_iva, abs($sumaIva - (float) $f->imp_iva))];
                 }
             }
         }

@@ -37,10 +37,12 @@ export function FacturaCompraManualPage() {
     queryKey: ['fc-tipos-compra'],
     queryFn: () => api.get('/api/erp/tipos-comprobante?clase=COMPRA'),
   });
-  const { data: periodos } = useQuery<{ data: Periodo[] }>({
-    queryKey: ['fc-periodos'],
+  // El endpoint devuelve { data: Periodo | null } (un solo período abierto).
+  const { data: periodoResp } = useQuery<{ data: Periodo | null }>({
+    queryKey: ['fc-periodo-abierto'],
     queryFn: () => api.get('/api/erp/periodos/abierto'),
   });
+  const periodoAbierto = periodoResp?.data ?? null;
   // Catálogos del facturas-venta tienen jurisdicciones y clientes con CC.
   const { data: catsVenta } = useQuery<{ clientes: Cliente[]; jurisdicciones?: Jurisdiccion[] }>({
     queryKey: ['fc-catalogos-clientes'],
@@ -83,11 +85,10 @@ export function FacturaCompraManualPage() {
       const fa = tipos.data.find((t) => t.codigo_interno === 'FA');
       setForm((f) => ({ ...f, tipo_comprobante_id: fa?.id ?? tipos.data[0].id }));
     }
-    if (!form.periodo_id && periodos?.data && periodos.data.length > 0) {
-      const p = periodos.data[0];
-      setForm((f) => ({ ...f, periodo_id: p.id }));
+    if (!form.periodo_id && periodoAbierto) {
+      setForm((f) => ({ ...f, periodo_id: periodoAbierto.id }));
     }
-  }, [tipos, periodos, form.tipo_comprobante_id, form.periodo_id]);
+  }, [tipos, periodoAbierto, form.tipo_comprobante_id, form.periodo_id]);
 
   // Auto-calcular total.
   useEffect(() => {
@@ -204,9 +205,11 @@ export function FacturaCompraManualPage() {
               onChange={(e) => setForm({ ...form, fecha_imputacion: e.target.value })} />
             <SelectField label="Período *" value={String(form.periodo_id)}
               onChange={(e) => setForm({ ...form, periodo_id: +e.target.value })}
-              options={(periodos?.data ?? []).map((p) => ({
-                value: String(p.id), label: `${MESES[p.mes]} ${p.anio} (${p.estado})`,
-              }))} placeholder="—" />
+              options={periodoAbierto
+                ? [{ value: String(periodoAbierto.id),
+                     label: `${MESES[periodoAbierto.mes]} ${periodoAbierto.anio} (${periodoAbierto.estado})` }]
+                : []}
+              placeholder="—" />
           </div>
 
           <div className="border-t border-line pt-3">

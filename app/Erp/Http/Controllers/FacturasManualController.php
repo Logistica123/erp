@@ -312,6 +312,9 @@ class FacturasManualController
             'numero' => $data['numero'],
             'cae' => $data['cae'] ?? null,
             'fecha_emision' => $data['fecha_emision'],
+            // v1.33 — mismo fix que el v1.21 hizo en el importer:
+            // `fecha_recepcion` es NOT NULL sin default. Default a fecha_emision.
+            'fecha_recepcion' => $data['fecha_recepcion'] ?? $data['fecha_emision'],
             'fecha_imputacion' => $data['fecha_imputacion'],
             'periodo_id' => $data['periodo_id'],
             'imputacion_diferida' => substr($data['fecha_emision'], 0, 7) !== substr($data['fecha_imputacion'], 0, 7) ? 1 : 0,

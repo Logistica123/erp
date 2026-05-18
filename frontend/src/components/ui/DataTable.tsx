@@ -216,14 +216,17 @@ export function fmtMoney(n: number | string | null | undefined): string {
 
 export function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
-  // v1.36 — bug clásico de timezone: `new Date('2026-01-02')` se parsea como
-  // UTC 00:00, y en Argentina (UTC-3) se renderiza como el día anterior 21:00.
-  // Si el string es solo YYYY-MM-DD (sin hora/zone), lo tratamos como fecha
-  // LOCAL armando el Date con (año, mes-1, día). Si trae hora/zone (ISO 8601
-  // completo, ej "2026-01-02T15:30:00Z"), respetamos el parseo normal.
-  const soloFecha = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const date = soloFecha
-    ? new Date(Number(soloFecha[1]), Number(soloFecha[2]) - 1, Number(soloFecha[3]))
+  // v1.36 — bug clásico de timezone. `new Date('2026-01-02')` o
+  // `new Date('2026-01-02T00:00:00.000000Z')` se parsea como UTC 00:00,
+  // y en Argentina (UTC-3) se renderiza como el día anterior 21:00.
+  //
+  // Eloquent con cast `'date'` devuelve ISO 8601 con sufijo de timezone Z
+  // y hora 00:00, así que extraemos solo la parte YYYY-MM-DD del prefijo
+  // y armamos la Date con constructor local (año, mes-1, día) — independiente
+  // del timezone del browser.
+  const prefijo = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const date = prefijo
+    ? new Date(Number(prefijo[1]), Number(prefijo[2]) - 1, Number(prefijo[3]))
     : new Date(d);
   if (Number.isNaN(date.getTime())) return d;
   return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });

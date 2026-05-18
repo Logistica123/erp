@@ -280,8 +280,13 @@ class LibroIvaComprasImportService
     }
 
     /** Tomar facturas previamente marcadas como no_tomada en un período X. */
-    public function tomarFacturas(array $facturaIds, int $periodoId, User $usuario, int $empresaId = 1): int
-    {
+    public function tomarFacturas(
+        array $facturaIds,
+        int $periodoId,
+        User $usuario,
+        int $empresaId = 1,
+        ?string $periodoTrabajadoTexto = null,
+    ): int {
         $periodo = DB::table('erp_periodos')->where('id', $periodoId)->first();
         if (! $periodo) throw new DomainException('PERIODO_NO_ENCONTRADO');
 
@@ -297,17 +302,28 @@ class LibroIvaComprasImportService
                 Carbon::create($periodo->anio, $periodo->mes, 1)->toDateString(),
                 $usuario, $empresaId
             );
-            $f->update([
+            $updateFields = [
                 'no_tomada' => 0,
                 'fecha_imputacion' => $imp['fecha_imputacion'],
                 'periodo_id' => $imp['periodo_id'],
                 'imputacion_diferida' => $imp['imputacion_diferida'],
-            ]);
+            ];
+            // v1.27 — si vino periodo_trabajado_texto en la request, lo seteamos
+            // en la misma operación (D-26-10: "tomar + asignar período").
+            if ($periodoTrabajadoTexto !== null && $periodoTrabajadoTexto !== '') {
+                $updateFields['periodo_trabajado_texto'] = $periodoTrabajadoTexto;
+            }
+            $f->update($updateFields);
             // Generar asiento si no tiene.
             if (! $f->asiento_id) {
                 $this->contabilizador->contabilizarCompra($f->id, $empresaId, $usuario->id);
             }
             $tomadas++;
+        }
+
+        // v1.27 — invalidar cache del dropdown de períodos trabajados.
+        if ($periodoTrabajadoTexto !== null) {
+            \Illuminate\Support\Facades\Cache::forget("facturas_compra.periodos_trabajados.{$empresaId}");
         }
 
         $this->audit->logEvento(

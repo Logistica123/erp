@@ -272,6 +272,8 @@ class LibroIvaComprasImportController
             'factura_ids' => ['required', 'array', 'min:1'],
             'factura_ids.*' => ['integer'],
             'periodo_id' => ['required', 'integer', 'exists:erp_periodos,id'],
+            // v1.27 — opcional: setear el período trabajado en la misma operación.
+            'periodo_trabajado_texto' => ['nullable', 'string', 'max:20', 'regex:/^(|\d{4}-\d{2}(-Q[12])?)$/'],
         ]);
         try {
             $tomadas = $this->svc->tomarFacturas(
@@ -279,6 +281,7 @@ class LibroIvaComprasImportController
                 (int) $data['periodo_id'],
                 $request->user(),
                 (int) ($request->header('X-Empresa-Id') ?: 1),
+                $data['periodo_trabajado_texto'] ?? null,
             );
             return response()->json(['ok' => true, 'data' => ['tomadas' => $tomadas]]);
         } catch (DomainException $e) {

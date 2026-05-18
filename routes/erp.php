@@ -402,6 +402,13 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.livc.export-comparar');
 
         // Facturación (venta)
+        // v1.27 — edición de período trabajado de facturas de venta.
+        Route::get('/facturas-venta/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'periodosTrabajadosDistinct'])
+            ->name('erp.facturas-venta.periodos-trabajados');
+        Route::patch('/facturas-venta/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodosTrabajadosBulk'])
+            ->name('erp.facturas-venta.periodos-trabajados.bulk');
+        Route::patch('/facturas-venta/{id}/periodo-trabajado', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodoTrabajado'])
+            ->whereNumber('id')->name('erp.facturas-venta.periodo-trabajado');
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])
             ->name('erp.fv.catalogos');
         Route::get('/facturas-venta', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'index'])
@@ -488,6 +495,13 @@ Route::prefix('api/erp')->group(function () {
         // v1.22 §13 — borrado masivo de facturas de compra (super_admin).
         Route::post('/facturas-compra/borrar-masivo', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'borrarMasivo'])
             ->name('erp.facturas-compra.borrar-masivo');
+        // v1.27 — edición de período trabajado (distinct + individual + bulk).
+        Route::get('/facturas-compra/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'periodosTrabajadosDistinct'])
+            ->name('erp.facturas-compra.periodos-trabajados');
+        Route::patch('/facturas-compra/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'patchPeriodosTrabajadosBulk'])
+            ->name('erp.facturas-compra.periodos-trabajados.bulk');
+        Route::patch('/facturas-compra/{id}/periodo-trabajado', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'patchPeriodoTrabajado'])
+            ->whereNumber('id')->name('erp.facturas-compra.periodo-trabajado');
         Route::get('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'index'])
             ->name('erp.fc.index');
         Route::post('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'store'])

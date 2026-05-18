@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2 } from 'lucide-react';
+import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -131,12 +132,22 @@ export function FacturasCompraPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [borrarMasivoOpen, setBorrarMasivoOpen] = useState(false);
 
-  // v1.22 §13 — chequeo de permiso `compras.facturas.borrar_masivo`.
+  // v1.22 §13 + v1.27 — chequeo de permisos.
   const { data: misPermisos } = useApi<Array<{ codigo: string; sensible: boolean }>>(
     ['mi-permisos'],
     '/api/erp/mi-permisos',
   );
   const puedeBorrarMasivo = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.borrar_masivo');
+  const puedeEditarPeriodo = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.editar');
+
+  // v1.27 — dropdown del filtro: períodos distinct cargados de la BD.
+  const { data: periodosDistinct } = useApi<string[]>(
+    ['facturas-compra-periodos-trabajados'],
+    '/api/erp/facturas-compra/periodos-trabajados',
+  );
+
+  const [editarPeriodoOpen, setEditarPeriodoOpen] = useState(false);
+  const usaSelector = (periodosDistinct?.length ?? 0) > 0;
 
   const filas = data?.data ?? [];
   const todoSeleccionado = filas.length > 0 && filas.every((r) => selectedIds.has(r.id));
@@ -157,7 +168,7 @@ export function FacturasCompraPage() {
   const seleccionadasObj = filas.filter((r) => selectedIds.has(r.id));
 
   const columns: Column<FacturaCompra>[] = [
-    ...(puedeBorrarMasivo ? [{
+    ...(puedeBorrarMasivo || puedeEditarPeriodo ? [{
       key: 'select' as const, width: '40px', align: 'center' as const,
       header: (
         <input
@@ -224,9 +235,14 @@ export function FacturasCompraPage() {
         ? <Badge variant="warning">NO</Badge>
         : <Badge variant="success">SÍ</Badge> },
     { key: 'periodo_trabajado_texto', header: 'P. trabaj.', width: '110px',
-      render: (r) => r.periodo_trabajado_texto
-        ? <code className="text-[11px]">{r.periodo_trabajado_texto}</code>
-        : <span className="text-ink-muted">—</span> },
+      render: (r) => (
+        <PeriodoTrabajadoCell
+          value={r.periodo_trabajado_texto}
+          editable={puedeEditarPeriodo}
+          endpointUrl={`/api/erp/facturas-compra/${r.id}/periodo-trabajado`}
+          invalidateKeys={[['facturas-compra'], ['facturas-compra-periodos-trabajados']]}
+        />
+      ) },
     { key: 'jurisdiccion_codigo', header: 'Juris.', width: '70px',
       render: (r) => r.jurisdiccion_codigo
         ? <code className="text-[11px]">{r.jurisdiccion_codigo}</code>
@@ -304,10 +320,21 @@ export function FacturasCompraPage() {
               onChange={(e) => setTipoGasto(e.target.value)}
               placeholder="Combustible…"
               containerClassName="w-[170px]" />
-            <Field label="Período trabajado" value={periodoTrab}
-              onChange={(e) => setPeriodoTrab(e.target.value)}
-              placeholder="2026-03"
-              containerClassName="w-[160px]" />
+            {/* v1.27 — dropdown si hay períodos cargados; input texto libre como fallback. */}
+            {usaSelector ? (
+              <SelectField label="Período trabajado" value={periodoTrab} placeholder="Todos"
+                onChange={(e) => setPeriodoTrab(e.target.value)}
+                containerClassName="w-[180px]"
+                options={[
+                  { value: '__VACIOS__', label: '— Vacíos —' },
+                  ...(periodosDistinct ?? []).map((p) => ({ value: p, label: p })),
+                ]} />
+            ) : (
+              <Field label="Período trabajado" value={periodoTrab}
+                onChange={(e) => setPeriodoTrab(e.target.value)}
+                placeholder="2026-03"
+                containerClassName="w-[160px]" />
+            )}
             <Field label="Jurisdicción" value={juris}
               onChange={(e) => setJuris(e.target.value)}
               placeholder="901"
@@ -315,8 +342,8 @@ export function FacturasCompraPage() {
           </div>
           {error && <FormError error={errorMessage(error)} />}
 
-          {/* v1.22 §13 — barra de acción cuando hay selección. */}
-          {puedeBorrarMasivo && selectedIds.size > 0 && (
+          {/* v1.22 §13 + v1.27 — barra de acción cuando hay selección. */}
+          {(puedeBorrarMasivo || puedeEditarPeriodo) && selectedIds.size > 0 && (
             <div className="flex items-center justify-between border border-warning/40 bg-warning-bg/30 rounded-md px-3 py-2 text-[12px]">
               <span className="text-warning font-medium">
                 {selectedIds.size} factura{selectedIds.size === 1 ? '' : 's'} seleccionada{selectedIds.size === 1 ? '' : 's'}
@@ -325,9 +352,16 @@ export function FacturasCompraPage() {
                 <Button size="sm" variant="outline" onClick={() => setSelectedIds(new Set())}>
                   Limpiar
                 </Button>
-                <Button size="sm" variant="danger" onClick={() => setBorrarMasivoOpen(true)}>
-                  <Trash2 className="w-3 h-3" /> Borrar {selectedIds.size}
-                </Button>
+                {puedeEditarPeriodo && (
+                  <Button size="sm" variant="primary" onClick={() => setEditarPeriodoOpen(true)}>
+                    <CalendarRange className="w-3 h-3" /> Asignar período
+                  </Button>
+                )}
+                {puedeBorrarMasivo && (
+                  <Button size="sm" variant="danger" onClick={() => setBorrarMasivoOpen(true)}>
+                    <Trash2 className="w-3 h-3" /> Borrar {selectedIds.size}
+                  </Button>
+                )}
               </div>
             </div>
           )}
@@ -348,9 +382,19 @@ export function FacturasCompraPage() {
           onDone={() => { setSelectedIds(new Set()); setBorrarMasivoOpen(false); }}
         />
       )}
+      {editarPeriodoOpen && (
+        <EditarPeriodoBulkModal
+          facturas={seleccionadasObj}
+          endpointUrl="/api/erp/facturas-compra/periodos-trabajados"
+          invalidateKeys={[['facturas-compra'], ['facturas-compra-periodos-trabajados']]}
+          onClose={() => setEditarPeriodoOpen(false)}
+          onDone={() => { setSelectedIds(new Set()); setEditarPeriodoOpen(false); }}
+        />
+      )}
     </div>
   );
 }
+
 
 function BorrarMasivoModal({
   facturas, onClose, onDone,

@@ -7,10 +7,12 @@ use App\Erp\Services\CobroFacturaService;
 use App\Erp\Services\EmisorFacturaService;
 use App\Erp\Services\FacturaVentaService;
 use App\Erp\Services\FceService;
+use App\Erp\Support\AuditLogger;
 use App\Http\Controllers\Controller;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -24,6 +26,7 @@ class FacturasVentaController extends Controller
         private CobroFacturaService $cobrador,
         private FacturaVentaService $service,
         private FceService $fce,
+        private AuditLogger $audit,
     ) {}
 
     public function fceAceptada(Request $request, int $id): JsonResponse
@@ -233,6 +236,8 @@ class FacturasVentaController extends Controller
                 'f.imp_neto_gravado', 'f.imp_iva', 'f.imp_total', 'f.origen', 'f.estado',
                 'f.verificada_arca', // v1.18 U6
                 'f.es_fce', 'f.created_at',
+                // v1.27 — exponer período trabajado en el listado
+                'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo',
                 'tc.codigo_interno as tipo_codigo', 'tc.nombre as tipo_nombre', 'tc.letra',
                 'tc.clase as tipo_clase', 'tc.signo as tipo_signo',
                 'pv.numero as pto_vta',
@@ -252,6 +257,17 @@ class FacturasVentaController extends Controller
         }
         if ($origen = $request->query('origen')) {
             $q->where('f.origen', $origen);
+        }
+        // v1.27 — filtro por período trabajado (acepta __VACIOS__).
+        if ($periodoTrab = $request->query('periodo_trabajado')) {
+            if ($periodoTrab === '__VACIOS__') {
+                $q->where(function ($sub) {
+                    $sub->whereNull('f.periodo_trabajado_texto')
+                        ->orWhere('f.periodo_trabajado_texto', '');
+                });
+            } else {
+                $q->where('f.periodo_trabajado_texto', $periodoTrab);
+            }
         }
 
         $data = $q->orderByDesc('f.fecha_emision')->orderByDesc('f.id')->limit(200)->get();
@@ -317,5 +333,109 @@ class FacturasVentaController extends Controller
             'iva' => $iva,
             'asiento_movimientos' => $asientoMovs,
         ]);
+    }
+
+    /**
+     * v1.27 — Listado de períodos trabajados distinct para el dropdown del filtro.
+     */
+    public function periodosTrabajadosDistinct(Request $request): JsonResponse
+    {
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $rows = Cache::remember(
+            "facturas_venta.periodos_trabajados.{$empresaId}",
+            300,
+            fn () => DB::table('erp_facturas_venta')
+                ->where('empresa_id', $empresaId)
+                ->whereNotNull('periodo_trabajado_texto')
+                ->where('periodo_trabajado_texto', '!=', '')
+                ->whereNull('deleted_at')
+                ->distinct()
+                ->orderByDesc('periodo_trabajado_texto')
+                ->pluck('periodo_trabajado_texto')
+                ->all(),
+        );
+        return response()->json(['ok' => true, 'data' => $rows]);
+    }
+
+    /**
+     * v1.27 — PATCH período trabajado individual de una factura de venta.
+     */
+    public function patchPeriodoTrabajado(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'ventas.facturas.editar');
+
+        $data = $request->validate([
+            'periodo_trabajado_texto' => ['nullable', 'string', 'max:20', 'regex:/^(|\d{4}-\d{2}(-Q[12])?)$/'],
+        ]);
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $factura = FacturaVenta::where('empresa_id', $empresaId)->findOrFail($id);
+
+        $old = $factura->periodo_trabajado_texto;
+        $new = $data['periodo_trabajado_texto'] ?: null;
+        $factura->update(['periodo_trabajado_texto' => $new]);
+
+        $this->audit->log('periodo_trabajado_editado', $factura,
+            ['periodo_trabajado_texto' => $old],
+            ['periodo_trabajado_texto' => $new],
+            sprintf('Factura venta #%d: período trabajado %s → %s', $id, $old ?? 'NULL', $new ?? 'NULL'),
+        );
+        Cache::forget("facturas_venta.periodos_trabajados.{$empresaId}");
+
+        return response()->json(['ok' => true, 'data' => $factura->fresh()]);
+    }
+
+    /**
+     * v1.27 — PATCH período trabajado masivo de facturas de venta.
+     */
+    public function patchPeriodosTrabajadosBulk(Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'ventas.facturas.editar');
+
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:500'],
+            'ids.*' => ['integer'],
+            'periodo_trabajado_texto' => ['nullable', 'string', 'max:20', 'regex:/^(|\d{4}-\d{2}(-Q[12])?)$/'],
+        ]);
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $new = $data['periodo_trabajado_texto'] ?: null;
+
+        $facturas = FacturaVenta::where('empresa_id', $empresaId)
+            ->whereIn('id', $data['ids'])->get(['id', 'periodo_trabajado_texto']);
+
+        if ($facturas->isEmpty()) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'FACTURAS_NO_ENCONTRADAS',
+                'message' => 'Ningún ID coincide con facturas de la empresa.',
+            ]], 422);
+        }
+
+        $snapshot = $facturas->mapWithKeys(fn ($f) => [$f->id => $f->periodo_trabajado_texto])->all();
+
+        DB::transaction(function () use ($facturas, $new, $empresaId) {
+            FacturaVenta::where('empresa_id', $empresaId)
+                ->whereIn('id', $facturas->pluck('id')->all())
+                ->update(['periodo_trabajado_texto' => $new]);
+        });
+
+        $this->audit->log('periodo_trabajado_editado_masivo', $facturas->first(),
+            ['old_values' => $snapshot],
+            ['new_value' => $new, 'count' => $facturas->count()],
+            sprintf('Edición masiva de período trabajado en %d facturas de venta → %s',
+                $facturas->count(), $new ?? 'NULL'),
+        );
+        Cache::forget("facturas_venta.periodos_trabajados.{$empresaId}");
+
+        return response()->json(['ok' => true, 'data' => ['updated' => $facturas->count()]]);
+    }
+
+    private function mustHave(Request $request, string $codigo): void
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso($codigo)) {
+            abort(response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => "Falta permiso {$codigo}",
+            ]], 403));
+        }
     }
 }

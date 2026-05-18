@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
-import { CheckSquare, Square, Wand2, ScrollText } from 'lucide-react';
+import { CheckSquare, Square, Wand2, ScrollText, CalendarRange } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { SelectField, FormError } from '@/components/ui/Field';
+import { Field, SelectField, FormError } from '@/components/ui/Field';
 import { fmtMoney, fmtDate } from '@/components/ui/DataTable';
 import { api, ApiError } from '@/lib/api';
 import { useApi, useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
@@ -40,6 +40,9 @@ const MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 export function LibroIvaComprasNoTomadasPage() {
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [periodoTarget, setPeriodoTarget] = useState('');
+  // v1.27 — período trabajado opcional al tomar (asigna en la misma operación).
+  const [periodoTrabajado, setPeriodoTrabajado] = useState('');
+  const [periodoTrabajadoErr, setPeriodoTrabajadoErr] = useState<string | null>(null);
 
   const toast = useToast();
   const invalidate = useInvalidate(['libro-iva-compras-no-tomadas']);
@@ -64,13 +67,17 @@ export function LibroIvaComprasNoTomadasPage() {
     [periodos]
   );
 
-  const tomar = useApiMutation<{ tomadas: number }, { factura_ids: number[]; periodo_id: number }>(
+  const tomar = useApiMutation<{ tomadas: number }, { factura_ids: number[]; periodo_id: number; periodo_trabajado_texto?: string }>(
     (vars) => api.post('/api/erp/libro-iva-compras/no-tomadas/tomar', vars),
     {
       onSuccess: (r) => {
+        const conPT = periodoTrabajado.trim() !== '';
         toast.success(`${r.tomadas} facturas reactivadas`,
-          'Se generaron los asientos correspondientes en el período seleccionado.');
+          conPT
+            ? `Asientos generados + período trabajado "${periodoTrabajado.trim()}" asignado.`
+            : 'Se generaron los asientos correspondientes en el período seleccionado.');
         setSeleccion(new Set());
+        setPeriodoTrabajado('');
         invalidate();
       },
       onError: (e) => {
@@ -94,7 +101,18 @@ export function LibroIvaComprasNoTomadasPage() {
 
   const ejecutar = () => {
     if (seleccion.size === 0 || !periodoTarget) return;
-    tomar.mutate({ factura_ids: [...seleccion], periodo_id: Number(periodoTarget) });
+    // v1.27 — validar formato del período trabajado si se completó.
+    const pt = periodoTrabajado.trim();
+    if (pt !== '' && !/^\d{4}-\d{2}(-Q[12])?$/.test(pt)) {
+      setPeriodoTrabajadoErr('Formato: YYYY-MM o YYYY-MM-Q1/Q2');
+      return;
+    }
+    setPeriodoTrabajadoErr(null);
+    tomar.mutate({
+      factura_ids: [...seleccion],
+      periodo_id: Number(periodoTarget),
+      ...(pt ? { periodo_trabajado_texto: pt } : {}),
+    });
   };
 
   const totalNeto = filas?.filter((f) => seleccion.has(f.id))
@@ -130,11 +148,21 @@ export function LibroIvaComprasNoTomadasPage() {
               placeholder="Elegí un período" options={opciones}
               onChange={(e) => setPeriodoTarget(e.target.value)}
               containerClassName="w-[260px]" />
+            {/* v1.27 — campo opcional: asignar período trabajado en la misma operación.
+                D-26-10: caso "tomar facturas viejas con período del mes actual". */}
+            <Field label="Período trabajado (opcional)" value={periodoTrabajado}
+              onChange={(e) => { setPeriodoTrabajado(e.target.value); if (periodoTrabajadoErr) setPeriodoTrabajadoErr(null); }}
+              placeholder="2026-05"
+              containerClassName="w-[160px]"
+              error={periodoTrabajadoErr ?? undefined} />
             <Button variant="primary" size="sm"
               disabled={seleccion.size === 0 || !periodoTarget || tomar.isPending}
               onClick={ejecutar}>
-              <Wand2 className="w-3 h-3" />
-              {tomar.isPending ? 'Tomando…' : `Tomar ${seleccion.size} factura${seleccion.size === 1 ? '' : 's'}`}
+              {periodoTrabajado.trim() !== '' ? <CalendarRange className="w-3 h-3" /> : <Wand2 className="w-3 h-3" />}
+              {tomar.isPending ? 'Tomando…' :
+                periodoTrabajado.trim() !== ''
+                  ? `Tomar ${seleccion.size} + asignar "${periodoTrabajado.trim()}"`
+                  : `Tomar ${seleccion.size} factura${seleccion.size === 1 ? '' : 's'}`}
             </Button>
             {seleccion.size > 0 && (
               <div className="text-[11.5px] text-ink-muted ml-auto">

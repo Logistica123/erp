@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, FileText, ExternalLink, Plus, DollarSign } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Plus, DollarSign, CalendarRange } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -7,7 +7,9 @@ import { Modal } from '@/components/ui/Modal';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useApi } from '@/hooks/useApi';
 import { Link, useSearchParams } from 'react-router-dom';
+import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
 
 type Factura = {
   id: number;
@@ -35,6 +37,9 @@ type Factura = {
   asiento_id: number | null;
   asiento_numero: number | null;
   asiento_estado: string | null;
+  // v1.27 — exposed by backend listing
+  periodo_trabajado_texto?: string | null;
+  jurisdiccion_codigo?: string | null;
 };
 
 type Resp = { data: Factura[] };
@@ -89,6 +94,7 @@ export function FacturacionPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const estado = searchParams.get('estado') ?? '';
   const origen = searchParams.get('origen') ?? '';
+  const periodoTrab = searchParams.get('periodo_trabajado') ?? '';
   const setEstado = (v: string) => {
     const p = new URLSearchParams(searchParams);
     if (v) p.set('estado', v); else p.delete('estado');
@@ -99,20 +105,52 @@ export function FacturacionPage() {
     if (v) p.set('origen', v); else p.delete('origen');
     setSearchParams(p, { replace: true });
   };
+  const setPeriodoTrab = (v: string) => {
+    const p = new URLSearchParams(searchParams);
+    if (v) p.set('periodo_trabajado', v); else p.delete('periodo_trabajado');
+    setSearchParams(p, { replace: true });
+  };
   const [cobroFactura, setCobroFactura] = useState<Factura | null>(null);
+  // v1.27 — bulk select + edición.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [editarPeriodoOpen, setEditarPeriodoOpen] = useState(false);
+
+  // v1.27 — permisos + lista distinct.
+  const { data: misPermisos } = useApi<Array<{ codigo: string }>>(
+    ['mi-permisos'],
+    '/api/erp/mi-permisos',
+  );
+  const puedeEditarPeriodo = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.editar');
+  const { data: periodosDistinct } = useApi<string[]>(
+    ['facturas-venta-periodos-trabajados'],
+    '/api/erp/facturas-venta/periodos-trabajados',
+  );
+  const usaSelectorPeriodo = (periodosDistinct?.length ?? 0) > 0;
 
   const { data, isLoading, error } = useQuery<Resp>({
-    queryKey: ['facturas-venta', { estado, origen }],
+    queryKey: ['facturas-venta', { estado, origen, periodoTrab }],
     queryFn: () => {
       const qs = new URLSearchParams();
       if (estado) qs.set('estado', estado);
       if (origen) qs.set('origen', origen);
+      if (periodoTrab) qs.set('periodo_trabajado', periodoTrab);
       const suf = qs.toString() ? `?${qs.toString()}` : '';
       return api.get<Resp>(`/api/erp/facturas-venta${suf}`);
     },
   });
 
   const facturas = data?.data ?? [];
+  const todoSeleccionado = facturas.length > 0 && facturas.every((f) => selectedIds.has(f.id));
+  const toggleFila = (id: number) => setSelectedIds((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const toggleTodos = () => {
+    if (todoSeleccionado) setSelectedIds(new Set());
+    else setSelectedIds(new Set(facturas.map((f) => f.id)));
+  };
+  const seleccionadas = facturas.filter((f) => selectedIds.has(f.id));
   const totales = facturas.reduce(
     (acc, f) => {
       const signo = f.tipo_signo ?? 1;
@@ -203,6 +241,29 @@ export function FacturacionPage() {
                 <option value="PREPARADA">PREPARADA</option>
                 <option value="EMISION_FALLIDA">EMISION_FALLIDA</option>
               </select>
+              {/* v1.27 — filtro período trabajado. Dropdown si hay valores cargados. */}
+              {usaSelectorPeriodo ? (
+                <select
+                  value={periodoTrab}
+                  onChange={(e) => setPeriodoTrab(e.target.value)}
+                  className="text-sm border rounded-md px-2 py-1 bg-white"
+                  title="Período trabajado"
+                >
+                  <option value="">Todos los períodos</option>
+                  <option value="__VACIOS__">— Vacíos —</option>
+                  {(periodosDistinct ?? []).map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={periodoTrab}
+                  onChange={(e) => setPeriodoTrab(e.target.value)}
+                  placeholder="P. trabaj."
+                  className="text-sm border rounded-md px-2 py-1 bg-white w-[120px]"
+                />
+              )}
               <select
                 value={origen}
                 onChange={(e) => setOrigen(e.target.value)}
@@ -218,6 +279,22 @@ export function FacturacionPage() {
           </div>
         </CardHeader>
         <CardBody className="p-0">
+          {/* v1.27 — barra de acción con selección. */}
+          {puedeEditarPeriodo && selectedIds.size > 0 && (
+            <div className="flex items-center justify-between border-b border-warning/40 bg-warning-bg/30 px-4 py-2 text-[12px]">
+              <span className="text-warning font-medium">
+                {selectedIds.size} factura{selectedIds.size === 1 ? '' : 's'} seleccionada{selectedIds.size === 1 ? '' : 's'}
+              </span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => setSelectedIds(new Set())}>
+                  Limpiar
+                </Button>
+                <Button size="sm" variant="primary" onClick={() => setEditarPeriodoOpen(true)}>
+                  <CalendarRange className="w-3 h-3" /> Asignar período
+                </Button>
+              </div>
+            </div>
+          )}
           {isLoading ? (
             <div className="p-8 flex items-center justify-center gap-2 text-gray-500 text-sm">
               <Loader2 className="w-4 h-4 animate-spin" /> Cargando...
@@ -231,6 +308,11 @@ export function FacturacionPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 text-left text-[11px] font-semibold uppercase text-gray-500 tracking-wider">
                   <tr>
+                    {puedeEditarPeriodo && (
+                      <th className="px-2 py-3 w-[40px]">
+                        <input type="checkbox" checked={todoSeleccionado} onChange={toggleTodos} />
+                      </th>
+                    )}
                     <th className="px-4 py-3">Fecha</th>
                     <th className="px-4 py-3">Comprobante</th>
                     <th className="px-4 py-3">Cliente</th>
@@ -238,6 +320,7 @@ export function FacturacionPage() {
                     <th className="px-4 py-3 text-right">Neto</th>
                     <th className="px-4 py-3 text-right">IVA</th>
                     <th className="px-4 py-3 text-right">Total</th>
+                    <th className="px-4 py-3">P. trabaj.</th>
                     <th className="px-4 py-3">Origen</th>
                     <th className="px-4 py-3">Estado</th>
                     <th className="px-4 py-3">Asiento</th>
@@ -247,6 +330,15 @@ export function FacturacionPage() {
                 <tbody className="divide-y divide-gray-100">
                   {facturas.map((f) => (
                     <tr key={f.id} className="hover:bg-gray-50">
+                      {puedeEditarPeriodo && (
+                        <td className="px-2 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(f.id)}
+                            onChange={() => toggleFila(f.id)}
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                         {f.fecha_emision?.slice(0, 10)}
                       </td>
@@ -270,6 +362,14 @@ export function FacturacionPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-gray-900">
                         {fmtMoney(parseFloat(f.imp_total))}
+                      </td>
+                      <td className="px-4 py-3 text-[11px]">
+                        <PeriodoTrabajadoCell
+                          value={f.periodo_trabajado_texto}
+                          editable={puedeEditarPeriodo}
+                          endpointUrl={`/api/erp/facturas-venta/${f.id}/periodo-trabajado`}
+                          invalidateKeys={[['facturas-venta'], ['facturas-venta-periodos-trabajados']]}
+                        />
                       </td>
                       <td className="px-4 py-3">
                         <div className="inline-flex items-center gap-1">
@@ -319,6 +419,15 @@ export function FacturacionPage() {
           qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
         }}
       />
+      {editarPeriodoOpen && (
+        <EditarPeriodoBulkModal
+          facturas={seleccionadas}
+          endpointUrl="/api/erp/facturas-venta/periodos-trabajados"
+          invalidateKeys={[['facturas-venta'], ['facturas-venta-periodos-trabajados']]}
+          onClose={() => setEditarPeriodoOpen(false)}
+          onDone={() => { setSelectedIds(new Set()); setEditarPeriodoOpen(false); }}
+        />
+      )}
     </div>
   );
 }

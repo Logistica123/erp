@@ -37,7 +37,10 @@ type FacturaCompra = {
   proveedor_cuit: string | null;
   cuit_emisor: string;
   razon_social_emisor: string;
-  moneda: string;
+  // El listado devuelve `moneda` como string (alias del JOIN, ej "ARS").
+  // El detalle (show) devuelve `moneda` como objeto Eloquent (relación).
+  // monedaStr() normaliza ambos casos al código del símbolo.
+  moneda: string | { codigo: string; simbolo?: string; nombre?: string } | null;
   asiento_id: number | null;
   asiento_numero: number | null;
   // Addendum v1.13 + v1.14
@@ -51,6 +54,13 @@ type FacturaCompra = {
 
 const ESTADOS = ['RECIBIDA', 'CONTROLADA', 'OBSERVADA', 'PAGO_PARCIAL', 'PAGADA', 'ANULADA_POR_NC', 'RECHAZADA'];
 const ORIGENES = ['MANUAL', 'LIBRO_IVA_IMPORT', 'MIS_COMPROBANTES', 'DISTRIAPP'];
+
+/** Normaliza el campo `moneda` que viene como string (listado) o como objeto Eloquent (detalle). */
+function monedaStr(m: FacturaCompra['moneda']): string {
+  if (!m) return '';
+  if (typeof m === 'string') return m;
+  return m.codigo ?? '';
+}
 
 function badgeFor(estado: string) {
   switch (estado) {
@@ -193,7 +203,7 @@ export function FacturasCompraPage() {
         </div>
       ) },
     { key: 'imp_total', header: 'Total', align: 'right', width: '120px',
-      render: (r) => `${r.moneda} ${fmtMoney(r.imp_total)}` },
+      render: (r) => `${monedaStr(r.moneda)} ${fmtMoney(r.imp_total)}` },
     { key: 'origen', header: 'Origen', width: '110px',
       render: (r) => {
         const o = (r as Record<string, unknown>)['origen'] as string;
@@ -485,7 +495,7 @@ function ControlarConfirm({ factura, onClose }: { factura: FacturaCompra; onClos
         <>
           ¿Marcar como CONTROLADA la factura <strong>{factura.letra} {factura.tipo_codigo}</strong> de{' '}
           <strong>{factura.razon_social_emisor}</strong> por{' '}
-          <strong>{factura.moneda} {fmtMoney(factura.imp_total)}</strong>?
+          <strong>{monedaStr(factura.moneda)} {fmtMoney(factura.imp_total)}</strong>?
           <br /><br />
           Genera el asiento contable y habilita el pago (RN-31).
         </>
@@ -579,9 +589,9 @@ function DetalleModal({ id, onClose }: { id: number; onClose: () => void }) {
             <Info label="Proveedor" value={f.razon_social_emisor} />
             <Info label="CUIT" value={f.cuit_emisor} />
             <Info label="Estado" value={<Badge variant={badgeFor(f.estado as string)}>{f.estado as string}</Badge>} />
-            <Info label="Neto gravado" value={`${f.moneda} ${fmtMoney(f.imp_neto_gravado)}`} />
-            <Info label="IVA" value={`${f.moneda} ${fmtMoney(f.imp_iva)}`} />
-            <Info label="Total" value={<strong className="text-navy-800">{f.moneda} {fmtMoney(f.imp_total)}</strong>} />
+            <Info label="Neto gravado" value={`${monedaStr(f.moneda)} ${fmtMoney(f.imp_neto_gravado)}`} />
+            <Info label="IVA" value={`${monedaStr(f.moneda)} ${fmtMoney(f.imp_iva)}`} />
+            <Info label="Total" value={<strong className="text-navy-800">{monedaStr(f.moneda)} {fmtMoney(f.imp_total)}</strong>} />
             {/* Addendum v1.14 — período trabajado, jurisdicción y CC */}
             {(f as Record<string, unknown>)['periodo_trabajado_texto'] != null && (
               <Info label="Período trabajado" value={String((f as Record<string, unknown>)['periodo_trabajado_texto'])} />

@@ -162,17 +162,21 @@ class GeneradorF8001ServiceTest extends TestCase
         $f->imp_total          = $this->parseMonto(substr($linea, 104, 15));
         $f->imp_no_gravado     = $this->parseMonto(substr($linea, 119, 15));
         $f->imp_exento         = $this->parseMonto(substr($linea, 134, 15));
-        $f->imp_per_iva        = $this->parseMonto(substr($linea, 149, 15));
-        $f->imp_per_otros_nac  = $this->parseMonto(substr($linea, 164, 15));
-        $f->imp_per_iibb       = $this->parseMonto(substr($linea, 179, 15));
-        $f->imp_per_municipales = $this->parseMonto(substr($linea, 194, 15));
-        $f->imp_internos       = $this->parseMonto(substr($linea, 209, 15));
+        // v1.28 — nombres alineados a las columnas reales de la BD (las
+        // mismas que pobló el v1.24 al expandir erp_facturas_compra).
+        $f->imp_percepciones_iva       = $this->parseMonto(substr($linea, 149, 15));
+        $f->imp_percepciones_otros_nac = $this->parseMonto(substr($linea, 164, 15));
+        $f->imp_percepciones_iibb      = $this->parseMonto(substr($linea, 179, 15));
+        $f->imp_municipales            = $this->parseMonto(substr($linea, 194, 15));
+        $f->imp_internos               = $this->parseMonto(substr($linea, 209, 15));
         // pos 225-227: moneda (siempre PES)
         $f->cotizacion         = ((int) substr($linea, 227, 10)) / 1000000.0;
         // pos 238: cantidad alícuotas (recalculada a partir de las alic adjuntas)
         // pos 239: cod op
         $f->imp_iva            = $this->parseMonto(substr($linea, 239, 15));
-        $f->imp_tributos       = $this->parseMonto(substr($linea, 254, 15));
+        // v1.28 — el generador prefiere `imp_otros_tributos` (v1.24) con
+        // fallback a `imp_tributos` (legacy). Para el roundtrip basta con uno.
+        $f->imp_otros_tributos = $this->parseMonto(substr($linea, 254, 15));
         return $f;
     }
 

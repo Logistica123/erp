@@ -208,14 +208,17 @@ class GeneradorF8001Service
         $impTotal     = $this->moneda((float) $f->imp_total);
         $impNoGravado = $this->moneda((float) ($f->imp_no_gravado ?? 0));
         $impExento    = $this->moneda((float) ($f->imp_exento ?? 0));
-        // Detalle de percepciones: si el modelo no tiene desglose, todos
-        // quedan en 0 (el agregado vive en `imp_percepciones`, que F.8001
-        // no mapea a un único campo).
-        $impPerIva    = $this->moneda((float) ($f->imp_per_iva ?? 0));
-        $impPerOtrosNac = $this->moneda((float) ($f->imp_per_otros_nac ?? 0));
-        $impPerIibb   = $this->moneda((float) ($f->imp_per_iibb ?? 0));
-        $impPerMun    = $this->moneda((float) ($f->imp_per_municipales ?? 0));
-        $impIntern    = $this->moneda((float) ($f->imp_internos ?? 0));
+        // v1.28 — el v1.24 introdujo desglose detallado en erp_facturas_compra
+        // (imp_percepciones_iva, imp_percepciones_iibb, imp_percepciones_otros_nac,
+        // imp_municipales, imp_internos). El generador histórico buscaba nombres
+        // distintos (imp_per_iva, imp_per_iibb...) que no existen → escribía 0 en
+        // todos los campos de percepciones/impuestos → AFIP rebotaba con
+        // "El Importe Total no coincide con la suma de los demás montos".
+        $impPerIva     = $this->moneda((float) ($f->imp_percepciones_iva ?? 0));
+        $impPerOtrosNac = $this->moneda((float) ($f->imp_percepciones_otros_nac ?? 0));
+        $impPerIibb    = $this->moneda((float) ($f->imp_percepciones_iibb ?? 0));
+        $impPerMun     = $this->moneda((float) ($f->imp_municipales ?? 0));
+        $impIntern     = $this->moneda((float) ($f->imp_internos ?? 0));
 
         $moneda = 'PES';
         $cotiz  = $this->numpad((string) (int) round((float) ($f->cotizacion ?? 1.0) * 1000000), 10);
@@ -223,7 +226,9 @@ class GeneradorF8001Service
         $cantAlic = (string) count($alicuotas);
         $codOp = ' ';
         $creditoFiscal = $this->moneda((float) $f->imp_iva);
-        $otrosTrib    = $this->moneda((float) ($f->imp_tributos ?? 0));
+        // v1.28 — usar imp_otros_tributos (campo detallado del v1.24) con
+        // fallback a imp_tributos (agregado legacy) si está poblado.
+        $otrosTrib    = $this->moneda((float) ($f->imp_otros_tributos ?? $f->imp_tributos ?? 0));
         $cuitCorredor = str_repeat('0', 11);
         $razonCorredor = str_repeat(' ', 30);
         $ivaComision = $this->moneda(0.0);
@@ -278,6 +283,8 @@ class GeneradorF8001Service
      */
     public function extraerAlicuotas(object $f): array
     {
+        // Prioridad 1: tabla histórica erp_factura_compra_iva (carga manual
+        // detallada, anterior al v1.24).
         $rows = DB::table('erp_factura_compra_iva as fi')
             ->join('erp_alicuotas_iva as a', 'a.id', '=', 'fi.alicuota_iva_id')
             ->where('fi.factura_id', $f->id)
@@ -292,8 +299,40 @@ class GeneradorF8001Service
             ])->all();
         }
 
-        // Fallback: si la factura tiene IVA discriminado pero sin desglose,
-        // asume 21% sobre el total neto gravado.
+        // v1.28 / Prioridad 2: columnas detalladas del v1.24+v1.25
+        // (imp_iva_21/10_5/27/2_5/5 + imp_neto_gravado_21/10_5/27/2_5/5).
+        // Esto cubre imports del Libro IVA Compras y cargas manuales del v1.25.
+        $alicuotasV124 = [
+            ['codigo_afip' => '0005', 'iva' => (float) ($f->imp_iva_21 ?? 0),
+                'base' => (float) ($f->imp_neto_gravado_21 ?? 0)],
+            ['codigo_afip' => '0003', 'iva' => (float) ($f->imp_iva_10_5 ?? 0),
+                'base' => (float) ($f->imp_neto_gravado_10_5 ?? 0)],
+            ['codigo_afip' => '0004', 'iva' => (float) ($f->imp_iva_27 ?? 0),
+                'base' => (float) ($f->imp_neto_gravado_27 ?? 0)],
+            ['codigo_afip' => '0008', 'iva' => (float) ($f->imp_iva_5 ?? 0),
+                'base' => (float) ($f->imp_neto_gravado_5 ?? 0)],
+            ['codigo_afip' => '0006', 'iva' => (float) ($f->imp_iva_2_5 ?? 0),
+                'base' => (float) ($f->imp_neto_gravado_2_5 ?? 0)],
+        ];
+        $filtrado = array_filter($alicuotasV124, fn ($a) => $a['iva'] > 0.01 || $a['base'] > 0.01);
+        if (! empty($filtrado)) {
+            // Si vino solo IVA detallado pero el neto detallado quedó en 0
+            // (caso import del v1.24 antes del v1.25 que sumó las columnas
+            // imp_neto_gravado_*), derivar la base con la tasa.
+            return array_values(array_map(function ($a) {
+                if ($a['base'] <= 0.01 && $a['iva'] > 0.01) {
+                    $tasa = match ($a['codigo_afip']) {
+                        '0005' => 0.21, '0003' => 0.105, '0004' => 0.27,
+                        '0008' => 0.05, '0006' => 0.025, default => 0.21,
+                    };
+                    $a['base'] = round($a['iva'] / $tasa, 2);
+                }
+                return $a;
+            }, $filtrado));
+        }
+
+        // Prioridad 3 (fallback histórico): IVA y neto agregados sin desglose
+        // — deducir alícuota por ratio. Solo aplica a facturas viejas pre-v1.24.
         $iva = (float) ($f->imp_iva ?? 0);
         $neto = (float) ($f->imp_neto_gravado ?? 0);
         if ($iva <= 0.01 || $neto <= 0.01) {

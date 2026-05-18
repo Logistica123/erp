@@ -188,8 +188,9 @@ export function LibroIvaComprasImportPage() {
         <CardBody className="p-4 space-y-3">
           <div className="text-[12px] text-ink-muted">
             Importa el CSV/Excel del Libro IVA Compras enriquecido por el contador.
-            Las 4 columnas extras (<code>Tomado</code>, <code>Cliente</code>, <code>Observaciones</code>, <code>Tipo</code>)
-            son opcionales. Las facturas con <code>Tomado=NO</code> se importan sin generar asiento ni
+            Las 6 columnas extras (<code>Tomado</code>, <code>Cliente</code>, <code>Observaciones</code>,{' '}
+            <code>Tipo</code>, <code>Período trabajado</code>, <code>Jurisdicción</code>) son opcionales.
+            Las facturas con <code>Tomado=NO</code> se importan sin generar asiento ni
             impactar el Libro IVA del ERP — pueden tomarse después en otro período.
           </div>
 
@@ -498,7 +499,7 @@ function Step1({ archivo, setArchivo, error }: {
     <div className="space-y-3">
       <div className="text-[12px] text-ink-muted">
         Subí el CSV crudo de AFIP "Mis Comprobantes" o el Excel enriquecido por el contador
-        (con las 4 columnas extra). Hasta 50 MB. Encoding ISO-8859-1 / UTF-8.
+        (con las 6 columnas extra). Hasta 50 MB. Encoding ISO-8859-1 / UTF-8.
       </div>
 
       <div className="border-2 border-dashed border-line rounded-lg p-6 text-center space-y-2 bg-surface-row">

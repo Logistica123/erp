@@ -7,7 +7,9 @@ use App\Erp\Services\GeneradorF8001Service;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * ADDENDUM v1.11 — endpoints del generador F.8001 Libro IVA Compras.
@@ -55,20 +57,45 @@ class LibroIvaComprasExportController
         return response()->json(['ok' => true, 'data' => $exp]);
     }
 
-    public function descargarCbte(Request $request, int $id): BinaryFileResponse
+    public function descargarCbte(Request $request, int $id): StreamedResponse|JsonResponse
     {
-        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
-        $exp = LibroIvaComprasExport::where('empresa_id', $empresaId)->findOrFail($id);
-        $absoluto = storage_path('app/'.$exp->archivo_cbte_path);
-        return response()->download($absoluto, basename($exp->archivo_cbte_path));
+        return $this->descargarArchivo($request, $id, 'cbte');
     }
 
-    public function descargarAlicuotas(Request $request, int $id): BinaryFileResponse
+    public function descargarAlicuotas(Request $request, int $id): StreamedResponse|JsonResponse
+    {
+        return $this->descargarArchivo($request, $id, 'alicuotas');
+    }
+
+    /**
+     * v1.26 — fix de descarga F.8001.
+     *
+     * Antes: `storage_path('app/'.$path)` → busca en `storage/app/<path>` y
+     * tira 404 silente porque Laravel 11 cambió el disco `local` a
+     * `storage/app/private/<path>`. Como el SPA tiene fallback al index.html
+     * para rutas no encontradas, el navegador descargaba `<!DOCTYPE html>...`
+     * con el nombre de archivo forzado por el `download` attribute.
+     *
+     * Ahora: `Storage::disk('local')->download($path, $filename)` abstrae el
+     * path interno y resuelve bien (mismo disco con el que el generador guarda
+     * los archivos vía `Storage::disk('local')->put($path, ...)`).
+     */
+    private function descargarArchivo(Request $request, int $id, string $kind): StreamedResponse|JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $exp = LibroIvaComprasExport::where('empresa_id', $empresaId)->findOrFail($id);
-        $absoluto = storage_path('app/'.$exp->archivo_alicuotas_path);
-        return response()->download($absoluto, basename($exp->archivo_alicuotas_path));
+
+        $path = $kind === 'cbte' ? $exp->archivo_cbte_path : $exp->archivo_alicuotas_path;
+        if (! $path || ! Storage::disk('local')->exists($path)) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'ARCHIVO_NO_ENCONTRADO',
+                'message' => sprintf('El archivo del export #%d no existe en disco (%s).', $id, $kind),
+            ]], 404);
+        }
+
+        return Storage::disk('local')->download($path, basename($path), [
+            'Content-Type' => 'text/plain; charset=ISO-8859-1',
+        ]);
     }
 
     public function marcarEnviado(Request $request, int $id): JsonResponse

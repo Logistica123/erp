@@ -57,6 +57,7 @@ import { ImputarNcPage } from './pages/ImputarNcPage';
 import { AsientoDetallePage } from './pages/AsientoDetallePage';
 import { CentrosCostoPage } from './pages/CentrosCostoPage';
 import { ConfiguracionIvaPage } from './pages/ConfiguracionIvaPage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { FacturaVentaManualPage } from './pages/FacturaVentaManualPage';
 import { FacturaCompraManualPage } from './pages/FacturaCompraManualPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
@@ -91,6 +92,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <BrowserRouter>
+          {/* v1.26 — ErrorBoundary global: convierte crashes de React en
+              mensaje + botón de recarga, antes daba pantalla blanca silenciosa. */}
+          <ErrorBoundary>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route
@@ -207,6 +211,7 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/erp/dashboard" replace />} />
           </Routes>
+          </ErrorBoundary>
         </BrowserRouter>
       </ToastProvider>
     </QueryClientProvider>

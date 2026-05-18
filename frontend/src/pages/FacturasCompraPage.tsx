@@ -605,7 +605,14 @@ function DetalleModal({ id, onClose }: { id: number; onClose: () => void }) {
     asiento?: { id: number; numero: number; fecha: string };
     constatacion?: Record<string, unknown>;
     estado?: string;
+    // v1.36 — el endpoint /show usa Eloquent ->with('tipoComprobante') y
+    // devuelve la relación anidada; el listado /index aplana via JOIN.
+    tipoComprobante?: { codigo_interno?: string; letra?: string | null; nombre?: string };
   } | undefined;
+
+  // v1.36 — derivar tipo/letra desde el shape correcto (listado o relación).
+  const tipoCodigo = f?.tipo_codigo ?? f?.tipoComprobante?.codigo_interno ?? '';
+  const letra = f?.letra ?? f?.tipoComprobante?.letra ?? '';
 
   return (
     <Modal open onClose={onClose} title={`Factura compra #${id}`} size="lg">
@@ -614,7 +621,7 @@ function DetalleModal({ id, onClose }: { id: number; onClose: () => void }) {
       ) : !f ? null : (
         <div className="space-y-4 text-[12.5px]">
           <div className="grid grid-cols-3 gap-3">
-            <Info label="Comprobante" value={`${f.letra} ${f.tipo_codigo} ${String(f.punto_venta).padStart(5, '0')}-${String(f.numero).padStart(8, '0')}`} />
+            <Info label="Comprobante" value={`${letra} ${tipoCodigo} ${String(f.punto_venta).padStart(5, '0')}-${String(f.numero).padStart(8, '0')}`.trim()} />
             <Info label="Fecha emisión" value={fmtDate(f.fecha_emision)} />
             <Info
               label="Fecha imputación"

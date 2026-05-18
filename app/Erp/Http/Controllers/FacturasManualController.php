@@ -261,7 +261,10 @@ class FacturasManualController
             ], 409);
         }
 
-        // Resolver auxiliar del proveedor si no viene.
+        // Resolver auxiliar del proveedor; si no existe, hacer upsert
+        // automático (v1.29) — mismo patrón que el importer del Libro IVA.
+        // Antes (v1.17): devolvía 422 PROVEEDOR_NO_ENCONTRADO y forzaba al
+        // operador a darlo de alta primero, lo cual fricciona innecesariamente.
         $proveedorAuxId = $data['auxiliar_id'] ?? null;
         if (! $proveedorAuxId) {
             $proveedorAuxId = DB::table('erp_auxiliares')
@@ -269,15 +272,24 @@ class FacturasManualController
                 ->where('tipo', 'Proveedor')
                 ->where('cuit', $data['cuit_emisor'])
                 ->value('id');
-            // No hay auto-upsert acá; el operador debe darlo de alta primero
-            // (en el flujo del import del Libro IVA Compras se hace upsert).
-            if (! $proveedorAuxId) {
-                return response()->json([
-                    'ok' => false,
-                    'error' => ['code' => 'PROVEEDOR_NO_ENCONTRADO',
-                        'message' => "No existe un proveedor con CUIT {$data['cuit_emisor']}. Dalo de alta primero (sidebar Compras → Proveedores)."],
-                ], 422);
-            }
+        }
+        if (! $proveedorAuxId) {
+            // v1.29 — upsert del proveedor con la razón social del form.
+            $cuentaDefaultId = DB::table('erp_cuentas_contables')
+                ->where('empresa_id', $empresaId)
+                ->where('codigo', '2.1.1.01')
+                ->value('id');
+            $proveedorAuxId = DB::table('erp_auxiliares')->insertGetId([
+                'empresa_id' => $empresaId,
+                'tipo' => 'Proveedor',
+                'codigo' => 'PROV-'.$data['cuit_emisor'],
+                'nombre' => $data['razon_social_emisor'] ?: ('Proveedor '.$data['cuit_emisor']),
+                'cuit' => $data['cuit_emisor'],
+                'cuenta_contable_default_id' => $cuentaDefaultId,
+                'activo' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         }
 
         // CC: si hay cliente_auxiliar_id, deriva de él; si no, usa el manual.

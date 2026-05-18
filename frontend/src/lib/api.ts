@@ -45,10 +45,30 @@ async function request<T>(
     if (res.status === 401) {
       auth.logout();
     }
-    const msg =
-      (isJson && typeof payload === 'object' && payload && 'message' in payload
-        ? String((payload as { message: unknown }).message)
-        : null) ?? `HTTP ${res.status}`;
+    // Extraer el mensaje más útil del payload:
+    //   1. error.message (formato ERP custom: { ok:false, error:{ code, message }})
+    //   2. errors[campo][0] (Laravel validation 422 — devuelve detalle por campo)
+    //   3. message (Laravel default)
+    //   4. fallback "HTTP {status}"
+    let msg: string | null = null;
+    if (isJson && typeof payload === 'object' && payload !== null) {
+      const p = payload as Record<string, unknown>;
+      if (p.error && typeof p.error === 'object') {
+        const err = p.error as Record<string, unknown>;
+        if (typeof err.message === 'string') msg = err.message;
+      }
+      if (!msg && p.errors && typeof p.errors === 'object') {
+        const detalles: string[] = [];
+        for (const [campo, errs] of Object.entries(p.errors as Record<string, unknown>)) {
+          if (Array.isArray(errs) && errs.length > 0 && typeof errs[0] === 'string') {
+            detalles.push(`${campo}: ${errs[0]}`);
+          }
+        }
+        if (detalles.length) msg = detalles.join(' · ');
+      }
+      if (!msg && typeof p.message === 'string') msg = p.message;
+    }
+    msg = msg ?? `HTTP ${res.status}`;
     throw new ApiError(res.status, payload, msg);
   }
 

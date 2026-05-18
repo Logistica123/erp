@@ -77,6 +77,9 @@ export function FacturaCompraManualPage() {
     imp_iva_21: 0,
     imp_iva_10_5: 0,
     imp_iva_27: 0,
+    // v1.34 — percepciones.
+    imp_percepciones_iva: 0,
+    imp_percepciones_iibb: 0,
     imp_total: 0,
     cae: '',
     tomado: true,
@@ -97,8 +100,8 @@ export function FacturaCompraManualPage() {
     }
   }, [tipos, periodoAbierto, form.tipo_comprobante_id, form.periodo_id]);
 
-  // v1.25 — Auto-calcular agregados (imp_neto_gravado, imp_iva) y total a
-  // partir de los desgloses por alícuota + no gravado + exento.
+  // v1.25 + v1.34 — Auto-calcular agregados y total. Total = netos por alícuota
+  // + IVA por alícuota + no gravado + exento + percepciones IVA + percepciones IIBB.
   useEffect(() => {
     const neto = Number(form.imp_neto_gravado_21 || 0)
       + Number(form.imp_neto_gravado_10_5 || 0)
@@ -106,10 +109,11 @@ export function FacturaCompraManualPage() {
     const iva = Number(form.imp_iva_21 || 0)
       + Number(form.imp_iva_10_5 || 0)
       + Number(form.imp_iva_27 || 0);
-    const total = neto + iva + Number(form.imp_no_gravado || 0) + Number(form.imp_exento || 0);
+    const percep = Number(form.imp_percepciones_iva || 0)
+      + Number(form.imp_percepciones_iibb || 0);
+    const total = neto + iva + Number(form.imp_no_gravado || 0) + Number(form.imp_exento || 0) + percep;
 
     setForm((f) => {
-      // Solo actualizar si cambió algo (evita loop infinito).
       if (Math.abs(neto - f.imp_neto_gravado) < 0.005
         && Math.abs(iva - f.imp_iva) < 0.005
         && Math.abs(total - f.imp_total) < 0.005) {
@@ -126,6 +130,7 @@ export function FacturaCompraManualPage() {
     form.imp_neto_gravado_21, form.imp_neto_gravado_10_5, form.imp_neto_gravado_27,
     form.imp_iva_21, form.imp_iva_10_5, form.imp_iva_27,
     form.imp_no_gravado, form.imp_exento,
+    form.imp_percepciones_iva, form.imp_percepciones_iibb,
   ]);
 
   // Buscar proveedor por CUIT cuando se escribe.
@@ -162,6 +167,9 @@ export function FacturaCompraManualPage() {
       imp_iva_21: form.imp_iva_21,
       imp_iva_10_5: form.imp_iva_10_5,
       imp_iva_27: form.imp_iva_27,
+      // v1.34 — percepciones
+      imp_percepciones_iva: form.imp_percepciones_iva,
+      imp_percepciones_iibb: form.imp_percepciones_iibb,
       imp_total: form.imp_total,
       cae: form.cae || undefined,
       tomado: form.tomado,
@@ -354,6 +362,16 @@ export function FacturaCompraManualPage() {
                 onChange={(e) => setForm({ ...form, imp_no_gravado: +e.target.value })} />
               <Field label="Exento" type="number" step="0.01" value={String(form.imp_exento)}
                 onChange={(e) => setForm({ ...form, imp_exento: +e.target.value })} />
+            </div>
+
+            {/* v1.34 — percepciones IVA + IIBB. Suman al total. */}
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Percepción IVA" type="number" step="0.01"
+                value={String(form.imp_percepciones_iva)}
+                onChange={(e) => setForm({ ...form, imp_percepciones_iva: +e.target.value })} />
+              <Field label="Percepción Ingresos Brutos" type="number" step="0.01"
+                value={String(form.imp_percepciones_iibb)}
+                onChange={(e) => setForm({ ...form, imp_percepciones_iibb: +e.target.value })} />
             </div>
 
             <div className="mt-3 flex justify-between items-center bg-surface-row border border-line rounded-md px-3 py-2">

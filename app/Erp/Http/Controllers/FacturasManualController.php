@@ -213,6 +213,9 @@ class FacturasManualController
             'imp_iva_27' => ['nullable', 'numeric'],
             'imp_iva_2_5' => ['nullable', 'numeric'],
             'imp_iva_5' => ['nullable', 'numeric'],
+            // v1.34 — percepciones detalladas (columnas existen desde v1.24).
+            'imp_percepciones_iva' => ['nullable', 'numeric'],
+            'imp_percepciones_iibb' => ['nullable', 'numeric'],
             'imp_total' => ['required', 'numeric'],
             'cae' => ['nullable', 'string', 'max:20'],
             'tomado' => ['nullable', 'boolean'],
@@ -339,6 +342,11 @@ class FacturasManualController
             'imp_iva_27' => $data['imp_iva_27'] ?? 0,
             'imp_iva_2_5' => $data['imp_iva_2_5'] ?? 0,
             'imp_iva_5' => $data['imp_iva_5'] ?? 0,
+            // v1.34 — percepciones (detalladas + agregado para compat).
+            'imp_percepciones_iva' => $data['imp_percepciones_iva'] ?? 0,
+            'imp_percepciones_iibb' => $data['imp_percepciones_iibb'] ?? 0,
+            'imp_percepciones' => (float) ($data['imp_percepciones_iva'] ?? 0)
+                                  + (float) ($data['imp_percepciones_iibb'] ?? 0),
             'imp_total' => $data['imp_total'],
             'origen' => 'MANUAL',
             'estado' => 'RECIBIDA',

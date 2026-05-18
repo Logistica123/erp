@@ -85,6 +85,9 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/centros-costo/{id}/reactivar', [CentrosCostoController::class, 'reactivar'])
             ->whereNumber('id')->name('erp.cc.reactivar');
         Route::get('/auxiliares', [CatalogosController::class, 'auxiliares'])->name('erp.auxiliares');
+        // v1.24.1 — endpoint que faltaba desde v1.17, lo llama FacturaCompraManualPage.
+        Route::get('/tipos-comprobante', [CatalogosController::class, 'tiposComprobante'])
+            ->name('erp.tipos-comprobante');
         Route::get('/auxiliares/buscar', [AuxiliaresController::class, 'buscar'])->name('erp.auxiliares.buscar');
         // v1.17 helper: lookup por CUIT.
         Route::get('/auxiliares/by-cuit/{cuit}', [AuxiliaresController::class, 'byCuit'])

@@ -15,6 +15,7 @@ use App\Erp\Models\Moneda;
 use App\Erp\Models\Periodo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Catálogos de lectura para alimentar selects del frontend:
@@ -225,6 +226,36 @@ class CatalogosController
 
         return response()->json([
             'data' => $query->limit(50)->get(['id', 'tipo', 'codigo', 'nombre', 'cuit', 'cuenta_contable_default_id']),
+        ]);
+    }
+
+    /**
+     * Catálogo de tipos de comprobante AFIP (activos).
+     *
+     * v1.24.1 — endpoint que el frontend de Carga manual de factura de compra
+     * estaba llamando desde el v1.17 pero nunca se había registrado en routes.
+     * Aparecía como 404 al abrir la página y volcaba la consola con un
+     * `.map is not a function` aguas abajo.
+     *
+     * Acepta filtro opcional `?clase=FACTURA|NOTA_CREDITO|NOTA_DEBITO|RECIBO|TICKET|OTRO`.
+     * Valores inválidos (ej: el legacy `?clase=COMPRA`) se ignoran sin error —
+     * el mismo tipo de comprobante AFIP sirve para venta y compra (FA, FB, FC...).
+     */
+    public function tiposComprobante(Request $request): JsonResponse
+    {
+        $clasesValidas = ['FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO', 'RECIBO', 'TICKET', 'OTRO'];
+        $q = DB::table('erp_tipos_comprobante')->where('activo', 1);
+
+        $clase = $request->query('clase');
+        if ($clase && in_array($clase, $clasesValidas, true)) {
+            $q->where('clase', $clase);
+        }
+
+        return response()->json([
+            'data' => $q->orderBy('id')->get([
+                'id', 'codigo_interno', 'letra', 'nombre', 'clase', 'signo',
+                'discrimina_iva', 'es_fce',
+            ]),
         ]);
     }
 

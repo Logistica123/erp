@@ -310,17 +310,20 @@ class GeneradorF8001Service
 
         // v1.28 / Prioridad 2: columnas detalladas del v1.24+v1.25
         // (imp_iva_21/10_5/27/2_5/5 + imp_neto_gravado_21/10_5/27/2_5/5).
-        // Esto cubre imports del Libro IVA Compras y cargas manuales del v1.25.
+        // v1.31 — códigos AFIP corregidos (antes 10.5%='0003', 27%='0004',
+        // 2.5%='0006' — todos mal). Los correctos verificados contra el
+        // byte-perfect 2026-03 de LIBER + RG 5616/2024:
+        //   0003=0%/exento · 0004=10.5% · 0005=21% · 0006=27% · 0008=5% · 0009=2.5%
         $alicuotasV124 = [
             ['codigo_afip' => '0005', 'iva' => (float) ($f->imp_iva_21 ?? 0),
                 'base' => (float) ($f->imp_neto_gravado_21 ?? 0)],
-            ['codigo_afip' => '0003', 'iva' => (float) ($f->imp_iva_10_5 ?? 0),
+            ['codigo_afip' => '0004', 'iva' => (float) ($f->imp_iva_10_5 ?? 0),
                 'base' => (float) ($f->imp_neto_gravado_10_5 ?? 0)],
-            ['codigo_afip' => '0004', 'iva' => (float) ($f->imp_iva_27 ?? 0),
+            ['codigo_afip' => '0006', 'iva' => (float) ($f->imp_iva_27 ?? 0),
                 'base' => (float) ($f->imp_neto_gravado_27 ?? 0)],
             ['codigo_afip' => '0008', 'iva' => (float) ($f->imp_iva_5 ?? 0),
                 'base' => (float) ($f->imp_neto_gravado_5 ?? 0)],
-            ['codigo_afip' => '0006', 'iva' => (float) ($f->imp_iva_2_5 ?? 0),
+            ['codigo_afip' => '0009', 'iva' => (float) ($f->imp_iva_2_5 ?? 0),
                 'base' => (float) ($f->imp_neto_gravado_2_5 ?? 0)],
         ];
         $filtrado = array_filter($alicuotasV124, fn ($a) => $a['iva'] > 0.01 || $a['base'] > 0.01);
@@ -331,8 +334,8 @@ class GeneradorF8001Service
             return array_values(array_map(function ($a) {
                 if ($a['base'] <= 0.01 && $a['iva'] > 0.01) {
                     $tasa = match ($a['codigo_afip']) {
-                        '0005' => 0.21, '0003' => 0.105, '0004' => 0.27,
-                        '0008' => 0.05, '0006' => 0.025, default => 0.21,
+                        '0005' => 0.21, '0004' => 0.105, '0006' => 0.27,
+                        '0008' => 0.05, '0009' => 0.025, default => 0.21,
                     };
                     $a['base'] = round($a['iva'] / $tasa, 2);
                 }
@@ -348,12 +351,13 @@ class GeneradorF8001Service
             return [];
         }
         $tasa = round($iva / $neto, 4);
+        // v1.31 — códigos AFIP corregidos (mismo mapeo que Prioridad 2).
         $codigo = match (true) {
             abs($tasa - 0.21)  < 0.005 => '0005',
-            abs($tasa - 0.105) < 0.003 => '0003',
-            abs($tasa - 0.27)  < 0.005 => '0004',
+            abs($tasa - 0.105) < 0.003 => '0004',
+            abs($tasa - 0.27)  < 0.005 => '0006',
             abs($tasa - 0.05)  < 0.003 => '0008',
-            abs($tasa - 0.025) < 0.002 => '0006',
+            abs($tasa - 0.025) < 0.002 => '0009',
             default => '0005',
         };
         return [['codigo_afip' => $codigo, 'base' => $neto, 'iva' => $iva]];

@@ -227,6 +227,26 @@ class FacturasManualController
 
         $empresaId = $this->empresaId($request);
 
+        // v1.37 — derivar periodo_id real desde fecha_imputacion.
+        // Antes el form pasaba periodo_id elegido por el operador, pero podía
+        // no coincidir con la fecha_imputacion (caso real: operador elige
+        // diciembre como default pero pone fecha en abril). El generador
+        // F.8001 filtra por periodo_id → la factura no aparece en el período
+        // correcto. El periodo_id debe ser SIEMPRE el que cubre la fecha.
+        $periodoReal = DB::table('erp_periodos as p')
+            ->join('erp_ejercicios as e', 'e.id', '=', 'p.ejercicio_id')
+            ->where('e.empresa_id', $empresaId)
+            ->whereDate('p.fecha_inicio', '<=', $data['fecha_imputacion'])
+            ->whereDate('p.fecha_fin', '>=', $data['fecha_imputacion'])
+            ->value('p.id');
+        if (! $periodoReal) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'PERIODO_NO_ENCONTRADO',
+                'message' => "No existe un período fiscal que cubra la fecha de imputación {$data['fecha_imputacion']}.",
+            ]], 422);
+        }
+        $data['periodo_id'] = (int) $periodoReal;
+
         // v1.25 — si vienen los netos/IVA por alícuota, derivamos los agregados.
         $netos = [
             (float) ($data['imp_neto_gravado_21'] ?? 0),

@@ -435,14 +435,19 @@ class GeneradorF8001Service
         return str_pad($val, $len, ' ', STR_PAD_RIGHT);
     }
 
-    /** Importe a 15 chars: ×100, sin decimales, padding 0s izq. */
+    /**
+     * Importe a 15 chars: ×100, sin decimales, padding 0s izq.
+     *
+     * v1.35 — AFIP F.8001 espera importes SIEMPRE positivos. El "signo" lo da
+     * el tipo de comprobante (NC tipo 3/13/203 = resta; FA tipo 1/6/11/51 = suma).
+     * Aplicamos abs() para que NC con totales negativos en BD se reporten como
+     * positivos en el TXT. Validado contra el fixture byte-perfect LIBER 2026-03
+     * que también respeta esta convención (0 importes con signo negativo).
+     */
     private function moneda(float $val): string
     {
-        $entero = (int) round($val * 100);
-        $abs = abs($entero);
-        $signo = $entero < 0 ? '-' : '';
-        $padded = str_pad((string) $abs, 15 - strlen($signo), '0', STR_PAD_LEFT);
-        return $signo.$padded;
+        $entero = (int) round(abs($val) * 100);
+        return str_pad((string) $entero, 15, '0', STR_PAD_LEFT);
     }
 
     /** Validación check digit CUIT (estándar AFIP). */

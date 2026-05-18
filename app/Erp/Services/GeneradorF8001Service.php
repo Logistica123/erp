@@ -326,13 +326,14 @@ class GeneradorF8001Service
             ['codigo_afip' => '0009', 'iva' => (float) ($f->imp_iva_2_5 ?? 0),
                 'base' => (float) ($f->imp_neto_gravado_2_5 ?? 0)],
         ];
-        $filtrado = array_filter($alicuotasV124, fn ($a) => $a['iva'] > 0.01 || $a['base'] > 0.01);
+        // v1.32 — usar abs() para detectar entradas válidas (las NC tienen
+        // valores negativos en imp_iva_21, imp_iva_10_5, etc.). Conservar
+        // el signo en el output para que ALICUOTAS.txt cuadre con el CBTE
+        // (las NC reportan IVA y neto negativos en ambos archivos).
+        $filtrado = array_filter($alicuotasV124, fn ($a) => abs($a['iva']) > 0.01 || abs($a['base']) > 0.01);
         if (! empty($filtrado)) {
-            // Si vino solo IVA detallado pero el neto detallado quedó en 0
-            // (caso import del v1.24 antes del v1.25 que sumó las columnas
-            // imp_neto_gravado_*), derivar la base con la tasa.
             return array_values(array_map(function ($a) {
-                if ($a['base'] <= 0.01 && $a['iva'] > 0.01) {
+                if (abs($a['base']) <= 0.01 && abs($a['iva']) > 0.01) {
                     $tasa = match ($a['codigo_afip']) {
                         '0005' => 0.21, '0004' => 0.105, '0006' => 0.27,
                         '0008' => 0.05, '0009' => 0.025, default => 0.21,
@@ -345,12 +346,13 @@ class GeneradorF8001Service
 
         // Prioridad 3 (fallback histórico): IVA y neto agregados sin desglose
         // — deducir alícuota por ratio. Solo aplica a facturas viejas pre-v1.24.
+        // v1.32 — abs() para que NC con valores negativos también entren.
         $iva = (float) ($f->imp_iva ?? 0);
         $neto = (float) ($f->imp_neto_gravado ?? 0);
-        if ($iva <= 0.01 || $neto <= 0.01) {
+        if (abs($iva) <= 0.01 || abs($neto) <= 0.01) {
             return [];
         }
-        $tasa = round($iva / $neto, 4);
+        $tasa = round(abs($iva / $neto), 4);
         // v1.31 — códigos AFIP corregidos (mismo mapeo que Prioridad 2).
         $codigo = match (true) {
             abs($tasa - 0.21)  < 0.005 => '0005',

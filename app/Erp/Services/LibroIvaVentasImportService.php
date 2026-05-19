@@ -42,8 +42,36 @@ class LibroIvaVentasImportService
         'cod jurisd', 'comentario', 'periodo trabajado',
     ];
 
+    /**
+     * v1.46 — Aliases de columnas. AFIP exporta con headers variables entre
+     * formatos. Para cada canónica probamos múltiples aliases hasta encontrar
+     * uno. Lo que esté antes en la lista gana.
+     */
+    private const HEADER_ALIASES = [
+        'fecha de emision' => ['fecha de emision', 'fecha emision', 'fecha'],
+        'tipo de comprobante' => ['tipo de comprobante', 'tipo comprobante', 'tipo cbte', 'tipo de cbte'],
+        'punto de venta' => ['punto de venta', 'pto. de venta', 'pto venta', 'pto. vta', 'pto de vta'],
+        'numero desde' => ['numero desde', 'nro. desde', 'numero de comprobante', 'numero', 'nro. comprobante'],
+        'tipo doc. receptor' => ['tipo doc. receptor', 'tipo doc receptor', 'tipo de documento', 'tipo documento'],
+        'nro. doc. receptor' => ['nro. doc. receptor', 'nro doc receptor', 'cuit receptor', 'cuit', 'nro. documento'],
+        'denominacion receptor' => ['denominacion receptor', 'denominacion', 'razon social receptor', 'razon social', 'apellido y nombre razon social'],
+        'imp. total' => ['imp. total', 'imp total', 'importe total', 'total'],
+        'imp. neto gravado' => ['imp. neto gravado', 'importe neto gravado', 'neto gravado'],
+        'imp. neto no gravado' => ['imp. neto no gravado', 'importe neto no gravado', 'no gravado'],
+        'imp. op. exentas' => ['imp. op. exentas', 'op. exentas', 'exento', 'imp. exento'],
+        'iva' => ['iva', 'imp. iva', 'total iva'],
+        'otros tributos' => ['otros tributos', 'otros tribu'],
+        'cod. autorizacion' => ['cod. autorizacion', 'codigo autorizacion', 'cae', 'cae nro'],
+        'cod jurisd' => ['cod jurisd', 'codigo jurisdiccion', 'jurisdiccion'],
+        'comentario' => ['comentario', 'comentarios', 'observaciones', 'observacion'],
+        'periodo trabajado' => ['periodo trabajado', 'periodo de trabajo', 'periodo'],
+    ];
+
     /** Encoding detectado de la última lectura. */
     private ?string $lastEncoding = null;
+
+    /** v1.46 — para diagnóstico en mensajes de error. */
+    private array $lastHeadersDetectados = [];
 
     public function __construct(
         private readonly ContabilizadorFacturas $contabilizador,
@@ -93,9 +121,13 @@ class LibroIvaVentasImportService
             if (! isset($headerMap[$col])) $faltantes[] = $col;
         }
         if (! empty($faltantes)) {
+            $disponibles = $this->lastHeadersDetectados;
+            $resumen = empty($disponibles)
+                ? '(ningún header detectado)'
+                : implode(' | ', array_slice($disponibles, 0, 15)).(count($disponibles) > 15 ? ' …' : '');
             throw new DomainException(
-                'HEADERS_FALTANTES: el archivo no tiene las columnas obligatorias de AFIP: '
-                . implode(', ', $faltantes)
+                'HEADERS_FALTANTES: faltan columnas obligatorias: '.implode(', ', $faltantes)
+                .'. Headers detectados: '.$resumen
             );
         }
 
@@ -541,11 +573,25 @@ class LibroIvaVentasImportService
 
     private function mapearHeader(array $row): array
     {
-        $map = [];
+        $byName = [];
         foreach ($row as $idx => $cell) {
             $norm = $this->normalizar((string) $cell);
-            if ($norm) $map[$norm] = $idx;
+            if ($norm) $byName[$norm] = $idx;
         }
+        $map = $byName;
+        foreach (self::HEADER_ALIASES as $canonica => $aliases) {
+            if (isset($map[$canonica])) continue;
+            foreach ($aliases as $alias) {
+                $aliasNorm = $this->normalizar($alias);
+                if (isset($byName[$aliasNorm])) {
+                    $map[$canonica] = $byName[$aliasNorm];
+                    break;
+                }
+            }
+        }
+        $this->lastHeadersDetectados = array_values(array_filter(array_map(
+            fn ($c) => $this->normalizar((string) $c), $row,
+        )));
         return $map;
     }
 

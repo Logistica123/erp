@@ -46,6 +46,40 @@ class LibroIvaComprasImportService
     ];
 
     /**
+     * v1.46 — Aliases por columna canónica.
+     *
+     * AFIP exporta el "Detalle del Libro IVA" con headers que cambiaron entre
+     * formatos viejos y nuevos. Algunos casos vistos en prod:
+     *   - "Fecha de Emisión" / "Fecha Emisión" / "Fecha"
+     *   - "Número de Comprobante" / "Número Desde"
+     *   - "Tipo Doc. Vendedor" / "Tipo Doc. Receptor" (recibidos)
+     *   - "Importe Total" / "Imp. Total" / "Total"
+     *
+     * El parser intenta cada alias hasta encontrar uno en el header del archivo.
+     * Lo que esté antes en la lista gana si hay múltiples matches.
+     */
+    private const HEADER_ALIASES = [
+        'fecha de emision' => ['fecha de emision', 'fecha emision', 'fecha'],
+        'tipo de comprobante' => ['tipo de comprobante', 'tipo comprobante', 'tipo cbte', 'tipo de cbte'],
+        'punto de venta' => ['punto de venta', 'pto. de venta', 'pto venta', 'pto. vta', 'pto de vta'],
+        'numero de comprobante' => ['numero de comprobante', 'numero comprobante', 'nro. comprobante', 'nro comprobante', 'numero desde', 'nro. desde', 'numero'],
+        'tipo doc. vendedor' => ['tipo doc. vendedor', 'tipo doc vendedor', 'tipo doc. receptor', 'tipo doc receptor', 'tipo documento', 'tipo de documento'],
+        'nro. doc. vendedor' => ['nro. doc. vendedor', 'nro doc vendedor', 'nro. doc. receptor', 'nro doc receptor', 'cuit vendedor', 'cuit', 'nro. documento'],
+        'denominacion vendedor' => ['denominacion vendedor', 'denominacion receptor', 'denominacion', 'razon social', 'razon social vendedor', 'apellido y nombre razon social'],
+        'importe total' => ['importe total', 'imp. total', 'imp total', 'total'],
+        'numero de comprobante hasta' => ['numero de comprobante hasta', 'numero hasta', 'nro. hasta'],
+        // Extras (opcionales).
+        'tomado' => ['tomado'],
+        'cliente' => ['cliente'],
+        'observaciones' => ['observaciones', 'observacion', 'comentario', 'comentarios'],
+        'tipo' => ['tipo gasto', 'tipo de gasto', 'tipo'],
+        'periodo trabajado' => ['periodo trabajado', 'periodo de trabajo', 'periodo'],
+        'jurisdiccion' => ['jurisdiccion', 'cod jurisd', 'codigo jurisdiccion'],
+        'op' => ['op', 'orden de pago', 'nro op', 'numero op'],
+        'fecha de pago' => ['fecha de pago', 'fecha pago', 'fecha pagado'],
+    ];
+
+    /**
      * Headers extras del contador (opcionales).
      *
      * v1.14: "periodo pagado" eliminado (era typo del v1.13 — el concepto
@@ -409,13 +443,34 @@ class LibroIvaComprasImportService
     /** Normaliza header (lowercase, sin acentos, trim) → mapa nombre → idx. */
     private function mapearHeader(array $row): array
     {
-        $map = [];
+        // 1) Mapa directo: nombre normalizado → idx.
+        $byName = [];
         foreach ($row as $idx => $cell) {
             $norm = $this->normalizar((string) $cell);
-            if ($norm) $map[$norm] = $idx;
+            if ($norm) $byName[$norm] = $idx;
         }
+        // 2) v1.46 — aplicar aliases: para cada canónica que NO esté en byName,
+        // probar los aliases. Si encontramos uno, asignamos esa idx a la canónica.
+        $map = $byName;
+        foreach (self::HEADER_ALIASES as $canonica => $aliases) {
+            if (isset($map[$canonica])) continue;
+            foreach ($aliases as $alias) {
+                $aliasNorm = $this->normalizar($alias);
+                if (isset($byName[$aliasNorm])) {
+                    $map[$canonica] = $byName[$aliasNorm];
+                    break;
+                }
+            }
+        }
+        // Guardamos los headers crudos del archivo para diagnóstico en errores.
+        $this->lastHeadersDetectados = array_values(array_filter(array_map(
+            fn ($c) => $this->normalizar((string) $c), $row,
+        )));
         return $map;
     }
+
+    /** v1.46 — guardado solo para mensaje de error si nada matchea. */
+    private array $lastHeadersDetectados = [];
 
     private function normalizar(string $s): string
     {
@@ -570,12 +625,26 @@ class LibroIvaComprasImportService
     ): array {
         $tomada = $this->leerTomado($r, $headerMap);
 
+        // v1.46 — diagnóstico claro: distinguir "columna no encontrada" de
+        // "columna existe pero valor vacío". Si TODO el archivo no encuentra
+        // la columna, el mensaje incluye los headers que SÍ detectó para que
+        // el operador pueda comparar.
+        if (! isset($headerMap['fecha de emision'])) {
+            $disponibles = $this->lastHeadersDetectados;
+            $resumen = empty($disponibles)
+                ? '(ningún header detectado)'
+                : implode(' | ', array_slice($disponibles, 0, 12)).(count($disponibles) > 12 ? ' …' : '');
+            throw new DomainException(
+                'HEADER_FECHA_EMISION_FALTANTE: no se encontró la columna "Fecha de Emisión" (ni variantes como "Fecha Emisión"). '
+                . 'Headers detectados en el archivo: '.$resumen
+            );
+        }
         $fechaEmision = $this->parsearFecha(
             $this->get($r, $headerMap, 'fecha de emision'),
             'Fecha de Emisión',
         );
         if (! $fechaEmision) {
-            throw new DomainException('MISSING_FECHA_EMISION: la columna "Fecha de Emisión" está vacía.');
+            throw new DomainException('MISSING_FECHA_EMISION: la columna "Fecha de Emisión" existe pero está vacía en esta fila.');
         }
 
         $tipoCbteCod = (int) ($this->get($r, $headerMap, 'tipo de comprobante') ?: 0);

@@ -43,6 +43,8 @@ class FacturaCompra extends Model
         'no_tomada', 'cliente_auxiliar_id', 'tipo_gasto', 'import_id',
         // Addendum v1.14 — período trabajado + jurisdicción IIBB
         'periodo_trabajado_texto', 'jurisdiccion_codigo',
+        // v1.40 — OP externa + fecha de pago (referenciales, opcionales en el importador)
+        'op_externa', 'fecha_pago',
     ];
 
     protected $casts = [
@@ -51,6 +53,7 @@ class FacturaCompra extends Model
         'fecha_vencimiento' => 'date',
         'fecha_vto_cae' => 'date',
         'fecha_imputacion' => 'date',
+        'fecha_pago' => 'date',
         'imputacion_diferida' => 'boolean',
         'no_tomada' => 'boolean',
         'controlada_at' => 'datetime',

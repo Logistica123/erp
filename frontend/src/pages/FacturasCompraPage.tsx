@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
+import { OpExternaCell, FechaPagoCell } from '@/components/factura/PagoInfoCells';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -51,6 +52,9 @@ type FacturaCompra = {
   periodo_trabajado_texto: string | null;
   jurisdiccion_codigo: string | null;
   centro_costo_id: number | null;
+  // v1.40 — OP externa + fecha de pago (referenciales, opcionales).
+  op_externa: string | null;
+  fecha_pago: string | null;
 };
 
 const ESTADOS = ['RECIBIDA', 'CONTROLADA', 'OBSERVADA', 'PAGO_PARCIAL', 'PAGADA', 'ANULADA_POR_NC', 'RECHAZADA'];
@@ -251,6 +255,25 @@ export function FacturasCompraPage() {
       render: (r) => r.tipo_gasto
         ? <span className="text-[11.5px]">{r.tipo_gasto}</span>
         : <span className="text-ink-muted">—</span> },
+    // v1.40 — OP externa + fecha de pago (inline editable).
+    { key: 'op_externa', header: 'OP', width: '110px',
+      render: (r) => (
+        <OpExternaCell
+          value={r.op_externa}
+          facturaId={r.id}
+          editable={puedeEditarPeriodo}
+          invalidateKeys={[['facturas-compra']]}
+        />
+      ) },
+    { key: 'fecha_pago', header: 'Fecha pago', width: '130px',
+      render: (r) => (
+        <FechaPagoCell
+          value={r.fecha_pago}
+          facturaId={r.id}
+          editable={puedeEditarPeriodo}
+          invalidateKeys={[['facturas-compra']]}
+        />
+      ) },
     { key: 'estado', header: 'Estado', width: '140px',
       render: (r) => <Badge variant={badgeFor(r.estado)}>{r.estado}</Badge> },
     { key: 'constatacion', header: 'Constat.', width: '120px',

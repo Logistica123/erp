@@ -54,6 +54,8 @@ class FacturasCompraController extends Controller
                 // Addendum v1.13 + v1.14 — campos enriquecidos del import
                 'f.no_tomada', 'f.cliente_auxiliar_id', 'f.tipo_gasto',
                 'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo', 'f.centro_costo_id',
+                // v1.40 — OP externa + fecha de pago (importer + inline edit).
+                'f.op_externa', 'f.fecha_pago',
             ]);
 
         if ($estado = $request->query('estado')) {
@@ -512,6 +514,43 @@ class FacturasCompraController extends Controller
             sprintf('Factura compra #%d: período trabajado %s → %s', $id, $old ?? 'NULL', $new ?? 'NULL'),
         );
         \Illuminate\Support\Facades\Cache::forget("facturas_compra.periodos_trabajados.{$empresaId}");
+
+        return response()->json(['ok' => true, 'data' => $factura->fresh()]);
+    }
+
+    /**
+     * v1.40 — PATCH OP externa y/o fecha de pago de una factura.
+     * Ambos campos son opcionales en el body — el frontend manda solo el que
+     * cambió. Sin restricción por estado (son metadatos referenciales, no
+     * impactan estado contable).
+     */
+    public function patchPagoInfo(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'compras.facturas.editar');
+
+        $data = $request->validate([
+            'op_externa' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'fecha_pago' => ['sometimes', 'nullable', 'date'],
+        ]);
+        if (empty($data)) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'SIN_CAMBIOS',
+                'message' => 'No se recibió ningún campo válido (op_externa o fecha_pago).',
+            ]], 422);
+        }
+
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $factura = FacturaCompra::where('empresa_id', $empresaId)->findOrFail($id);
+
+        $old = $factura->only(array_keys($data));
+        // Normalizar strings vacíos a null para no guardar '' en VARCHAR.
+        $new = collect($data)->map(fn ($v) => $v === '' ? null : $v)->all();
+        $factura->update($new);
+
+        $this->audit->log('pago_info_editada', $factura, $old, $new,
+            sprintf('Factura compra #%d: pago_info actualizada (%s)',
+                $id, implode(',', array_keys($new))),
+        );
 
         return response()->json(['ok' => true, 'data' => $factura->fresh()]);
     }

@@ -503,6 +503,9 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.facturas-compra.periodos-trabajados');
         Route::patch('/facturas-compra/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'patchPeriodosTrabajadosBulk'])
             ->name('erp.facturas-compra.periodos-trabajados.bulk');
+        // v1.40 — PATCH OP + fecha de pago (referencial, ambos opcionales).
+        Route::patch('/facturas-compra/{id}/pago-info', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'patchPagoInfo'])
+            ->whereNumber('id')->name('erp.fc.pago-info');
         Route::patch('/facturas-compra/{id}/periodo-trabajado', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'patchPeriodoTrabajado'])
             ->whereNumber('id')->name('erp.facturas-compra.periodo-trabajado');
         Route::get('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'index'])

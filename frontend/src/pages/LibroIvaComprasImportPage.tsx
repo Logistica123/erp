@@ -74,10 +74,12 @@ const MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 // v1.13 introdujo 4 columnas extras (tomado/cliente/observaciones/tipo).
-// v1.14 sumó 2 más (periodo trabajado/jurisdiccion). Todas opcionales.
+// v1.14 sumó 2 más (periodo trabajado/jurisdiccion).
+// v1.40 sumó 2 más (op + fecha de pago). Todas opcionales.
 const EXTRAS_OBLIGATORIAS = [
   'tomado', 'cliente', 'observaciones', 'tipo',
   'periodo trabajado', 'jurisdiccion',
+  'op', 'fecha de pago',
 ];
 
 const ESTADO_BADGES: Record<Import['estado'], 'success' | 'danger' | 'warning'> = {
@@ -188,8 +190,9 @@ export function LibroIvaComprasImportPage() {
         <CardBody className="p-4 space-y-3">
           <div className="text-[12px] text-ink-muted">
             Importa el CSV/Excel del Libro IVA Compras enriquecido por el contador.
-            Las 6 columnas extras (<code>Tomado</code>, <code>Cliente</code>, <code>Observaciones</code>,{' '}
-            <code>Tipo</code>, <code>Período trabajado</code>, <code>Jurisdicción</code>) son opcionales.
+            Las 8 columnas extras (<code>Tomado</code>, <code>Cliente</code>, <code>Observaciones</code>,{' '}
+            <code>Tipo</code>, <code>Período trabajado</code>, <code>Jurisdicción</code>,{' '}
+            <code>OP</code>, <code>Fecha de pago</code>) son opcionales.
             Las facturas con <code>Tomado=NO</code> se importan sin generar asiento ni
             impactar el Libro IVA del ERP — pueden tomarse después en otro período.
           </div>

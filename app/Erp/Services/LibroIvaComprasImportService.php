@@ -56,6 +56,9 @@ class LibroIvaComprasImportService
     private const HEADERS_EXTRAS = [
         'tomado', 'cliente', 'observaciones', 'tipo',
         'periodo trabajado', 'jurisdiccion',
+        // v1.40 — datos de pago externos (referencia/auditoría, no impactan
+        // estado de la factura — eso sigue derivándose de Tesorería).
+        'op', 'fecha de pago',
     ];
 
     public function __construct(
@@ -646,6 +649,26 @@ class LibroIvaComprasImportService
         $juris = preg_match('/^\d{3}$/', $juris) ? $juris : null;
         $tipoGasto = trim((string) $this->get($r, $headerMap, 'tipo')) ?: null;
         $observ = trim((string) $this->get($r, $headerMap, 'observaciones')) ?: null;
+        // v1.40 — OP externa + fecha de pago (referenciales). La OP es texto
+        // libre (50 chars). La fecha de pago usa el mismo parser estricto que
+        // las demás fechas (dd/mm/yyyy AFIP), pero si está vacía no rompe.
+        $opExterna = trim((string) $this->get($r, $headerMap, 'op')) ?: null;
+        if ($opExterna !== null && mb_strlen($opExterna) > 50) {
+            $opExterna = mb_substr($opExterna, 0, 50);
+        }
+        // v1.40 — fecha_pago es referencial: si el formato es inválido NO
+        // rechazamos la fila (se pierde el dato pero la factura se importa).
+        // Decisión explícita del usuario: preferir importar y revisar después
+        // a frenar todo por una columna que no impacta el estado contable.
+        $fechaPago = null;
+        try {
+            $fechaPago = $this->parsearFecha(
+                $this->get($r, $headerMap, 'fecha de pago'),
+                'Fecha de Pago',
+            );
+        } catch (DomainException $e) {
+            $fechaPago = null;
+        }
         // CC derivado del cliente (auxiliar). Si no hay cliente, queda NULL.
         $centroCostoId = $clienteAuxId
             ? DB::table('erp_centros_costo')->where('auxiliar_id', $clienteAuxId)->value('id')
@@ -763,6 +786,9 @@ class LibroIvaComprasImportService
             'centro_costo_id' => $centroCostoId,
             'tipo_gasto' => $tipoGasto,
             'observaciones' => $observ,
+            // v1.40 — OP + fecha de pago opcionales.
+            'op_externa' => $opExterna,
+            'fecha_pago' => $fechaPago,
             'import_id' => $importId,
             'created_by_user_id' => $usuario->id,
         ]);

@@ -4,6 +4,7 @@ import { ShoppingCart, ShieldCheck, AlertTriangle, ArrowLeft } from 'lucide-reac
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectField, FormError } from '@/components/ui/Field';
+import { DecimalField } from '@/components/ui/DecimalField';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
@@ -31,6 +32,12 @@ export function FacturaCompraManualPage() {
   const toast = useToast();
   const [verificacion, setVerificacion] = useState<{ verificada: boolean; resultado: Record<string, unknown> } | null>(null);
   const [createdId, setCreatedId] = useState<number | null>(null);
+  // v1.38 M1 — flag para pintar de rojo el campo razón social si el CUIT no
+  // matchea ningún proveedor existente. Se resetea al cambiar el CUIT.
+  const [proveedorNoExiste, setProveedorNoExiste] = useState(false);
+  // v1.38 M2 — modo "registrar y cargar otro": no navega tras success y
+  // preserva CUIT, razón social, fecha emisión, fecha imputación.
+  const [cargarOtroMode, setCargarOtroMode] = useState(false);
 
   // Catálogos.
   const { data: tipos } = useQuery<{ data: Tipo[] }>({
@@ -133,14 +140,27 @@ export function FacturaCompraManualPage() {
     form.imp_percepciones_iva, form.imp_percepciones_iibb,
   ]);
 
-  // Buscar proveedor por CUIT cuando se escribe.
+  // v1.38 M1 — Buscar proveedor por CUIT al perder foco (onBlur). Si existe,
+  // autocompleta razón social; si no, pinta rojo el campo razón social.
   const proveedorLookup = useMutation<{ data: { id: number; nombre: string } }, ApiError, string>({
     mutationFn: (cuit) => api.get(`/api/erp/auxiliares/by-cuit/${cuit}?tipo=Proveedor`),
     onSuccess: (r) => {
       setForm((f) => ({ ...f, auxiliar_id: r.data.id, razon_social_emisor: r.data.nombre || f.razon_social_emisor }));
-      toast.success('Proveedor encontrado', r.data.nombre);
+      setProveedorNoExiste(false);
+    },
+    onError: () => {
+      // 404 esperado cuando el CUIT no está cargado todavía. No mostramos
+      // toast — el feedback es el borde rojo del input de razón social.
+      setForm((f) => ({ ...f, auxiliar_id: 0 }));
+      setProveedorNoExiste(true);
     },
   });
+
+  const handleCuitBlur = () => {
+    if (/^\d{11}$/.test(form.cuit_emisor) && !proveedorLookup.isPending) {
+      proveedorLookup.mutate(form.cuit_emisor);
+    }
+  };
 
   const registrar = useMutation<{ data: { id: number } }, ApiError, void>({
     mutationFn: () => api.post('/api/erp/facturas-compra/manual', {
@@ -181,6 +201,39 @@ export function FacturaCompraManualPage() {
     onSuccess: (r) => {
       toast.success('Factura registrada', `Manual #${r.data.id}`);
       setCreatedId(r.data.id);
+      if (cargarOtroMode) {
+        // v1.38 M2 — reset preservando proveedor + fechas. El operador típico
+        // carga varias facturas seguidas del mismo proveedor o del mismo día.
+        setForm((f) => ({
+          ...f,
+          punto_venta: 1,
+          numero: 0,
+          cliente_auxiliar_id: 0,
+          centro_costo_id: 0,
+          imp_neto_gravado: 0,
+          imp_no_gravado: 0,
+          imp_exento: 0,
+          imp_iva: 0,
+          imp_neto_gravado_21: 0,
+          imp_neto_gravado_10_5: 0,
+          imp_neto_gravado_27: 0,
+          imp_iva_21: 0,
+          imp_iva_10_5: 0,
+          imp_iva_27: 0,
+          imp_percepciones_iva: 0,
+          imp_percepciones_iibb: 0,
+          imp_total: 0,
+          cae: '',
+          tipo_gasto: '',
+          observaciones: '',
+          periodo_trabajado_texto: '',
+          jurisdiccion_codigo: '',
+        }));
+        setCreatedId(null);
+        setVerificacion(null);
+        setCargarOtroMode(false);
+        return;
+      }
       if (returnTo === 'libro-iva') {
         navigate('/erp/libro-iva-compras/import');
       } else {
@@ -259,24 +312,41 @@ export function FacturaCompraManualPage() {
           <div className="border-t border-line pt-3">
             <h3 className="text-[12px] font-semibold text-navy-800 uppercase tracking-wide mb-2">Proveedor</h3>
             <div className="grid grid-cols-3 gap-3">
-              <div className="flex gap-2 col-span-1">
-                <Field label="CUIT proveedor *" value={form.cuit_emisor}
-                  onChange={(e) => setForm({ ...form, cuit_emisor: e.target.value })}
-                  placeholder="11 dígitos" containerClassName="flex-1" />
-                <Button variant="outline" size="sm" className="self-end mb-0.5"
-                  disabled={!/^\d{11}$/.test(form.cuit_emisor) || proveedorLookup.isPending}
-                  onClick={() => proveedorLookup.mutate(form.cuit_emisor)}>
-                  Buscar
-                </Button>
+              <Field label="CUIT proveedor *" value={form.cuit_emisor}
+                onChange={(e) => {
+                  // Al editar el CUIT, reseteamos el estado de "no existe"
+                  // hasta que se vuelva a disparar el lookup en blur.
+                  if (proveedorNoExiste) setProveedorNoExiste(false);
+                  setForm({ ...form, cuit_emisor: e.target.value, auxiliar_id: 0 });
+                }}
+                onBlur={handleCuitBlur}
+                placeholder="11 dígitos" containerClassName="col-span-1" />
+              <div className="col-span-2">
+                <label className="block text-[11px] font-medium text-ink-muted mb-1">Razón social *</label>
+                <input
+                  type="text"
+                  value={form.razon_social_emisor}
+                  onChange={(e) => setForm({ ...form, razon_social_emisor: e.target.value })}
+                  className={`w-full text-[12px] border rounded px-2 py-1 focus:outline-none ${
+                    proveedorNoExiste
+                      ? 'border-danger focus:border-danger bg-danger-bg/10'
+                      : 'border-azure-soft focus:border-azure'
+                  }`}
+                />
+                {proveedorNoExiste && (
+                  <div className="mt-0.5 text-[10.5px] text-danger">
+                    Proveedor no existe — será cargado al registrar. Ingresá el nombre.
+                  </div>
+                )}
               </div>
-              <Field label="Razón social *" value={form.razon_social_emisor}
-                onChange={(e) => setForm({ ...form, razon_social_emisor: e.target.value })}
-                containerClassName="col-span-2" />
             </div>
-            {form.auxiliar_id > 0 && (
+            {form.auxiliar_id > 0 && !proveedorNoExiste && (
               <div className="text-[11.5px] text-success mt-1">
                 ✓ Proveedor reconocido (auxiliar #{form.auxiliar_id})
               </div>
+            )}
+            {proveedorLookup.isPending && (
+              <div className="text-[11.5px] text-ink-muted mt-1">Buscando proveedor…</div>
             )}
           </div>
 
@@ -326,52 +396,84 @@ export function FacturaCompraManualPage() {
               Cargá el neto y el IVA por alícuota. El total se calcula solo.
             </div>
 
-            {/* v1.25 — desglose por alícuota (10,5% / 21% / 27%). */}
+            {/*
+              v1.25 — desglose por alícuota (10,5% / 21% / 27%).
+              v1.38 M3 — al cambiar el neto, autocalculamos IVA = neto * tasa
+              SOLO si el IVA actual está "sincronizado" con el neto anterior
+              (es decir, no fue editado manualmente). Esto permite override
+              manual: si el usuario edita el IVA, futuros cambios al neto NO
+              lo van a pisar.
+              v1.38 M4 — DecimalField acepta '.' y ',' sin perder valor.
+            */}
             <div className="space-y-2">
               <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-end">
                 <div className="text-[11px] text-ink-muted font-medium pb-2">IVA 21%</div>
-                <Field label="Neto gravado" type="number" step="0.01"
-                  value={String(form.imp_neto_gravado_21)}
-                  onChange={(e) => setForm({ ...form, imp_neto_gravado_21: +e.target.value })} />
-                <Field label="IVA" type="number" step="0.01"
-                  value={String(form.imp_iva_21)}
-                  onChange={(e) => setForm({ ...form, imp_iva_21: +e.target.value })} />
+                <DecimalField label="Neto gravado"
+                  value={form.imp_neto_gravado_21}
+                  onChange={(n) => setForm((f) => {
+                    const ivaPrevExpected = +(f.imp_neto_gravado_21 * 0.21).toFixed(2);
+                    const ivaSync = Math.abs(f.imp_iva_21 - ivaPrevExpected) < 0.01;
+                    return {
+                      ...f,
+                      imp_neto_gravado_21: n,
+                      imp_iva_21: ivaSync ? +(n * 0.21).toFixed(2) : f.imp_iva_21,
+                    };
+                  })} />
+                <DecimalField label="IVA"
+                  value={form.imp_iva_21}
+                  onChange={(n) => setForm({ ...form, imp_iva_21: n })} />
               </div>
               <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-end">
                 <div className="text-[11px] text-ink-muted font-medium pb-2">IVA 10,5%</div>
-                <Field label="Neto gravado" type="number" step="0.01"
-                  value={String(form.imp_neto_gravado_10_5)}
-                  onChange={(e) => setForm({ ...form, imp_neto_gravado_10_5: +e.target.value })} />
-                <Field label="IVA" type="number" step="0.01"
-                  value={String(form.imp_iva_10_5)}
-                  onChange={(e) => setForm({ ...form, imp_iva_10_5: +e.target.value })} />
+                <DecimalField label="Neto gravado"
+                  value={form.imp_neto_gravado_10_5}
+                  onChange={(n) => setForm((f) => {
+                    const ivaPrevExpected = +(f.imp_neto_gravado_10_5 * 0.105).toFixed(2);
+                    const ivaSync = Math.abs(f.imp_iva_10_5 - ivaPrevExpected) < 0.01;
+                    return {
+                      ...f,
+                      imp_neto_gravado_10_5: n,
+                      imp_iva_10_5: ivaSync ? +(n * 0.105).toFixed(2) : f.imp_iva_10_5,
+                    };
+                  })} />
+                <DecimalField label="IVA"
+                  value={form.imp_iva_10_5}
+                  onChange={(n) => setForm({ ...form, imp_iva_10_5: n })} />
               </div>
               <div className="grid grid-cols-[80px_1fr_1fr] gap-3 items-end">
                 <div className="text-[11px] text-ink-muted font-medium pb-2">IVA 27%</div>
-                <Field label="Neto gravado" type="number" step="0.01"
-                  value={String(form.imp_neto_gravado_27)}
-                  onChange={(e) => setForm({ ...form, imp_neto_gravado_27: +e.target.value })} />
-                <Field label="IVA" type="number" step="0.01"
-                  value={String(form.imp_iva_27)}
-                  onChange={(e) => setForm({ ...form, imp_iva_27: +e.target.value })} />
+                <DecimalField label="Neto gravado"
+                  value={form.imp_neto_gravado_27}
+                  onChange={(n) => setForm((f) => {
+                    const ivaPrevExpected = +(f.imp_neto_gravado_27 * 0.27).toFixed(2);
+                    const ivaSync = Math.abs(f.imp_iva_27 - ivaPrevExpected) < 0.01;
+                    return {
+                      ...f,
+                      imp_neto_gravado_27: n,
+                      imp_iva_27: ivaSync ? +(n * 0.27).toFixed(2) : f.imp_iva_27,
+                    };
+                  })} />
+                <DecimalField label="IVA"
+                  value={form.imp_iva_27}
+                  onChange={(n) => setForm({ ...form, imp_iva_27: n })} />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <Field label="No gravado" type="number" step="0.01" value={String(form.imp_no_gravado)}
-                onChange={(e) => setForm({ ...form, imp_no_gravado: +e.target.value })} />
-              <Field label="Exento" type="number" step="0.01" value={String(form.imp_exento)}
-                onChange={(e) => setForm({ ...form, imp_exento: +e.target.value })} />
+              <DecimalField label="No gravado" value={form.imp_no_gravado}
+                onChange={(n) => setForm({ ...form, imp_no_gravado: n })} />
+              <DecimalField label="Exento" value={form.imp_exento}
+                onChange={(n) => setForm({ ...form, imp_exento: n })} />
             </div>
 
             {/* v1.34 — percepciones IVA + IIBB. Suman al total. */}
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <Field label="Percepción IVA" type="number" step="0.01"
-                value={String(form.imp_percepciones_iva)}
-                onChange={(e) => setForm({ ...form, imp_percepciones_iva: +e.target.value })} />
-              <Field label="Percepción Ingresos Brutos" type="number" step="0.01"
-                value={String(form.imp_percepciones_iibb)}
-                onChange={(e) => setForm({ ...form, imp_percepciones_iibb: +e.target.value })} />
+              <DecimalField label="Percepción IVA"
+                value={form.imp_percepciones_iva}
+                onChange={(n) => setForm({ ...form, imp_percepciones_iva: n })} />
+              <DecimalField label="Percepción Ingresos Brutos"
+                value={form.imp_percepciones_iibb}
+                onChange={(n) => setForm({ ...form, imp_percepciones_iibb: n })} />
             </div>
 
             <div className="mt-3 flex justify-between items-center bg-surface-row border border-line rounded-md px-3 py-2">
@@ -413,9 +515,14 @@ export function FacturaCompraManualPage() {
                 {verificar.isPending ? 'Verificando…' : 'Verificar ARCA'}
               </Button>
             )}
+            <Button variant="outline" disabled={!valid || registrar.isPending}
+              onClick={() => { setCargarOtroMode(true); registrar.mutate(); }}
+              title="Guarda esta factura y deja la ventana abierta con proveedor y fechas para cargar la siguiente.">
+              {registrar.isPending && cargarOtroMode ? 'Registrando…' : 'Registrar y cargar otro'}
+            </Button>
             <Button variant="primary" disabled={!valid || registrar.isPending}
-              onClick={() => registrar.mutate()}>
-              {registrar.isPending ? 'Registrando…' : `Registrar (${fmtMoney(form.imp_total)})`}
+              onClick={() => { setCargarOtroMode(false); registrar.mutate(); }}>
+              {registrar.isPending && !cargarOtroMode ? 'Registrando…' : `Registrar (${fmtMoney(form.imp_total)})`}
             </Button>
           </div>
         </CardBody>

@@ -4,6 +4,7 @@ use App\Erp\Http\Controllers\ArcaController;
 use App\Erp\Http\Controllers\AliasContraparteController;
 use App\Erp\Http\Controllers\LibroIvaComprasExportController;
 use App\Erp\Http\Controllers\LibroIvaComprasImportController;
+use App\Erp\Http\Controllers\LibroIvaVentasImportController;
 use App\Erp\Http\Controllers\AsientosController;
 use App\Erp\Http\Controllers\AuditoriaController;
 use App\Erp\Http\Controllers\AuthController;
@@ -384,6 +385,20 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.livc.no-tomadas');
         Route::post('/libro-iva-compras/no-tomadas/tomar', [LibroIvaComprasImportController::class, 'tomarFacturas'])
             ->name('erp.livc.no-tomadas.tomar');
+
+        // v1.45 — Importador del Libro IVA Ventas (espejo del v1.9 compras).
+        Route::post('/libro-iva-ventas/import/preview', [LibroIvaVentasImportController::class, 'preview'])
+            ->name('erp.livv.preview');
+        Route::post('/libro-iva-ventas/import/confirmar', [LibroIvaVentasImportController::class, 'confirmar'])
+            ->name('erp.livv.confirmar');
+        Route::get('/libro-iva-ventas/imports', [LibroIvaVentasImportController::class, 'imports'])
+            ->name('erp.livv.imports');
+        Route::get('/libro-iva-ventas/imports/{id}/errores.csv', [LibroIvaVentasImportController::class, 'descargarErrores'])
+            ->whereNumber('id')->name('erp.livv.import-errores-csv');
+        Route::get('/libro-iva-ventas/imports/{id}', [LibroIvaVentasImportController::class, 'importDetalle'])
+            ->whereNumber('id')->name('erp.livv.import-detalle');
+        Route::delete('/libro-iva-ventas/imports/{id}', [LibroIvaVentasImportController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.livv.import-destroy');
 
         // ADDENDUM v1.11 — Generador F.8001 Libro IVA Digital Compras
         Route::post('/libro-iva-compras/{periodoId}/exportar-f8001', [LibroIvaComprasExportController::class, 'exportar'])

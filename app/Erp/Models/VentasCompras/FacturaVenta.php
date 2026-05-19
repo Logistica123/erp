@@ -34,6 +34,13 @@ class FacturaVenta extends Model
         'es_fce', 'cbu_beneficiario', 'alias_beneficiario', 'saldo_aceptacion',
         'liq_id', 'origen', 'estado', 'estado_fce',
         'observaciones', 'centro_costo_id', 'asiento_id', 'created_by_user_id',
+        // v1.43 — desglose IVA por alícuota.
+        'imp_iva_27', 'imp_iva_21', 'imp_iva_10_5', 'imp_iva_5', 'imp_iva_2_5',
+        'imp_neto_gravado_27', 'imp_neto_gravado_21', 'imp_neto_gravado_10_5',
+        'imp_neto_gravado_5', 'imp_neto_gravado_2_5',
+        // v1.45 — import del Libro IVA Ventas + metadata extra.
+        'import_id', 'periodo_trabajado_texto', 'jurisdiccion_codigo',
+        'pdf_path',
     ];
 
     protected $casts = [

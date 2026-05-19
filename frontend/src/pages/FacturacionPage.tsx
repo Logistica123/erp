@@ -174,6 +174,12 @@ export function FacturacionPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {/* v1.45 — Importador CSV/Excel del Libro IVA Ventas. */}
+          <Link to="/erp/libro-iva-ventas/import">
+            <Button variant="outline">
+              <Plus className="w-4 h-4 mr-1" /> Importar Libro IVA
+            </Button>
+          </Link>
           {/* v1.39 — Wizard batch import de PDFs de AFIP. */}
           <Link to="/erp/facturacion/importar-pdfs">
             <Button variant="outline">

@@ -60,6 +60,7 @@ import { ConfiguracionIvaPage } from './pages/ConfiguracionIvaPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FacturaVentaManualPage } from './pages/FacturaVentaManualPage';
 import { ImportVentasPdfWizardPage } from './pages/ImportVentasPdfWizardPage';
+import { LibroIvaVentasImportPage } from './pages/LibroIvaVentasImportPage';
 import { FacturaCompraManualPage } from './pages/FacturaCompraManualPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
 import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
@@ -129,6 +130,8 @@ export default function App() {
               <Route path="/erp/facturacion/nueva-manual" element={<FacturaVentaManualPage />} handle={{ crumb: 'Nueva manual' }} />
               {/* v1.39 — Wizard batch import de PDFs AFIP (Mis Comprobantes Emitidos) */}
               <Route path="/erp/facturacion/importar-pdfs" element={<ImportVentasPdfWizardPage />} handle={{ crumb: 'Importar PDFs' }} />
+              {/* v1.45 — Importador CSV/Excel del Libro IVA Ventas */}
+              <Route path="/erp/libro-iva-ventas/import" element={<LibroIvaVentasImportPage />} handle={{ crumb: 'Importar Libro IVA Ventas' }} />
               <Route path="/erp/libro-iva-ventas" element={<LibroIvaVentasPage />} handle={{ crumb: 'Libro IVA Ventas' }} />
               <Route path="/erp/bancos" element={<BancosPage />} handle={{ crumb: 'Bancos' }} />
               <Route path="/erp/conciliacion" element={<ConciliacionPage />} handle={{ crumb: 'Conciliación' }} />

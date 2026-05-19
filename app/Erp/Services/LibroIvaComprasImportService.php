@@ -385,10 +385,30 @@ class LibroIvaComprasImportService
 
     private function leerArchivo(string $path): array
     {
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION) ?: 'csv');
-        if ($ext === 'xlsx' || $ext === 'xls') {
-            $this->lastEncoding = 'XLSX'; // PhpSpreadsheet ya entrega strings UTF-8.
-            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
+        // v1.47 — Laravel guarda los uploads en /tmp con nombres como
+        // `phpXXXX.tmp` SIN extensión. La detección anterior por extensión
+        // del path tmp siempre fallaba → caía al parser CSV con contenido
+        // binario y devolvía garbage como "headers detectados".
+        // Solución: detectar el tipo por magic bytes leyendo los primeros
+        // bytes del archivo.
+        //   - XLSX (zip): "PK\x03\x04"
+        //   - XLS (compound): "\xD0\xCF\x11\xE0"
+        //   - CSV/TXT: cualquier texto
+        $fh = fopen($path, 'rb');
+        $magic = $fh ? (string) fread($fh, 8) : '';
+        if ($fh) fclose($fh);
+
+        $extPath = strtolower(pathinfo($path, PATHINFO_EXTENSION) ?: '');
+        $esXlsx = str_starts_with($magic, "PK\x03\x04") || $extPath === 'xlsx';
+        $esXls = str_starts_with($magic, "\xD0\xCF\x11\xE0") || $extPath === 'xls';
+
+        if ($esXlsx || $esXls) {
+            $this->lastEncoding = 'XLSX'; // PhpSpreadsheet entrega strings UTF-8.
+            // Forzar el tipo de reader cuando el archivo no tiene extensión
+            // (Laravel tmp), si no createReaderForFile() falla.
+            $reader = $esXlsx
+                ? \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx')
+                : \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
             $reader->setReadDataOnly(true);
             $sheet = $reader->load($path)->getActiveSheet();
             return $sheet->toArray(null, true, false, false);

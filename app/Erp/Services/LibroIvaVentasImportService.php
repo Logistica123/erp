@@ -534,10 +534,20 @@ class LibroIvaVentasImportService
 
     private function leerArchivo(string $path): array
     {
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION) ?: 'csv');
-        if ($ext === 'xlsx' || $ext === 'xls') {
+        // v1.47 — Detección por magic bytes (Laravel uploads sin extensión).
+        $fh = fopen($path, 'rb');
+        $magic = $fh ? (string) fread($fh, 8) : '';
+        if ($fh) fclose($fh);
+
+        $extPath = strtolower(pathinfo($path, PATHINFO_EXTENSION) ?: '');
+        $esXlsx = str_starts_with($magic, "PK\x03\x04") || $extPath === 'xlsx';
+        $esXls = str_starts_with($magic, "\xD0\xCF\x11\xE0") || $extPath === 'xls';
+
+        if ($esXlsx || $esXls) {
             $this->lastEncoding = 'XLSX';
-            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
+            $reader = $esXlsx
+                ? \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx')
+                : \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
             $reader->setReadDataOnly(true);
             $sheet = $reader->load($path)->getActiveSheet();
             return $sheet->toArray(null, true, false, false);

@@ -83,6 +83,17 @@ class FacturasManualController
             'imp_no_gravado' => ['nullable', 'numeric'],
             'imp_exento' => ['nullable', 'numeric'],
             'imp_iva' => ['nullable', 'numeric'],
+            // v1.43 — desglose IVA por alícuota (extraído del PDF AFIP).
+            'imp_iva_27' => ['nullable', 'numeric'],
+            'imp_iva_21' => ['nullable', 'numeric'],
+            'imp_iva_10_5' => ['nullable', 'numeric'],
+            'imp_iva_5' => ['nullable', 'numeric'],
+            'imp_iva_2_5' => ['nullable', 'numeric'],
+            'imp_neto_gravado_27' => ['nullable', 'numeric'],
+            'imp_neto_gravado_21' => ['nullable', 'numeric'],
+            'imp_neto_gravado_10_5' => ['nullable', 'numeric'],
+            'imp_neto_gravado_5' => ['nullable', 'numeric'],
+            'imp_neto_gravado_2_5' => ['nullable', 'numeric'],
             'imp_total' => ['required', 'numeric'],
             'cae' => ['nullable', 'string', 'max:20'],
             'fecha_vto_cae' => ['nullable', 'date'],
@@ -92,6 +103,28 @@ class FacturasManualController
             // v1.39 — PDF original (AFIP) opcional. Hasta 8MB.
             'pdf' => ['nullable', 'file', 'mimes:pdf', 'max:8192'],
         ]);
+
+        // v1.43 — derivar agregados desde el desglose si vino del PDF.
+        // Si el cliente mandó imp_iva_21/10_5/etc, sumamos automáticamente
+        // imp_iva y imp_neto_gravado (idéntico patrón a v1.25 compras).
+        $netosDetalle = [
+            (float) ($data['imp_neto_gravado_27'] ?? 0),
+            (float) ($data['imp_neto_gravado_21'] ?? 0),
+            (float) ($data['imp_neto_gravado_10_5'] ?? 0),
+            (float) ($data['imp_neto_gravado_5'] ?? 0),
+            (float) ($data['imp_neto_gravado_2_5'] ?? 0),
+        ];
+        $ivasDetalle = [
+            (float) ($data['imp_iva_27'] ?? 0),
+            (float) ($data['imp_iva_21'] ?? 0),
+            (float) ($data['imp_iva_10_5'] ?? 0),
+            (float) ($data['imp_iva_5'] ?? 0),
+            (float) ($data['imp_iva_2_5'] ?? 0),
+        ];
+        $sumaNetos = array_sum($netosDetalle);
+        $sumaIvas = array_sum($ivasDetalle);
+        if ($sumaNetos > 0) $data['imp_neto_gravado'] = round($sumaNetos, 2);
+        if ($sumaIvas > 0)  $data['imp_iva'] = round($sumaIvas, 2);
 
         $empresaId = $this->empresaId($request);
 
@@ -192,6 +225,17 @@ class FacturasManualController
             'imp_no_gravado' => $data['imp_no_gravado'] ?? 0,
             'imp_exento' => $data['imp_exento'] ?? 0,
             'imp_iva' => $data['imp_iva'] ?? 0,
+            // v1.43 — desglose por alícuota.
+            'imp_iva_27' => $data['imp_iva_27'] ?? 0,
+            'imp_iva_21' => $data['imp_iva_21'] ?? 0,
+            'imp_iva_10_5' => $data['imp_iva_10_5'] ?? 0,
+            'imp_iva_5' => $data['imp_iva_5'] ?? 0,
+            'imp_iva_2_5' => $data['imp_iva_2_5'] ?? 0,
+            'imp_neto_gravado_27' => $data['imp_neto_gravado_27'] ?? 0,
+            'imp_neto_gravado_21' => $data['imp_neto_gravado_21'] ?? 0,
+            'imp_neto_gravado_10_5' => $data['imp_neto_gravado_10_5'] ?? 0,
+            'imp_neto_gravado_5' => $data['imp_neto_gravado_5'] ?? 0,
+            'imp_neto_gravado_2_5' => $data['imp_neto_gravado_2_5'] ?? 0,
             'imp_tributos' => 0,
             'imp_total' => $data['imp_total'],
             'origen' => 'MANUAL',

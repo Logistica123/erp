@@ -28,24 +28,23 @@ use Symfony\Component\Process\Process;
 class VentaPdfExtractor
 {
     /**
+     * Tasas reconocidas en el PDF y nombre de campo asociado (clave del array
+     * de respuesta). Si el PDF AFIP lista una alícuota que no esté acá la
+     * ignoramos silenciosamente — habría que sumar el campo a futuro.
+     */
+    private const ALICUOTAS = [
+        ['tasa' => 27.0,  'key' => '27',   'factor' => 0.27],
+        ['tasa' => 21.0,  'key' => '21',   'factor' => 0.21],
+        ['tasa' => 10.5,  'key' => '10_5', 'factor' => 0.105],
+        ['tasa' => 5.0,   'key' => '5',    'factor' => 0.05],
+        ['tasa' => 2.5,   'key' => '2_5',  'factor' => 0.025],
+        ['tasa' => 0.0,   'key' => '0',    'factor' => 0.0],
+    ];
+
+    /**
      * @return array{
      *   ok: bool,
-     *   campos: array{
-     *     codigo_afip: ?int,
-     *     letra: ?string,
-     *     punto_venta: ?int,
-     *     numero: ?int,
-     *     fecha_emision: ?string,
-     *     cuit_cliente: ?string,
-     *     razon_social_cliente: ?string,
-     *     imp_neto_gravado: ?float,
-     *     imp_iva: ?float,
-     *     imp_total: ?float,
-     *     alicuota: ?float,
-     *     cae: ?string,
-     *     fecha_vto_cae: ?string,
-     *     periodo_trabajado_texto: ?string,
-     *   },
+     *   campos: array<string,mixed>,
      *   tipo_comprobante_id: ?int,
      *   raw_excerpt: string,
      *   warning: ?string,
@@ -70,8 +69,16 @@ class VentaPdfExtractor
             'razon_social_cliente' => null,
             'imp_neto_gravado' => null,
             'imp_iva' => null,
+            'imp_no_gravado' => null,
+            'imp_exento' => null,
             'imp_total' => null,
             'alicuota' => null,
+            // v1.43 — desglose por alícuota (todas las que AFIP discrimina).
+            'imp_iva_27' => null, 'imp_iva_21' => null, 'imp_iva_10_5' => null,
+            'imp_iva_5' => null,  'imp_iva_2_5' => null, 'imp_iva_0' => null,
+            'imp_neto_gravado_27' => null, 'imp_neto_gravado_21' => null,
+            'imp_neto_gravado_10_5' => null, 'imp_neto_gravado_5' => null,
+            'imp_neto_gravado_2_5' => null,
             'cae' => null,
             'fecha_vto_cae' => null,
             'periodo_trabajado_texto' => null,
@@ -126,33 +133,61 @@ class VentaPdfExtractor
             $campos['cuit_cliente'] = $cuits[0];
         }
 
-        // Total: buscar variantes (Total, Importe Total, Subtotal c/IVA si es la última línea).
-        // Preferimos el "Importe Total" si está, sino el "Total".
+        // v1.43 — "Importe Total" (label específico de AFIP, NO confundir con
+        // "Subtotal c/IVA" del cuerpo). Si por algún motivo no aparece ese
+        // label, fallback al último número con la palabra "Total" como prefix.
         if (preg_match('/Importe\s+Total:?\s*\$?\s*([\d.,]+)/iu', $texto, $m)) {
             $campos['imp_total'] = $this->parseImporte($m[1]);
-        } elseif (preg_match('/Total:?\s*\$?\s*([\d.,]+)/iu', $texto, $m)) {
-            $campos['imp_total'] = $this->parseImporte($m[1]);
         }
 
-        // Neto gravado: AFIP suele rotularlo como "Importe Neto Gravado" o
-        // "Subtotal" (en facturas A — antes del IVA).
+        // Neto gravado: AFIP rotula "Importe Neto Gravado".
         if (preg_match('/Importe\s+Neto\s+Gravado:?\s*\$?\s*([\d.,]+)/iu', $texto, $m)) {
             $campos['imp_neto_gravado'] = $this->parseImporte($m[1]);
-        } elseif (preg_match('/Subtotal:?\s*\$?\s*([\d.,]+)/iu', $texto, $m)) {
-            $campos['imp_neto_gravado'] = $this->parseImporte($m[1]);
+        }
+        // Importe Exento y Importe No Gravado (algunas facturas los discriminan).
+        if (preg_match('/Importe\s+Exento:?\s*\$?\s*([\d.,]+)/iu', $texto, $m)) {
+            $campos['imp_exento'] = $this->parseImporte($m[1]);
+        }
+        if (preg_match('/Importe\s+No\s+Gravado:?\s*\$?\s*([\d.,]+)/iu', $texto, $m)) {
+            $campos['imp_no_gravado'] = $this->parseImporte($m[1]);
         }
 
-        // IVA: "IVA 21%" o "Importe Total IVA" o similar.
-        if (preg_match('/IVA\s+(?:Inscripto\s+)?(\d{1,2}(?:[,.]\d+)?)\s*%?:?\s*\$?\s*([\d.,]+)/iu', $texto, $m)) {
-            $campos['alicuota'] = (float) str_replace(',', '.', $m[1]);
-            $campos['imp_iva'] = $this->parseImporte($m[2]);
+        // v1.43 — Desglose IVA por alícuota.
+        // PDF AFIP lista las 6 alícuotas en líneas separadas:
+        //   IVA 27%: $ X     IVA 21%: $ X    IVA 10.5%: $ X
+        //   IVA 5%: $ X      IVA 2.5%: $ X   IVA 0%: $ X
+        // Usamos preg_match_all para capturarlas TODAS en lugar de quedarnos
+        // con la primera (bug v1.41: se quedaba con "IVA 27%: 0" y el resto
+        // se perdía).
+        $ivaTotal = 0.0;
+        $ivaCapturados = 0;
+        if (preg_match_all('/IVA\s+(\d+(?:[.,]\d+)?)\s*%\s*:?\s*\$?\s*([\d.,]+)/iu', $texto, $mm, PREG_SET_ORDER)) {
+            foreach ($mm as $match) {
+                $tasa = (float) str_replace(',', '.', $match[1]);
+                $monto = $this->parseImporte($match[2]);
+                if ($monto === null) continue;
+                $bucket = $this->bucketAlicuota($tasa);
+                if ($bucket === null) continue;
+                $campos["imp_iva_{$bucket['key']}"] = $monto;
+                $ivaTotal += $monto;
+                $ivaCapturados++;
+                // Derivar neto correspondiente: si tasa > 0 y hay IVA > 0.
+                if ($bucket['factor'] > 0 && $monto > 0.005) {
+                    $campos["imp_neto_gravado_{$bucket['key']}"] = round($monto / $bucket['factor'], 2);
+                }
+            }
         }
-        // Fallback: si encontramos alícuota suelta pero no monto, lo derivamos del neto.
-        if ($campos['alicuota'] === null && preg_match('/Al[ií]cuota\s+IVA[:\s]+(\d{1,2}(?:[,.]\d+)?)\s*%/iu', $texto, $m)) {
-            $campos['alicuota'] = (float) str_replace(',', '.', $m[1]);
-        }
-        if ($campos['imp_iva'] === null && $campos['alicuota'] !== null && $campos['imp_neto_gravado'] !== null) {
-            $campos['imp_iva'] = round($campos['imp_neto_gravado'] * $campos['alicuota'] / 100, 2);
+        if ($ivaCapturados > 0) {
+            $campos['imp_iva'] = round($ivaTotal, 2);
+            // alícuota dominante = la del IVA más alto (para legacy display).
+            $maxKey = null; $maxVal = -1;
+            foreach (self::ALICUOTAS as $a) {
+                $v = (float) ($campos["imp_iva_{$a['key']}"] ?? 0);
+                if ($v > $maxVal) { $maxVal = $v; $maxKey = $a; }
+            }
+            if ($maxKey && $maxVal > 0.005) {
+                $campos['alicuota'] = (float) $maxKey['tasa'];
+            }
         }
 
         // CAE: 14 dígitos típicamente al final del PDF.
@@ -265,6 +300,19 @@ class VentaPdfExtractor
         return is_numeric($s) ? (float) $s : null;
     }
 
+    /**
+     * Mapea una tasa numérica al bucket conocido (con tolerancia ±0.01 para
+     * absorber rounding de la regex). Devuelve null si la tasa no está en la
+     * tabla de alícuotas reconocidas.
+     */
+    private function bucketAlicuota(float $tasa): ?array
+    {
+        foreach (self::ALICUOTAS as $a) {
+            if (abs($a['tasa'] - $tasa) < 0.01) return $a;
+        }
+        return null;
+    }
+
     private function respuestaVacia(string $warning): array
     {
         return [
@@ -272,8 +320,12 @@ class VentaPdfExtractor
             'campos' => array_fill_keys([
                 'codigo_afip', 'letra', 'punto_venta', 'numero', 'fecha_emision',
                 'cuit_cliente', 'razon_social_cliente', 'imp_neto_gravado',
-                'imp_iva', 'imp_total', 'alicuota', 'cae', 'fecha_vto_cae',
-                'periodo_trabajado_texto',
+                'imp_iva', 'imp_no_gravado', 'imp_exento', 'imp_total', 'alicuota',
+                'imp_iva_27', 'imp_iva_21', 'imp_iva_10_5', 'imp_iva_5',
+                'imp_iva_2_5', 'imp_iva_0',
+                'imp_neto_gravado_27', 'imp_neto_gravado_21', 'imp_neto_gravado_10_5',
+                'imp_neto_gravado_5', 'imp_neto_gravado_2_5',
+                'cae', 'fecha_vto_cae', 'periodo_trabajado_texto',
             ], null),
             'tipo_comprobante_id' => null,
             'raw_excerpt' => '',

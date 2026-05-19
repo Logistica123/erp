@@ -53,6 +53,17 @@ export type FacturaVentaFormValues = {
   imp_exento: number;
   imp_iva: number;
   imp_total: number;
+  // v1.43 — desglose IVA por alícuota.
+  imp_iva_27: number;
+  imp_iva_21: number;
+  imp_iva_10_5: number;
+  imp_iva_5: number;
+  imp_iva_2_5: number;
+  imp_neto_gravado_27: number;
+  imp_neto_gravado_21: number;
+  imp_neto_gravado_10_5: number;
+  imp_neto_gravado_5: number;
+  imp_neto_gravado_2_5: number;
   cae: string;
   fecha_vto_cae: string;
   periodo_trabajado_texto: string;
@@ -76,6 +87,9 @@ export const defaultFormValues: FacturaVentaFormValues = {
   imp_exento: 0,
   imp_iva: 0,
   imp_total: 0,
+  imp_iva_27: 0, imp_iva_21: 0, imp_iva_10_5: 0, imp_iva_5: 0, imp_iva_2_5: 0,
+  imp_neto_gravado_27: 0, imp_neto_gravado_21: 0, imp_neto_gravado_10_5: 0,
+  imp_neto_gravado_5: 0, imp_neto_gravado_2_5: 0,
   cae: '',
   fecha_vto_cae: '',
   periodo_trabajado_texto: '',
@@ -95,8 +109,20 @@ type PdfExtractResp = {
     razon_social_cliente: string | null;
     imp_neto_gravado: number | null;
     imp_iva: number | null;
+    imp_no_gravado: number | null;
+    imp_exento: number | null;
     imp_total: number | null;
     alicuota: number | null;
+    imp_iva_27: number | null;
+    imp_iva_21: number | null;
+    imp_iva_10_5: number | null;
+    imp_iva_5: number | null;
+    imp_iva_2_5: number | null;
+    imp_neto_gravado_27: number | null;
+    imp_neto_gravado_21: number | null;
+    imp_neto_gravado_10_5: number | null;
+    imp_neto_gravado_5: number | null;
+    imp_neto_gravado_2_5: number | null;
     cae: string | null;
     fecha_vto_cae: string | null;
     periodo_trabajado_texto: string | null;
@@ -134,6 +160,12 @@ export function FacturaVentaForm({
   const [extractInfo, setExtractInfo] = useState<{
     detectados: string[]; warning: string | null;
   } | null>(null);
+  // v1.43 — set de campos que vinieron del PDF (lockeados para no permitir
+  // edición accidental — pdftotext es confiable cuando matchea el layout AFIP).
+  const [lockedFields, setLockedFields] = useState<Set<string>>(new Set());
+  // v1.43 — razón social que dijo el PDF (para comparar contra DB tras lookup).
+  const [pdfRazonSocial, setPdfRazonSocial] = useState<string | null>(null);
+  const [razonDbMismatch, setRazonDbMismatch] = useState<{ pdf: string; db: string } | null>(null);
 
   const { data: cats } = useQuery<Catalogos>({
     queryKey: ['fv-catalogos-manual'],
@@ -188,21 +220,42 @@ export function FacturaVentaForm({
   const aplicarCamposExtraidos = (data: PdfExtractResp): string[] => {
     const c = data.campos;
     const cambios: Partial<FacturaVentaFormValues> = {};
-    if (data.tipo_comprobante_id) cambios.tipo_comprobante_id = data.tipo_comprobante_id;
-    if (c.punto_venta != null) cambios.punto_venta = c.punto_venta;
-    if (c.numero != null) cambios.numero = c.numero;
-    if (c.fecha_emision) cambios.fecha_emision = c.fecha_emision;
-    if (c.cuit_cliente) cambios.cuit_cliente = c.cuit_cliente;
-    if (c.razon_social_cliente) cambios.razon_social_cliente = c.razon_social_cliente;
-    if (c.imp_neto_gravado != null) cambios.imp_neto_gravado = c.imp_neto_gravado;
-    if (c.imp_iva != null) cambios.imp_iva = c.imp_iva;
-    if (c.imp_total != null) cambios.imp_total = c.imp_total;
-    if (c.cae) cambios.cae = c.cae;
-    if (c.fecha_vto_cae) cambios.fecha_vto_cae = c.fecha_vto_cae;
+    const locked: string[] = [];
+    if (data.tipo_comprobante_id) { cambios.tipo_comprobante_id = data.tipo_comprobante_id; locked.push('tipo_comprobante_id'); }
+    if (c.punto_venta != null) { cambios.punto_venta = c.punto_venta; locked.push('punto_venta'); }
+    if (c.numero != null) { cambios.numero = c.numero; locked.push('numero'); }
+    if (c.fecha_emision) { cambios.fecha_emision = c.fecha_emision; locked.push('fecha_emision'); }
+    if (c.cuit_cliente) { cambios.cuit_cliente = c.cuit_cliente; locked.push('cuit_cliente'); }
+    // Razón social: NO se lockea — el operador puede corregirla si difiere
+    // de la BD (warning aparte). Solo guardamos la versión del PDF para
+    // comparar después del lookup.
+    if (c.razon_social_cliente) {
+      cambios.razon_social_cliente = c.razon_social_cliente;
+      setPdfRazonSocial(c.razon_social_cliente);
+    }
+    if (c.imp_neto_gravado != null) { cambios.imp_neto_gravado = c.imp_neto_gravado; locked.push('imp_neto_gravado'); }
+    if (c.imp_iva != null) { cambios.imp_iva = c.imp_iva; locked.push('imp_iva'); }
+    if (c.imp_no_gravado != null) { cambios.imp_no_gravado = c.imp_no_gravado; locked.push('imp_no_gravado'); }
+    if (c.imp_exento != null) { cambios.imp_exento = c.imp_exento; locked.push('imp_exento'); }
+    if (c.imp_total != null) { cambios.imp_total = c.imp_total; locked.push('imp_total'); }
+    // Desglose IVA por alícuota.
+    if (c.imp_iva_27 != null) cambios.imp_iva_27 = c.imp_iva_27;
+    if (c.imp_iva_21 != null) cambios.imp_iva_21 = c.imp_iva_21;
+    if (c.imp_iva_10_5 != null) cambios.imp_iva_10_5 = c.imp_iva_10_5;
+    if (c.imp_iva_5 != null) cambios.imp_iva_5 = c.imp_iva_5;
+    if (c.imp_iva_2_5 != null) cambios.imp_iva_2_5 = c.imp_iva_2_5;
+    if (c.imp_neto_gravado_27 != null) cambios.imp_neto_gravado_27 = c.imp_neto_gravado_27;
+    if (c.imp_neto_gravado_21 != null) cambios.imp_neto_gravado_21 = c.imp_neto_gravado_21;
+    if (c.imp_neto_gravado_10_5 != null) cambios.imp_neto_gravado_10_5 = c.imp_neto_gravado_10_5;
+    if (c.imp_neto_gravado_5 != null) cambios.imp_neto_gravado_5 = c.imp_neto_gravado_5;
+    if (c.imp_neto_gravado_2_5 != null) cambios.imp_neto_gravado_2_5 = c.imp_neto_gravado_2_5;
+    if (c.cae) { cambios.cae = c.cae; locked.push('cae'); }
+    if (c.fecha_vto_cae) { cambios.fecha_vto_cae = c.fecha_vto_cae; locked.push('fecha_vto_cae'); }
     if (c.periodo_trabajado_texto) cambios.periodo_trabajado_texto = c.periodo_trabajado_texto;
     if (Object.keys(cambios).length > 0) {
       setForm((f) => ({ ...f, ...cambios }));
     }
+    setLockedFields(new Set(locked));
     // Si vino CUIT, lanzamos el lookup para resolver el cliente_auxiliar_id.
     if (cambios.cuit_cliente && /^\d{11}$/.test(cambios.cuit_cliente)) {
       clienteLookup.mutate(cambios.cuit_cliente);
@@ -228,13 +281,17 @@ export function FacturaVentaForm({
   }, [form.tipo_comprobante_id, cats]);
 
   // Total = neto + iva + no_gravado + exento.
+  // v1.43 — si el total vino lockeado del PDF, NO lo pisamos: el "Importe
+  // Total" de AFIP es la fuente de verdad y la suma de componentes podría
+  // diferir por redondeo de alícuotas.
   useEffect(() => {
+    if (lockedFields.has('imp_total')) return;
     const total = Number(form.imp_neto_gravado || 0) + Number(form.imp_iva || 0) +
       Number(form.imp_no_gravado || 0) + Number(form.imp_exento || 0);
     if (Math.abs(total - form.imp_total) > 0.005) {
       setForm((f) => ({ ...f, imp_total: +total.toFixed(2) }));
     }
-  }, [form.imp_neto_gravado, form.imp_iva, form.imp_no_gravado, form.imp_exento, form.imp_total]);
+  }, [form.imp_neto_gravado, form.imp_iva, form.imp_no_gravado, form.imp_exento, form.imp_total, lockedFields]);
 
   // v1.39 — CUIT lookup onBlur. Mismo patrón que en compras (v1.38 M1).
   // Acá usamos el endpoint específico de clientes; si no existe, queda en
@@ -243,16 +300,32 @@ export function FacturaVentaForm({
   const clienteLookup = useMutation<{ data: { id: number; nombre: string } }, ApiError, string>({
     mutationFn: (cuit) => api.get(`/api/erp/auxiliares/by-cuit/${cuit}?tipo=Cliente`),
     onSuccess: (r) => {
+      // v1.43 — comparar razón social del PDF vs la guardada en BD.
+      // Si difieren significativamente avisamos al operador (sin bloquear).
+      if (pdfRazonSocial) {
+        const norm = (s: string) => s.toLowerCase().normalize('NFD')
+          .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+        if (norm(pdfRazonSocial) !== norm(r.data.nombre)) {
+          setRazonDbMismatch({ pdf: pdfRazonSocial, db: r.data.nombre });
+        } else {
+          setRazonDbMismatch(null);
+        }
+      } else {
+        setRazonDbMismatch(null);
+      }
       setForm((f) => ({
         ...f,
         cliente_auxiliar_id: r.data.id,
-        razon_social_cliente: r.data.nombre || f.razon_social_cliente,
+        // Mantenemos lo que dijo el PDF si vino — el operador decide qué
+        // valor mantener mirando el banner de mismatch.
+        razon_social_cliente: pdfRazonSocial || r.data.nombre || f.razon_social_cliente,
       }));
       setClienteNoExiste(false);
     },
     onError: () => {
       setForm((f) => ({ ...f, cliente_auxiliar_id: 0 }));
       setClienteNoExiste(true);
+      setRazonDbMismatch(null);
     },
   });
 
@@ -282,6 +355,16 @@ export function FacturaVentaForm({
         append('imp_no_gravado', form.imp_no_gravado);
         append('imp_exento', form.imp_exento);
         append('imp_iva', form.imp_iva);
+        append('imp_iva_27', form.imp_iva_27);
+        append('imp_iva_21', form.imp_iva_21);
+        append('imp_iva_10_5', form.imp_iva_10_5);
+        append('imp_iva_5', form.imp_iva_5);
+        append('imp_iva_2_5', form.imp_iva_2_5);
+        append('imp_neto_gravado_27', form.imp_neto_gravado_27);
+        append('imp_neto_gravado_21', form.imp_neto_gravado_21);
+        append('imp_neto_gravado_10_5', form.imp_neto_gravado_10_5);
+        append('imp_neto_gravado_5', form.imp_neto_gravado_5);
+        append('imp_neto_gravado_2_5', form.imp_neto_gravado_2_5);
         append('imp_total', form.imp_total);
         append('cae', form.cae);
         append('fecha_vto_cae', form.fecha_vto_cae);
@@ -304,6 +387,16 @@ export function FacturaVentaForm({
         imp_no_gravado: form.imp_no_gravado,
         imp_exento: form.imp_exento,
         imp_iva: form.imp_iva,
+        imp_iva_27: form.imp_iva_27,
+        imp_iva_21: form.imp_iva_21,
+        imp_iva_10_5: form.imp_iva_10_5,
+        imp_iva_5: form.imp_iva_5,
+        imp_iva_2_5: form.imp_iva_2_5,
+        imp_neto_gravado_27: form.imp_neto_gravado_27,
+        imp_neto_gravado_21: form.imp_neto_gravado_21,
+        imp_neto_gravado_10_5: form.imp_neto_gravado_10_5,
+        imp_neto_gravado_5: form.imp_neto_gravado_5,
+        imp_neto_gravado_2_5: form.imp_neto_gravado_2_5,
         imp_total: form.imp_total,
         cae: form.cae || undefined,
         fecha_vto_cae: form.fecha_vto_cae || undefined,
@@ -388,23 +481,46 @@ export function FacturaVentaForm({
         </div>
       </div>
 
+      {/* v1.43 — alerta cuando la razón social del PDF difiere de la BD. */}
+      {razonDbMismatch && (
+        <div className="border border-warning/40 bg-warning-bg/30 rounded-md p-2 text-[12px] flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0 mt-0.5" />
+          <div>
+            <strong>Atención: la razón social del PDF no coincide con la cargada en la base de datos.</strong>
+            <div className="text-[11px] mt-1">
+              <div><span className="text-ink-muted">PDF:</span> <code>{razonDbMismatch.pdf}</code></div>
+              <div><span className="text-ink-muted">BD:</span> <code>{razonDbMismatch.db}</code></div>
+            </div>
+            <div className="text-[10.5px] text-ink-muted mt-1">
+              Se va a registrar con la razón del PDF (vinculada al cliente existente). Si necesitás corregir,
+              editá el campo abajo o actualizá el cliente desde Auxiliares.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-3">
         <SelectField label="Tipo *" value={String(form.tipo_comprobante_id)}
           onChange={(e) => setForm({ ...form, tipo_comprobante_id: +e.target.value })}
+          disabled={lockedFields.has('tipo_comprobante_id')}
           options={(cats?.tipos_comprobante ?? []).map((t) => ({
             value: String(t.id), label: `${t.codigo_interno} ${t.letra ?? ''} — ${t.nombre}`,
           }))} placeholder="—" />
         <Field label="Punto de venta *" type="number" value={String(form.punto_venta)}
-          onChange={(e) => setForm({ ...form, punto_venta: +e.target.value })} />
+          onChange={(e) => setForm({ ...form, punto_venta: +e.target.value })}
+          disabled={lockedFields.has('punto_venta')} />
         <Field label="Número *" type="number" value={String(form.numero)}
-          onChange={(e) => setForm({ ...form, numero: +e.target.value })} />
+          onChange={(e) => setForm({ ...form, numero: +e.target.value })}
+          disabled={lockedFields.has('numero')} />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Fecha emisión *" type="date" value={form.fecha_emision}
-          onChange={(e) => setForm({ ...form, fecha_emision: e.target.value })} />
+          onChange={(e) => setForm({ ...form, fecha_emision: e.target.value })}
+          disabled={lockedFields.has('fecha_emision')} />
         <SelectField label="Cliente (existente)" value={String(form.cliente_auxiliar_id)}
           onChange={(e) => setForm({ ...form, cliente_auxiliar_id: +e.target.value })}
+          disabled={lockedFields.has('cuit_cliente')}
           options={[{ value: '0', label: '— escribí el CUIT abajo —' },
             ...((cats?.clientes ?? []).map((c) => ({
               value: String(c.id), label: `${c.codigo} ${c.nombre}`,
@@ -418,6 +534,7 @@ export function FacturaVentaForm({
             setForm({ ...form, cuit_cliente: e.target.value, cliente_auxiliar_id: 0 });
           }}
           onBlur={handleCuitBlur}
+          disabled={lockedFields.has('cuit_cliente')}
           placeholder="11 dígitos" containerClassName="col-span-1" />
         <div className="col-span-2">
           <label className="block text-[11px] font-medium text-ink-muted mb-1">Razón social *</label>
@@ -428,7 +545,9 @@ export function FacturaVentaForm({
             className={`w-full text-[12px] border rounded px-2 py-1 focus:outline-none ${
               clienteNoExiste
                 ? 'border-danger focus:border-danger bg-danger-bg/10'
-                : 'border-azure-soft focus:border-azure'
+                : razonDbMismatch
+                  ? 'border-warning focus:border-warning bg-warning-bg/10'
+                  : 'border-azure-soft focus:border-azure'
             }`}
           />
           {clienteNoExiste && (
@@ -471,6 +590,7 @@ export function FacturaVentaForm({
         <div className="grid grid-cols-4 gap-3">
           <DecimalField label="Neto gravado"
             value={form.imp_neto_gravado}
+            disabled={lockedFields.has('imp_neto_gravado')}
             onChange={(n) => setForm((f) => {
               // v1.39 (mismo patrón v1.38 M3) — auto-IVA 21% si no fue editado manual.
               const ivaPrevExpected = +(f.imp_neto_gravado * 0.21).toFixed(2);
@@ -483,16 +603,44 @@ export function FacturaVentaForm({
             })} />
           <DecimalField label="IVA"
             value={form.imp_iva}
+            disabled={lockedFields.has('imp_iva')}
             onChange={(n) => setForm({ ...form, imp_iva: n })} />
           <DecimalField label="No gravado"
             value={form.imp_no_gravado}
+            disabled={lockedFields.has('imp_no_gravado')}
             onChange={(n) => setForm({ ...form, imp_no_gravado: n })} />
           <DecimalField label="Exento"
             value={form.imp_exento}
+            disabled={lockedFields.has('imp_exento')}
             onChange={(n) => setForm({ ...form, imp_exento: n })} />
         </div>
+
+        {/* v1.43 — desglose IVA por alícuota cuando el PDF lo discriminó. */}
+        {(form.imp_iva_27 > 0 || form.imp_iva_21 > 0 || form.imp_iva_10_5 > 0
+          || form.imp_iva_5 > 0 || form.imp_iva_2_5 > 0) && (
+          <div className="mt-2 border border-line rounded-md p-2 bg-surface-row text-[11px]">
+            <div className="text-ink-muted uppercase tracking-wide mb-1 text-[10px]">
+              Desglose IVA detectado del PDF (se persiste discriminado)
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {[
+                { label: '27%', val: form.imp_iva_27 },
+                { label: '21%', val: form.imp_iva_21 },
+                { label: '10.5%', val: form.imp_iva_10_5 },
+                { label: '5%', val: form.imp_iva_5 },
+                { label: '2.5%', val: form.imp_iva_2_5 },
+              ].map((a) => (
+                <div key={a.label} className={a.val > 0 ? '' : 'text-ink-muted'}>
+                  <div className="text-[10px]">{a.label}</div>
+                  <div className="tabular font-mono">{fmtMoney(a.val)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="mt-3 flex justify-between items-center bg-surface-row border border-line rounded-md px-3 py-2">
-          <span className="text-[12px] font-semibold">Total</span>
+          <span className="text-[12px] font-semibold">Total {lockedFields.has('imp_total') && <span className="text-[10px] text-ink-muted">(del PDF)</span>}</span>
           <span className="text-[15px] font-bold tabular text-navy-800">{fmtMoney(form.imp_total)}</span>
         </div>
       </div>
@@ -500,9 +648,11 @@ export function FacturaVentaForm({
       <div className="grid grid-cols-2 gap-3 border-t border-line pt-3">
         <Field label="CAE (opcional)" value={form.cae}
           onChange={(e) => setForm({ ...form, cae: e.target.value })}
+          disabled={lockedFields.has('cae')}
           hint="Si la factura externa trae CAE, cargalo para verificar contra ARCA." />
         <Field label="Vto CAE (opcional)" type="date" value={form.fecha_vto_cae}
-          onChange={(e) => setForm({ ...form, fecha_vto_cae: e.target.value })} />
+          onChange={(e) => setForm({ ...form, fecha_vto_cae: e.target.value })}
+          disabled={lockedFields.has('fecha_vto_cae')} />
       </div>
 
       {verificacion && (

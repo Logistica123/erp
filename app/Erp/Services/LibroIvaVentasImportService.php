@@ -660,6 +660,19 @@ class LibroIvaVentasImportService
         $s = trim((string) $v);
         if ($s === '') return null;
 
+        // v1.48 — Excel serial date (XLSX setReadDataOnly).
+        if (preg_match('/^\d+(\.\d+)?$/', $s)) {
+            $n = (float) $s;
+            if ($n >= 1 && $n <= 2958465) {
+                try {
+                    $dt = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($n);
+                    $s = $dt->format('d/m/Y');
+                } catch (\Throwable $e) {
+                    // dejamos que abajo tire el error de formato.
+                }
+            }
+        }
+
         // AFIP a veces exporta YYYY-MM-DD, a veces dd/mm/yyyy. Soportamos ambos.
         if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $s, $m)) {
             return "{$m[1]}-{$m[2]}-{$m[3]}";

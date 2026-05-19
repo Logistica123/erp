@@ -608,6 +608,23 @@ class LibroIvaComprasImportService
         $s = trim((string) $v);
         if ($s === '') return null;
 
+        // v1.48 — Si el XLSX viene con el formato visual de la celda y leemos
+        // con setReadDataOnly(true), las fechas vienen como serial numbers de
+        // Excel (días desde 1899-12-30). Si el valor es un entero plausible
+        // como serial de fecha (>= 1 y <= 2958465 = 9999-12-31), lo convertimos.
+        if (preg_match('/^\d+(\.\d+)?$/', $s)) {
+            $n = (float) $s;
+            if ($n >= 1 && $n <= 2958465) {
+                try {
+                    $dt = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($n);
+                    $s = $dt->format('d/m/Y');
+                } catch (\Throwable $e) {
+                    // si no se puede convertir, dejamos que el regex de abajo
+                    // tire el error de formato con el valor crudo.
+                }
+            }
+        }
+
         if (! preg_match('/^(\d{2})\/(\d{2})\/(\d{4})$/', $s, $m)) {
             throw new DomainException(
                 "FECHA_FORMATO_INVALIDO: '{$campo}' = '{$s}' no tiene formato dd/mm/yyyy esperado por AFIP."

@@ -7,8 +7,11 @@ use DomainException;
 use Illuminate\Http\Client\Factory as HttpClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 /**
@@ -63,11 +66,17 @@ class FacturasManualController
             'periodo_trabajado_texto' => ['nullable', 'string', 'max:20'],
             'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
             'concepto_afip' => ['nullable', 'integer', 'min:1', 'max:3'],
+            // v1.39 — PDF original (AFIP) opcional. Hasta 8MB.
+            'pdf' => ['nullable', 'file', 'mimes:pdf', 'max:8192'],
         ]);
 
         $empresaId = $this->empresaId($request);
 
-        // Resolver auxiliar por CUIT si solo viene el CUIT.
+        // v1.39 — upsert del cliente. Antes (v1.17) si no se encontraba por
+        // CUIT devolvíamos 422 y se forzaba al operador a darlo de alta. Con
+        // el importer batch de PDFs eso fricciona — siguiendo el patrón ya
+        // usado en compraStore (v1.29), si no existe lo creamos al toque con
+        // la razón social que vino del form.
         $auxiliarId = $data['cliente_auxiliar_id'] ?? null;
         if (! $auxiliarId && ! empty($data['cuit_cliente'])) {
             $auxiliarId = DB::table('erp_auxiliares')
@@ -75,13 +84,24 @@ class FacturasManualController
                 ->where('tipo', 'Cliente')
                 ->where('cuit', $data['cuit_cliente'])
                 ->value('id');
-            if (! $auxiliarId) {
-                return response()->json([
-                    'ok' => false,
-                    'error' => ['code' => 'CLIENTE_NO_ENCONTRADO',
-                        'message' => "No existe un cliente con CUIT {$data['cuit_cliente']} en el ERP. Dalo de alta primero."],
-                ], 422);
-            }
+        }
+        if (! $auxiliarId && ! empty($data['cuit_cliente'])) {
+            $cuentaDefaultClienteId = DB::table('erp_cuentas_contables')
+                ->where('empresa_id', $empresaId)
+                ->where('codigo', '1.1.4.01')
+                ->value('id');
+            $auxiliarId = DB::table('erp_auxiliares')->insertGetId([
+                'empresa_id' => $empresaId,
+                'tipo' => 'Cliente',
+                'codigo' => 'CLI-'.$data['cuit_cliente'],
+                'nombre' => ($data['razon_social_cliente'] ?? null)
+                    ?: ('Cliente '.$data['cuit_cliente']),
+                'cuit' => $data['cuit_cliente'],
+                'cuenta_contable_default_id' => $cuentaDefaultClienteId,
+                'activo' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         }
         if (! $auxiliarId) {
             return response()->json([
@@ -160,6 +180,23 @@ class FacturasManualController
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+
+        // v1.39 — Guardar PDF adjunto en disco local privado.
+        if ($request->hasFile('pdf')) {
+            $file = $request->file('pdf');
+            $yyyy = substr($data['fecha_emision'], 0, 4);
+            $mm = substr($data['fecha_emision'], 5, 2);
+            $relPath = "facturas-venta-pdfs/{$yyyy}/{$mm}/{$id}.pdf";
+            Storage::disk('local')->putFileAs(
+                "facturas-venta-pdfs/{$yyyy}/{$mm}",
+                $file,
+                "{$id}.pdf"
+            );
+            DB::table('erp_facturas_venta')->where('id', $id)->update([
+                'pdf_path' => $relPath,
+                'updated_at' => now(),
+            ]);
+        }
 
         $this->audit->logEvento(
             accion: 'FACTURA_VENTA_MANUAL_REGISTRADA',
@@ -513,6 +550,46 @@ class FacturasManualController
                 'resultado' => $resultado,
             ],
         ]);
+    }
+
+    /**
+     * v1.39 — GET /api/erp/facturas-venta/{id}/pdf
+     * Devuelve el PDF original (AFIP) adjuntado al cargar la factura.
+     */
+    public function descargarPdfVenta(Request $request, int $id): Response|StreamedResponse|JsonResponse
+    {
+        if (! $this->permiso($request, 'ventas.facturas.ver')) {
+            return $this->sinPermiso();
+        }
+        $empresaId = $this->empresaId($request);
+
+        $factura = DB::table('erp_facturas_venta')
+            ->where('id', $id)
+            ->where('empresa_id', $empresaId)
+            ->whereNull('deleted_at')
+            ->first(['id', 'pdf_path', 'numero', 'punto_venta_id']);
+        if (! $factura) {
+            return response()->json(['ok' => false, 'error' => ['code' => 'NO_ENCONTRADA']], 404);
+        }
+        if (! $factura->pdf_path) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'SIN_PDF', 'message' => 'Esta factura no tiene PDF adjunto.'],
+            ], 404);
+        }
+        if (! Storage::disk('local')->exists($factura->pdf_path)) {
+            return response()->json([
+                'ok' => false,
+                'error' => ['code' => 'PDF_NO_EN_DISCO',
+                    'message' => "El path está registrado pero el archivo no existe ({$factura->pdf_path})."],
+            ], 410);
+        }
+
+        return Storage::disk('local')->response(
+            $factura->pdf_path,
+            sprintf('factura-venta-%d.pdf', $factura->id),
+            ['Content-Type' => 'application/pdf'],
+        );
     }
 
     private function empresaId(Request $request): int

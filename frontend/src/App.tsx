@@ -59,6 +59,7 @@ import { CentrosCostoPage } from './pages/CentrosCostoPage';
 import { ConfiguracionIvaPage } from './pages/ConfiguracionIvaPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FacturaVentaManualPage } from './pages/FacturaVentaManualPage';
+import { ImportVentasPdfWizardPage } from './pages/ImportVentasPdfWizardPage';
 import { FacturaCompraManualPage } from './pages/FacturaCompraManualPage';
 import { EmpleadosPage } from './pages/Sueldos/EmpleadosPage';
 import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
@@ -126,6 +127,8 @@ export default function App() {
               <Route path="/erp/facturacion/nueva" element={<NuevaFacturaPage />} handle={{ crumb: 'Nueva factura' }} />
               {/* v1.17 — Carga manual de factura de venta (NO emite ARCA) */}
               <Route path="/erp/facturacion/nueva-manual" element={<FacturaVentaManualPage />} handle={{ crumb: 'Nueva manual' }} />
+              {/* v1.39 — Wizard batch import de PDFs AFIP (Mis Comprobantes Emitidos) */}
+              <Route path="/erp/facturacion/importar-pdfs" element={<ImportVentasPdfWizardPage />} handle={{ crumb: 'Importar PDFs' }} />
               <Route path="/erp/libro-iva-ventas" element={<LibroIvaVentasPage />} handle={{ crumb: 'Libro IVA Ventas' }} />
               <Route path="/erp/bancos" element={<BancosPage />} handle={{ crumb: 'Bancos' }} />
               <Route path="/erp/conciliacion" element={<ConciliacionPage />} handle={{ crumb: 'Conciliación' }} />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
 import { OpExternaCell, FechaPagoCell } from '@/components/factura/PagoInfoCells';
@@ -100,8 +100,8 @@ export function FacturasCompraPage() {
     if (value) p.set(key, value); else p.delete(key);
     setSearchParams(p, { replace: true });
   };
-  const setEstado = (v: string) => setQueryParam('estado', v);
-  const setOrigen = (v: string) => setQueryParam('origen', v);
+  const setEstado = (v: string) => { setPage(1); setQueryParam('estado', v); };
+  const setOrigen = (v: string) => { setPage(1); setQueryParam('origen', v); };
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
   // Addendum v1.13 + v1.14 — filtros enriquecidos
@@ -109,6 +109,9 @@ export function FacturasCompraPage() {
   const [tipoGasto, setTipoGasto] = useState('');
   const [periodoTrab, setPeriodoTrab] = useState('');
   const [juris, setJuris] = useState('');
+  // v1.42 — paginación server-side (antes el backend limitaba a 200 y el
+  // resto era invisible; ahora paginate(50) por defecto).
+  const [page, setPage] = useState(1);
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
@@ -120,12 +123,23 @@ export function FacturasCompraPage() {
     if (tipoGasto) p.set('tipo_gasto', tipoGasto);
     if (periodoTrab) p.set('periodo_trabajado', periodoTrab);
     if (juris) p.set('jurisdiccion', juris);
+    p.set('page', String(page));
     return p.toString();
-  }, [estado, origen, desde, hasta, noTomada, tipoGasto, periodoTrab, juris]);
+  }, [estado, origen, desde, hasta, noTomada, tipoGasto, periodoTrab, juris, page]);
+
+  // Reset page=1 cuando cambian los filtros (no la página).
+  useEffect(() => { setPage(1); },
+    [estado, origen, desde, hasta, noTomada, tipoGasto, periodoTrab, juris]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['facturas-compra', qs],
-    queryFn: () => api.get<{ data: FacturaCompra[] }>(`/api/erp/facturas-compra${qs ? `?${qs}` : ''}`),
+    queryFn: () => api.get<{
+      data: FacturaCompra[];
+      current_page: number;
+      per_page: number;
+      last_page: number;
+      total: number;
+    }>(`/api/erp/facturas-compra${qs ? `?${qs}` : ''}`),
   });
 
   const [verId, setVerId] = useState<number | null>(null);
@@ -389,7 +403,16 @@ export function FacturasCompraPage() {
             </div>
           )}
 
-          <DataTable columns={columns} rows={filas} loading={isLoading}
+          <DataTable columns={columns}
+            paginator={data ? {
+              data: filas,
+              current_page: data.current_page,
+              per_page: data.per_page,
+              last_page: data.last_page,
+              total: data.total,
+            } : undefined}
+            onPageChange={(p) => setPage(p)}
+            loading={isLoading}
             onRowClick={(r) => setVerId(r.id)} empty="Sin facturas en el filtro" />
         </CardBody>
       </Card>

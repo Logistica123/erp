@@ -96,8 +96,22 @@ class FacturasCompraController extends Controller
             $q->where('f.jurisdiccion_codigo', $juris);
         }
 
+        // v1.42 — paginación server-side (antes: limit(200) hardcodeado,
+        // los imports grandes quedaban truncados sin avisar al usuario). El
+        // DataTable del frontend ya soporta el formato de paginator Laravel.
+        $perPage = (int) $request->query('per_page', 50);
+        $perPage = max(10, min(500, $perPage));
+        $paginator = $q->orderByDesc('f.fecha_emision')
+            ->orderByDesc('f.id')
+            ->paginate($perPage)
+            ->withQueryString();
+
         return response()->json([
-            'data' => $q->orderByDesc('f.fecha_emision')->orderByDesc('f.id')->limit(200)->get(),
+            'data' => $paginator->items(),
+            'current_page' => $paginator->currentPage(),
+            'per_page' => $paginator->perPage(),
+            'last_page' => $paginator->lastPage(),
+            'total' => $paginator->total(),
         ]);
     }
 

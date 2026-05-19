@@ -2,6 +2,7 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Services\Pdf\VentaPdfExtractor;
 use App\Erp\Support\AuditLogger;
 use DomainException;
 use Illuminate\Http\Client\Factory as HttpClient;
@@ -34,7 +35,29 @@ class FacturasManualController
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly HttpClient $http,
+        private readonly VentaPdfExtractor $pdfExtractor,
     ) {}
+
+    /**
+     * v1.41 — POST /api/erp/facturas-venta/pdf-extract
+     * Recibe un PDF (multipart) y devuelve los campos detectados mediante
+     * pdftotext + regex. NO inserta ni modifica nada — solo lectura.
+     */
+    public function extraerDesdePdfVenta(Request $request): JsonResponse
+    {
+        if (! $this->permiso($request, 'ventas.facturas.cargar_manual')) {
+            return $this->sinPermiso();
+        }
+
+        $request->validate([
+            'pdf' => ['required', 'file', 'mimes:pdf', 'max:8192'],
+        ]);
+
+        $tmp = $request->file('pdf')->getRealPath();
+        $resultado = $this->pdfExtractor->extraer($tmp);
+
+        return response()->json(['ok' => $resultado['ok'], 'data' => $resultado]);
+    }
 
     /**
      * POST /api/erp/facturas-venta/manual

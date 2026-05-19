@@ -423,6 +423,9 @@ Route::prefix('api/erp')->group(function () {
         // v1.39 — descarga del PDF adjunto (AFIP original).
         Route::get('/facturas-venta/{id}/pdf', [FacturasManualController::class, 'descargarPdfVenta'])
             ->whereNumber('id')->name('erp.fv.pdf');
+        // v1.41 — extracción de datos desde PDF AFIP (autofill del form).
+        Route::post('/facturas-venta/pdf-extract', [FacturasManualController::class, 'extraerDesdePdfVenta'])
+            ->name('erp.fv.pdf-extract');
         // v1.17 — Verificación opcional contra ARCA (WSCDC + padrón).
         Route::post('/facturas/{tipo}/{id}/verificar-arca', [FacturasManualController::class, 'verificarArca'])
             ->whereIn('tipo', ['venta', 'compra'])

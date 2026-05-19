@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, AlertTriangle, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Field, SelectField, FormError } from '@/components/ui/Field';
 import { DecimalField } from '@/components/ui/DecimalField';
@@ -83,6 +83,29 @@ export const defaultFormValues: FacturaVentaFormValues = {
   concepto_afip: 2,
 };
 
+type PdfExtractResp = {
+  ok: boolean;
+  campos: {
+    codigo_afip: number | null;
+    letra: string | null;
+    punto_venta: number | null;
+    numero: number | null;
+    fecha_emision: string | null;
+    cuit_cliente: string | null;
+    razon_social_cliente: string | null;
+    imp_neto_gravado: number | null;
+    imp_iva: number | null;
+    imp_total: number | null;
+    alicuota: number | null;
+    cae: string | null;
+    fecha_vto_cae: string | null;
+    periodo_trabajado_texto: string | null;
+  };
+  tipo_comprobante_id: number | null;
+  raw_excerpt: string;
+  warning: string | null;
+};
+
 type Props = {
   pdfFile?: File | null;
   initialValues?: Partial<FacturaVentaFormValues>;
@@ -106,6 +129,11 @@ export function FacturaVentaForm({
   const [clienteNoExiste, setClienteNoExiste] = useState(false);
   // v1.39 — "registrar y cargar otro": preserva cliente/fecha al guardar.
   const [cargarOtroMode, setCargarOtroMode] = useState(false);
+  // v1.41 — estado de la extracción automática desde el PDF.
+  const [extractando, setExtractando] = useState(false);
+  const [extractInfo, setExtractInfo] = useState<{
+    detectados: string[]; warning: string | null;
+  } | null>(null);
 
   const { data: cats } = useQuery<Catalogos>({
     queryKey: ['fv-catalogos-manual'],
@@ -124,6 +152,63 @@ export function FacturaVentaForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(initialValues ?? {})]);
+
+  // v1.41 — Si llega un PDF, intentar extraer datos del backend (pdftotext +
+  // regex). Los valores extraídos pisan los initialValues (más específicos).
+  // El operador puede corregir cualquier campo si la extracción falló o sacó
+  // un dato mal.
+  useEffect(() => {
+    if (!pdfFile) {
+      setExtractInfo(null);
+      return;
+    }
+    let cancelado = false;
+    setExtractando(true);
+    setExtractInfo(null);
+    const fd = new FormData();
+    fd.append('pdf', pdfFile);
+    api.post<{ ok: boolean; data: PdfExtractResp }>('/api/erp/facturas-venta/pdf-extract', fd)
+      .then((r) => {
+        if (cancelado) return;
+        const det = aplicarCamposExtraidos(r.data);
+        setExtractInfo({ detectados: det, warning: r.data.warning });
+      })
+      .catch((e: ApiError) => {
+        if (cancelado) return;
+        toast.error('Error extrayendo PDF', e.message);
+        setExtractInfo({ detectados: [], warning: e.message });
+      })
+      .finally(() => { if (!cancelado) setExtractando(false); });
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfFile]);
+
+  // Aplica al form los campos no-null extraídos. Devuelve la lista de keys
+  // que se completaron para mostrar feedback al usuario.
+  const aplicarCamposExtraidos = (data: PdfExtractResp): string[] => {
+    const c = data.campos;
+    const cambios: Partial<FacturaVentaFormValues> = {};
+    if (data.tipo_comprobante_id) cambios.tipo_comprobante_id = data.tipo_comprobante_id;
+    if (c.punto_venta != null) cambios.punto_venta = c.punto_venta;
+    if (c.numero != null) cambios.numero = c.numero;
+    if (c.fecha_emision) cambios.fecha_emision = c.fecha_emision;
+    if (c.cuit_cliente) cambios.cuit_cliente = c.cuit_cliente;
+    if (c.razon_social_cliente) cambios.razon_social_cliente = c.razon_social_cliente;
+    if (c.imp_neto_gravado != null) cambios.imp_neto_gravado = c.imp_neto_gravado;
+    if (c.imp_iva != null) cambios.imp_iva = c.imp_iva;
+    if (c.imp_total != null) cambios.imp_total = c.imp_total;
+    if (c.cae) cambios.cae = c.cae;
+    if (c.fecha_vto_cae) cambios.fecha_vto_cae = c.fecha_vto_cae;
+    if (c.periodo_trabajado_texto) cambios.periodo_trabajado_texto = c.periodo_trabajado_texto;
+    if (Object.keys(cambios).length > 0) {
+      setForm((f) => ({ ...f, ...cambios }));
+    }
+    // Si vino CUIT, lanzamos el lookup para resolver el cliente_auxiliar_id.
+    if (cambios.cuit_cliente && /^\d{11}$/.test(cambios.cuit_cliente)) {
+      clienteLookup.mutate(cambios.cuit_cliente);
+    }
+    return Object.keys(cambios);
+  };
 
   // Auto-fill cliente al elegir desde el dropdown.
   useEffect(() => {
@@ -268,6 +353,32 @@ export function FacturaVentaForm({
 
   return (
     <div className="space-y-4">
+      {/* v1.41 — Feedback de extracción automática desde PDF. */}
+      {extractando && (
+        <div className="border border-azure-soft bg-azure-soft/30 rounded-md p-2 text-[12px] flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-azure animate-pulse" />
+          Extrayendo datos del PDF…
+        </div>
+      )}
+      {!extractando && extractInfo && extractInfo.detectados.length > 0 && (
+        <div className="border border-success/30 bg-success-bg/20 rounded-md p-2 text-[12px] flex items-start gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-success shrink-0 mt-0.5" />
+          <div>
+            <strong>{extractInfo.detectados.length} campos autocompletados del PDF.</strong>{' '}
+            Revisalos y corregí si hace falta antes de guardar.
+          </div>
+        </div>
+      )}
+      {!extractando && extractInfo && extractInfo.detectados.length === 0 && extractInfo.warning && (
+        <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-2 text-[12px] flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0 mt-0.5" />
+          <div>
+            No se pudo autocompletar nada del PDF. Cargá los datos a mano.
+            <div className="text-[10.5px] text-ink-muted mt-0.5">{extractInfo.warning}</div>
+          </div>
+        </div>
+      )}
+
       <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3 text-[12px] flex items-start gap-2">
         <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0 mt-0.5" />
         <div>

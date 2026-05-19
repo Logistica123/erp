@@ -641,10 +641,25 @@ class LibroIvaVentasImportService
     private function parsearFloat($v): float
     {
         if ($v === null || $v === '') return 0.0;
+        // v1.48 — Native floats/ints (XLSX) van directos sin transformar
+        // (sino el str_replace '.' borra el decimal y queda 100x el valor).
+        if (is_int($v) || is_float($v)) {
+            return (float) $v;
+        }
         $s = trim((string) $v);
         if ($s === '') return 0.0;
-        $s = str_replace('.', '', $s);
-        $s = str_replace(',', '.', $s);
+        $tieneComa = strpos($s, ',') !== false;
+        $tienePunto = strpos($s, '.') !== false;
+        if ($tieneComa && $tienePunto) {
+            $s = str_replace('.', '', $s);
+            $s = str_replace(',', '.', $s);
+        } elseif ($tieneComa) {
+            $s = str_replace(',', '.', $s);
+        } else {
+            if (substr_count($s, '.') > 1) {
+                $s = str_replace('.', '', $s);
+            }
+        }
         return (float) $s;
     }
 

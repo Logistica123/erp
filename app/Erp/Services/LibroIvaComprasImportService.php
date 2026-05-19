@@ -538,10 +538,38 @@ class LibroIvaComprasImportService
     private function parsearFloat($v): float
     {
         if ($v === null || $v === '') return 0.0;
-        $s = (string) $v;
-        // Format AFIP: 167556,44 (coma decimal). Quitar puntos de miles, cambiar coma por punto.
-        $s = str_replace('.', '', $s);
-        $s = str_replace(',', '.', $s);
+
+        // v1.48 — Si el valor ya es numérico nativo (caso XLSX leído por
+        // PhpSpreadsheet), devolverlo directo. Antes lo convertíamos a string
+        // y aplicábamos str_replace('.', '') asumiendo que el "." era separador
+        // de miles es-AR — pero en floats nativos PHP usa "." como decimal
+        // y eso multiplicaba el valor por 100 (ej: 29999.99 → "29999.99" →
+        // strip dot → "2999999" → 2,999,999 en vez de 29999.99).
+        if (is_int($v) || is_float($v)) {
+            return (float) $v;
+        }
+
+        $s = trim((string) $v);
+        if ($s === '') return 0.0;
+
+        // Formato es-AR del CSV AFIP: "167.556,44" (punto miles, coma decimal).
+        $tieneComa = strpos($s, ',') !== false;
+        $tienePunto = strpos($s, '.') !== false;
+        if ($tieneComa && $tienePunto) {
+            // es-AR clásico.
+            $s = str_replace('.', '', $s);
+            $s = str_replace(',', '.', $s);
+        } elseif ($tieneComa) {
+            // Solo coma: decimal es-AR sin miles.
+            $s = str_replace(',', '.', $s);
+        } else {
+            // Solo punto: si hay más de uno son separadores de miles; si hay uno
+            // solo asumimos que es decimal en-US (porque es el formato que el
+            // contador puede pegar pega copiando de otro lado).
+            if (substr_count($s, '.') > 1) {
+                $s = str_replace('.', '', $s);
+            }
+        }
         return (float) $s;
     }
 

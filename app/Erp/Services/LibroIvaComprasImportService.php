@@ -494,6 +494,8 @@ class LibroIvaComprasImportService
 
     private function normalizar(string $s): string
     {
+        // v1.50 — Reparar mojibake UTF-8 doble (ver LibroIvaVentasImportService).
+        $s = $this->fixMojibakeUtf8($s);
         $s = mb_strtolower(trim($s));
         $s = strtr($s, [
             'á'=>'a','é'=>'e','í'=>'i','ó'=>'o','ú'=>'u','ñ'=>'n',
@@ -501,6 +503,18 @@ class LibroIvaComprasImportService
         ]);
         $s = preg_replace('/\s+/', ' ', $s) ?? $s;
         return $s;
+    }
+
+    private function fixMojibakeUtf8(string $s): string
+    {
+        if (! preg_match('/Ã[\x80-\xBF]/', $s)) {
+            return $s;
+        }
+        $candidate = @mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');
+        if ($candidate === false || $candidate === '') {
+            return $s;
+        }
+        return mb_check_encoding($candidate, 'UTF-8') ? $candidate : $s;
     }
 
     private function filaTieneDatos(?array $r): bool

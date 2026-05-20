@@ -607,6 +607,12 @@ class LibroIvaVentasImportService
 
     private function normalizar(string $s): string
     {
+        // v1.50 — Reparar mojibake UTF-8 doble: archivos XLSX exportados desde
+        // sistemas que codificaron mal (UTF-8 → leído como Latin-1 → re-encodeado
+        // como UTF-8) terminan con "Ã³" en vez de "ó", "Ã±" en vez de "ñ", etc.
+        // El round-trip "tratar UTF-8 como Latin-1, re-encodear como UTF-8"
+        // lo revierte. Solo aplica si detectamos el patrón típico.
+        $s = $this->fixMojibakeUtf8($s);
         $s = mb_strtolower(trim($s));
         $s = strtr($s, [
             'á'=>'a','é'=>'e','í'=>'i','ó'=>'o','ú'=>'u','ñ'=>'n',
@@ -614,6 +620,28 @@ class LibroIvaVentasImportService
         ]);
         $s = preg_replace('/\s+/', ' ', $s) ?? $s;
         return $s;
+    }
+
+    /**
+     * v1.50 — Detecta y revierte UTF-8 doblemente codificado.
+     *
+     * Patrón típico: el archivo tiene los bytes UTF-8 originales de "ó"
+     * (C3 B3) que fueron interpretados como Latin-1 (devolviendo "Ã³") y
+     * re-encodeados a UTF-8 (bytes C3 83 C2 B3). El round-trip a Latin-1
+     * extrae los bytes originales — y como esos bytes ya son UTF-8 válido,
+     * los devolvemos directo.
+     */
+    private function fixMojibakeUtf8(string $s): string
+    {
+        if (! preg_match('/Ã[\x80-\xBF]/', $s)) {
+            return $s;
+        }
+        $candidate = @mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');
+        if ($candidate === false || $candidate === '') {
+            return $s;
+        }
+        // Si los bytes resultantes forman UTF-8 válido, son los originales.
+        return mb_check_encoding($candidate, 'UTF-8') ? $candidate : $s;
     }
 
     private function filaTieneDatos(?array $r): bool

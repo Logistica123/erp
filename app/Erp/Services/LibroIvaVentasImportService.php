@@ -625,22 +625,30 @@ class LibroIvaVentasImportService
     /**
      * v1.50 — Detecta y revierte UTF-8 doblemente codificado.
      *
-     * Patrón típico: el archivo tiene los bytes UTF-8 originales de "ó"
-     * (C3 B3) que fueron interpretados como Latin-1 (devolviendo "Ã³") y
-     * re-encodeados a UTF-8 (bytes C3 83 C2 B3). El round-trip a Latin-1
-     * extrae los bytes originales — y como esos bytes ya son UTF-8 válido,
-     * los devolvemos directo.
+     * Bug v1.50 inicial: la regex /Ã[\x80-\xBF]/ activaba modo UTF-8 implícito
+     * en PCRE (por tener "Ã" en el patrón) y el rango [\x80-\xBF] pasaba a
+     * interpretarse como codepoints en vez de bytes — no matcheaba nada.
+     *
+     * Fix: usar strpos a nivel byte (sin PCRE) buscando secuencias C3 83 (Ã)
+     * o C3 A3 (ã) seguidas por C2 (segundo byte del char mojibake'd). El
+     * round-trip "interpretar UTF-8 como Latin-1, validar como UTF-8" hace
+     * el resto.
      */
     private function fixMojibakeUtf8(string $s): string
     {
-        if (! preg_match('/Ã[\x80-\xBF]/', $s)) {
+        // Detectar "Ã" (C3 83) o "ã" (C3 A3) seguido por C2 o C3 (segundo
+        // char del par mojibake'd: ³, º, ±, etc — todos empiezan con C2).
+        $hayMojibake = strpos($s, "\xC3\x83\xC2") !== false
+            || strpos($s, "\xC3\x83\xC3") !== false
+            || strpos($s, "\xC3\xA3\xC2") !== false
+            || strpos($s, "\xC3\xA3\xC3") !== false;
+        if (! $hayMojibake) {
             return $s;
         }
         $candidate = @mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');
         if ($candidate === false || $candidate === '') {
             return $s;
         }
-        // Si los bytes resultantes forman UTF-8 válido, son los originales.
         return mb_check_encoding($candidate, 'UTF-8') ? $candidate : $s;
     }
 

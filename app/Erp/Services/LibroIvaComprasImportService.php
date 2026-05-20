@@ -507,7 +507,13 @@ class LibroIvaComprasImportService
 
     private function fixMojibakeUtf8(string $s): string
     {
-        if (! preg_match('/Ã[\x80-\xBF]/', $s)) {
+        // v1.50.1 — Detección por strpos byte-level (la regex /Ã[\x80-\xBF]/
+        // activaba modo UTF-8 implícito en PCRE y no matcheaba a nivel byte).
+        $hayMojibake = strpos($s, "\xC3\x83\xC2") !== false
+            || strpos($s, "\xC3\x83\xC3") !== false
+            || strpos($s, "\xC3\xA3\xC2") !== false
+            || strpos($s, "\xC3\xA3\xC3") !== false;
+        if (! $hayMojibake) {
             return $s;
         }
         $candidate = @mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');

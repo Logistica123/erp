@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertCircle, Check, Loader2, Plus, Upload, X } from 'lucide-react';
+import { AlertCircle, Check, Loader2, Plus, Upload, X, Zap, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -24,6 +24,27 @@ type MovimientoBancario = {
   confianza_match: number | null;
   etiqueta_sugerida: string | null;
   regla_aplicada_id: number | null;
+  // v1.27 Sprint A
+  tipo_operativo: 'TRANSFERENCIA_RECIBIDA' | 'TRANSFERENCIA_ENVIADA' | 'PAGO_SERVICIO'
+    | 'COMISION_BANCARIA' | 'IMPUESTO_DEBITO_CREDITO' | 'DEPOSITO' | 'EXTRACCION'
+    | 'INTERES_GANADO' | 'OTRO';
+  monto_conciliado: string | number;
+};
+
+// v1.27 Sprint C — modelo de sugerencias devueltas por GET /sugerencias.
+type Sugerencia = {
+  tipo: 'FACTURA_VENTA' | 'FACTURA_COMPRA';
+  factura_id: number;
+  numero: number;
+  tipo_codigo?: string;
+  letra?: string;
+  cliente_nombre?: string;
+  proveedor_nombre?: string;
+  cuit?: string;
+  imp_total: number;
+  saldo_pendiente: number;
+  fecha_emision: string;
+  score: number;
 };
 type Cuenta = { id: number; codigo: string; nombre: string; imputable: boolean; admite_cc: boolean; admite_auxiliar: boolean };
 type Auxiliar = { id: number; codigo: string; nombre: string; tipo: string };
@@ -37,6 +58,8 @@ export function ConciliacionPage() {
   const [conciliar, setConciliar] = useState<MovimientoBancario | null>(null);
   const [ignorar, setIgnorar] = useState<MovimientoBancario | null>(null);
   const [nuevoMov, setNuevoMov] = useState(false);
+  // v1.27 Sprint C — modal de sugerencias contra factura.
+  const [sugerirPara, setSugerirPara] = useState<MovimientoBancario | null>(null);
   const [importExtracto, setImportExtracto] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -54,6 +77,18 @@ export function ConciliacionPage() {
       if (estado) qs.set('estado', estado);
       return api.get(`/api/erp/movimientos-bancarios?${qs}`);
     },
+  });
+
+  // v1.27 Sprint A — mutación conciliar directo (tipos auto).
+  const conciliarDirectoMut = useMutation({
+    mutationFn: (movId: number) =>
+      api.post(`/api/erp/movimientos-bancarios/${movId}/conciliar-directo`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mov-banc'] });
+      qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
+      setErr(null);
+    },
+    onError: (e: ApiError) => setErr(e.message),
   });
 
   return (
@@ -176,6 +211,14 @@ export function ConciliacionPage() {
                     {m.etiqueta_sugerida === 'PASANTE_MP' && (
                       <span className="ml-2 px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-700 font-medium">PASANTE MP</span>
                     )}
+                    {m.tipo_operativo && m.tipo_operativo !== 'OTRO' && (
+                      <span className={`ml-2 px-1.5 py-0.5 text-[10px] rounded font-medium ${
+                        ['COMISION_BANCARIA', 'IMPUESTO_DEBITO_CREDITO'].includes(m.tipo_operativo) ? 'bg-red-50 text-red-700' :
+                        m.tipo_operativo === 'INTERES_GANADO' ? 'bg-green-50 text-green-700' :
+                        m.tipo_operativo.startsWith('TRANSFERENCIA') ? 'bg-azure-soft/40 text-azure-dark' :
+                        'bg-line text-ink-2'
+                      }`}>{m.tipo_operativo.replace(/_/g, ' ')}</span>
+                    )}
                   </td>
                   <td className="px-[10px] py-[7px] text-[11px]">
                     {m.nombre_contraparte ? (
@@ -210,11 +253,26 @@ export function ConciliacionPage() {
                   </td>
                   <td className="px-[10px] py-[7px] text-right">
                     {(m.estado === 'PENDIENTE' || m.estado === 'ETIQUETADO') && (
-                      <div className="flex gap-1 justify-end">
-                        <Button size="sm" variant="primary" onClick={() => setConciliar(m)}>
+                      <div className="flex gap-1 justify-end flex-wrap">
+                        {/* v1.27 Sprint A — Conciliar directo: tipos auto en 1 click */}
+                        {['COMISION_BANCARIA', 'IMPUESTO_DEBITO_CREDITO', 'INTERES_GANADO'].includes(m.tipo_operativo) && (
+                          <Button size="sm" variant="primary"
+                            disabled={conciliarDirectoMut.isPending}
+                            onClick={() => conciliarDirectoMut.mutate(m.id)}
+                            title={`Concilia automáticamente a la cuenta configurada en banco_config para ${m.tipo_operativo}`}>
+                            <Zap className="w-3 h-3" /> Directo
+                          </Button>
+                        )}
+                        {/* v1.27 Sprint C — Sugerir facturas para transferencias */}
+                        {['TRANSFERENCIA_RECIBIDA', 'TRANSFERENCIA_ENVIADA', 'PAGO_SERVICIO', 'OTRO'].includes(m.tipo_operativo) && (
+                          <Button size="sm" variant="primary" onClick={() => setSugerirPara(m)}>
+                            <Search className="w-3 h-3" /> Facturas
+                          </Button>
+                        )}
+                        <Button size="sm" variant="secondary" onClick={() => setConciliar(m)}>
                           <Check className="w-3 h-3" /> Conciliar
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={() => setIgnorar(m)}>
+                        <Button size="sm" variant="ghost" onClick={() => setIgnorar(m)}>
                           <X className="w-3 h-3" /> Ignorar
                         </Button>
                       </div>
@@ -242,6 +300,18 @@ export function ConciliacionPage() {
           qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
           qc.invalidateQueries({ queryKey: ['asientos'] });
           qc.invalidateQueries({ queryKey: ['health'] });
+        }}
+        onError={setErr}
+      />
+
+      {/* v1.27 Sprint C — Modal de sugerencias top-N para conciliar contra factura */}
+      <SugerenciasModal
+        mov={sugerirPara}
+        onClose={() => { setSugerirPara(null); setErr(null); }}
+        onSuccess={() => {
+          setSugerirPara(null);
+          qc.invalidateQueries({ queryKey: ['mov-banc'] });
+          qc.invalidateQueries({ queryKey: ['asientos'] });
         }}
         onError={setErr}
       />
@@ -974,3 +1044,109 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
     </div>
   );
 }
+
+// v1.27 Sprint C — Modal de sugerencias de facturas para conciliar.
+function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
+  mov: MovimientoBancario | null;
+  onClose: () => void;
+  onSuccess: () => void;
+  onError: (msg: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [seleccionada, setSeleccionada] = useState<Sugerencia | null>(null);
+  const [monto, setMonto] = useState<string>('');
+
+  const { data: sugerencias, isLoading } = useQuery<{ data: Sugerencia[] }>({
+    queryKey: ['sugerencias', mov?.id],
+    queryFn: () => api.get(`/api/erp/movimientos-bancarios/${mov!.id}/sugerencias?top=10`),
+    enabled: !!mov,
+  });
+
+  const montoMov = mov ? Math.max(Number(mov.debito), Number(mov.credito)) : 0;
+
+  const conciliarMut = useMutation({
+    mutationFn: () =>
+      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar-factura`, {
+        tipo_factura: seleccionada!.tipo === 'FACTURA_VENTA' ? 'VENTA' : 'COMPRA',
+        factura_id: seleccionada!.factura_id,
+        monto: Number(monto || montoMov),
+      }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); onSuccess(); },
+    onError: (e: ApiError) => onError(e.message),
+  });
+
+  if (!mov) return null;
+
+  return (
+    <Modal open onClose={onClose} title={`Sugerencias para mov #${mov.id} · $${fmtMoney(montoMov)}`} size="lg">
+      <div className="space-y-3 text-[12px]">
+        <div className="text-ink-muted">
+          {mov.concepto} · {mov.fecha.slice(0, 10)} · tipo: <code>{mov.tipo_operativo}</code>
+        </div>
+        {isLoading && <div className="text-ink-muted">Buscando sugerencias…</div>}
+        {!isLoading && (sugerencias?.data ?? []).length === 0 && (
+          <div className="border border-warning/30 bg-warning-bg/20 rounded p-2 text-[11.5px]">
+            No se encontraron facturas con saldo pendiente cerca de este monto.
+            Probá la opción "Conciliar" general (referencia ASIENTO_MANUAL) para elegir cuenta manualmente.
+          </div>
+        )}
+        <div className="space-y-1 max-h-[300px] overflow-y-auto">
+          {(sugerencias?.data ?? []).map((s) => (
+            <label key={`${s.tipo}-${s.factura_id}`}
+              className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition ${
+                seleccionada?.factura_id === s.factura_id && seleccionada.tipo === s.tipo
+                  ? 'border-azure bg-azure-soft/30'
+                  : 'border-line hover:bg-surface-hover'
+              }`}>
+              <input type="radio" checked={seleccionada?.factura_id === s.factura_id && seleccionada.tipo === s.tipo}
+                onChange={() => { setSeleccionada(s); setMonto(String(Math.min(s.saldo_pendiente, montoMov))); }} />
+              <div className="flex-1">
+                <div className="font-medium text-ink-2">
+                  {s.tipo_codigo} {s.letra ?? ''} {s.numero}
+                  <span className="ml-2 text-[10px] px-1 rounded bg-line">
+                    {s.tipo === 'FACTURA_VENTA' ? 'VENTA' : 'COMPRA'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-ink-muted">
+                  {s.cliente_nombre ?? s.proveedor_nombre ?? '—'}
+                  {s.cuit && <span className="font-mono ml-2">{s.cuit}</span>}
+                  · {s.fecha_emision?.slice(0, 10)}
+                </div>
+              </div>
+              <div className="text-right text-[11px]">
+                <div className="font-semibold tabular">{fmtMoney(s.saldo_pendiente)}</div>
+                <div className={`text-[10px] ${s.score >= 95 ? 'text-success' : s.score >= 80 ? 'text-warning' : 'text-ink-muted'}`}>
+                  match {s.score}%
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {seleccionada && (
+          <div className="border-t border-line pt-3 space-y-2">
+            <div className="text-[11px] text-ink-muted">
+              Monto a conciliar (puede ser parcial si la factura es mayor):
+            </div>
+            <input type="number" step="0.01"
+              value={monto} onChange={(e) => setMonto(e.target.value)}
+              className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-line">
+          <Button variant="secondary" onClick={onClose} disabled={conciliarMut.isPending}>
+            Cancelar
+          </Button>
+          <Button variant="primary"
+            disabled={!seleccionada || !monto || Number(monto) <= 0 || conciliarMut.isPending}
+            onClick={() => conciliarMut.mutate()}>
+            {conciliarMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Confirmar conciliación
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+

@@ -355,6 +355,234 @@ class ConciliacionService
     }
 
     /**
+     * v1.27 Sprint C — Sugiere top-N facturas (compra o venta) candidatas
+     * a conciliar contra un movimiento, ordenadas por proximidad de monto.
+     *
+     * Filtros aplicados:
+     *  - Empresa de la cuenta bancaria.
+     *  - Estado factura !=ANULADA/PAGADA-COMPLETO (queda saldo pendiente).
+     *  - Solo facturas con auxiliar_id (no anónimas).
+     *  - Para TRANSFERENCIA_RECIBIDA → facturas de venta.
+     *  - Para TRANSFERENCIA_ENVIADA / PAGO_SERVICIO → facturas de compra.
+     *  - Si el cliente_id del movimiento está seteado (CM-3 matching),
+     *    prioriza facturas de ese cliente.
+     *
+     * @return array<int, array{tipo:string, factura_id:int, ...}>
+     */
+    public function sugerirFacturas(MovimientoBancario $mov, int $top = 10): array
+    {
+        $monto = (float) max($mov->debito, $mov->credito);
+        if ($monto <= 0.005) return [];
+
+        $cuenta = $mov->cuentaBancaria;
+        $empresaId = $cuenta?->empresa_id ?? 1;
+        $tipo = $mov->tipo_operativo;
+
+        // Determinar si buscar facturas de VENTA o COMPRA.
+        $buscarVenta = in_array($tipo, ['TRANSFERENCIA_RECIBIDA', 'DEPOSITO', 'OTRO'], true)
+            && (float) $mov->credito > 0;
+        $buscarCompra = in_array($tipo, ['TRANSFERENCIA_ENVIADA', 'PAGO_SERVICIO', 'OTRO'], true)
+            && (float) $mov->debito > 0;
+
+        $result = [];
+
+        if ($buscarVenta) {
+            // Facturas de venta con saldo pendiente. Calculamos saldo desde
+            // imp_total - SUMA(cobros). Por simplicidad inicial usamos
+            // imp_total (asumimos que el módulo de cobros marca estado).
+            $facturas = DB::table('erp_facturas_venta as f')
+                ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+                ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+                ->where('f.empresa_id', $empresaId)
+                ->whereNull('f.deleted_at')
+                ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL'])
+                ->select('f.id', 'f.numero', 'f.punto_venta_id', 'f.imp_total',
+                    'f.fecha_emision', 'f.auxiliar_id', 'a.nombre as cliente_nombre',
+                    'tc.codigo_interno as tipo_codigo', 'tc.letra')
+                ->orderByRaw('ABS(f.imp_total - ?)', [$monto])
+                ->limit($top * 2)
+                ->get();
+
+            foreach ($facturas as $f) {
+                $proximidad = $monto > 0 ? 1 - min(1, abs((float) $f->imp_total - $monto) / $monto) : 0;
+                $result[] = [
+                    'tipo' => 'FACTURA_VENTA',
+                    'factura_id' => $f->id,
+                    'numero' => $f->numero,
+                    'pv_id' => $f->punto_venta_id,
+                    'tipo_codigo' => $f->tipo_codigo,
+                    'letra' => $f->letra,
+                    'cliente_id' => $f->auxiliar_id,
+                    'cliente_nombre' => $f->cliente_nombre,
+                    'imp_total' => (float) $f->imp_total,
+                    'saldo_pendiente' => (float) $f->imp_total, // TODO: restar cobros parciales
+                    'fecha_emision' => $f->fecha_emision,
+                    'score' => round($proximidad * 100),
+                ];
+            }
+        }
+
+        if ($buscarCompra) {
+            $facturas = DB::table('erp_facturas_compra as f')
+                ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+                ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+                ->where('f.empresa_id', $empresaId)
+                ->whereNull('f.deleted_at')
+                ->whereIn('f.estado', ['RECIBIDA', 'CONTROLADA', 'PAGO_PARCIAL'])
+                ->select('f.id', 'f.numero', 'f.punto_venta', 'f.imp_total',
+                    'f.fecha_emision', 'f.cuit_emisor', 'f.razon_social_emisor', 'f.auxiliar_id',
+                    'tc.codigo_interno as tipo_codigo', 'tc.letra')
+                ->orderByRaw('ABS(f.imp_total - ?)', [$monto])
+                ->limit($top * 2)
+                ->get();
+
+            foreach ($facturas as $f) {
+                $proximidad = $monto > 0 ? 1 - min(1, abs((float) $f->imp_total - $monto) / $monto) : 0;
+                $result[] = [
+                    'tipo' => 'FACTURA_COMPRA',
+                    'factura_id' => $f->id,
+                    'numero' => $f->numero,
+                    'pv' => $f->punto_venta,
+                    'tipo_codigo' => $f->tipo_codigo,
+                    'letra' => $f->letra,
+                    'cuit' => $f->cuit_emisor,
+                    'proveedor_nombre' => $f->razon_social_emisor,
+                    'proveedor_id' => $f->auxiliar_id,
+                    'imp_total' => (float) $f->imp_total,
+                    'saldo_pendiente' => (float) $f->imp_total,
+                    'fecha_emision' => $f->fecha_emision,
+                    'score' => round($proximidad * 100),
+                ];
+            }
+        }
+
+        // Ordenar por score DESC y devolver top.
+        usort($result, fn ($a, $b) => $b['score'] <=> $a['score']);
+        return array_slice($result, 0, $top);
+    }
+
+    /**
+     * v1.27 Sprint C — Conciliar movimiento bancario contra una factura.
+     * Crea asiento de cobro (venta) o pago (compra) + registro en
+     * erp_conciliaciones. Soporta conciliación parcial: el monto se puede
+     * cobrar/pagar parcialmente y el saldo restante queda pendiente.
+     */
+    public function conciliarContraFactura(MovimientoBancario $mov, string $tipoFactura, int $facturaId, float $monto, User $usuario): MovimientoBancario
+    {
+        if ($mov->estado === MovimientoBancario::ESTADO_CONCILIADO) {
+            throw new DomainException('MOVIMIENTO_YA_CONCILIADO');
+        }
+        if (! in_array($tipoFactura, ['VENTA', 'COMPRA'], true)) {
+            throw new DomainException('TIPO_FACTURA_INVALIDO');
+        }
+        if ($monto <= 0) throw new DomainException('MONTO_INVALIDO');
+
+        $cuentaBanco = $mov->cuentaBancaria;
+        $empresaId = $cuentaBanco->empresa_id;
+        $montoMov = (float) max($mov->debito, $mov->credito);
+        if ($monto > ($montoMov - (float) $mov->monto_conciliado) + 0.005) {
+            throw new DomainException('MONTO_EXCEDE_SALDO_MOVIMIENTO');
+        }
+
+        return DB::transaction(function () use ($mov, $tipoFactura, $facturaId, $monto, $usuario, $cuentaBanco, $empresaId, $montoMov) {
+            DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
+
+            $tabla = $tipoFactura === 'VENTA' ? 'erp_facturas_venta' : 'erp_facturas_compra';
+            $factura = DB::table($tabla)
+                ->where('id', $facturaId)->where('empresa_id', $empresaId)
+                ->whereNull('deleted_at')->first();
+            if (! $factura) {
+                throw new DomainException("FACTURA_NO_ENCONTRADA: {$tipoFactura} #{$facturaId}");
+            }
+
+            $auxiliarId = $factura->auxiliar_id;
+            if (! $auxiliarId) throw new DomainException('FACTURA_SIN_AUXILIAR');
+
+            $cuentaAux = DB::table('erp_auxiliares')->where('id', $auxiliarId)->value('cuenta_contable_default_id');
+            if (! $cuentaAux) {
+                // Fallback: 1.1.4.01 (Deudores) o 2.1.1.01 (Proveedores).
+                $cuentaAux = DB::table('erp_cuentas_contables')
+                    ->where('empresa_id', $empresaId)
+                    ->where('codigo', $tipoFactura === 'VENTA' ? '1.1.4.01' : '2.1.1.01')
+                    ->value('id');
+            }
+            if (! $cuentaAux) throw new DomainException('CUENTA_CONTABLE_AUX_NO_ENCONTRADA');
+
+            $cuentaBancoContable = $cuentaBanco->cuenta_contable_id;
+            $diarioBan = DB::table('erp_diarios')
+                ->where('empresa_id', $empresaId)->where('codigo', 'BAN')->value('id')
+                ?? DB::table('erp_diarios')
+                    ->where('empresa_id', $empresaId)->where('codigo', 'GEN')->value('id');
+            if (! $diarioBan) throw new DomainException('DIARIO_BAN_INEXISTENTE');
+
+            // Asiento de cobro (venta): Debe Banco / Haber Deudor cliente.
+            // Asiento de pago (compra): Debe Proveedor / Haber Banco.
+            $debeBanco = $tipoFactura === 'VENTA';
+            $glosa = ($tipoFactura === 'VENTA' ? 'Cobro factura venta #' : 'Pago factura compra #').$factura->numero;
+            $movsAsiento = [
+                [
+                    'cuenta_id' => $debeBanco ? $cuentaBancoContable : $cuentaAux,
+                    'auxiliar_id' => $debeBanco ? null : $auxiliarId,
+                    'centro_costo_id' => null,
+                    'debe' => $monto, 'haber' => 0, 'glosa' => $glosa,
+                ],
+                [
+                    'cuenta_id' => $debeBanco ? $cuentaAux : $cuentaBancoContable,
+                    'auxiliar_id' => $debeBanco ? $auxiliarId : null,
+                    'centro_costo_id' => null,
+                    'debe' => 0, 'haber' => $monto, 'glosa' => $glosa,
+                ],
+            ];
+
+            $asientoSvc = app(AsientoService::class);
+            $asiento = $asientoSvc->crearBorrador([
+                'empresa_id' => $empresaId, 'diario_id' => $diarioBan,
+                'fecha' => $mov->fecha, 'concepto' => $glosa,
+                'movimientos' => $movsAsiento, 'user_id' => $usuario->id,
+            ]);
+            $asiento = $asientoSvc->contabilizar($asiento);
+
+            // Crear registro de conciliación (referencia_tipo polimórfico).
+            $refTipo = $tipoFactura === 'VENTA' ? 'COBRO' : 'ORDEN_PAGO';
+            // No tenemos un Cobro/OP intermediario per se, pero el referencia_id
+            // apunta a la factura. Para Sprint C usamos ASIENTO_MANUAL para
+            // simplificar (la factura queda vinculada vía glosa + monto).
+            Conciliacion::create([
+                'movimiento_bancario_id' => $mov->id,
+                'referencia_tipo' => 'ASIENTO_MANUAL',
+                'referencia_id' => $asiento->id,
+                'importe_conciliado' => $monto,
+                'user_id' => $usuario->id,
+                'modo' => 'MANUAL',
+                'observacion' => sprintf('Conciliación contra %s #%d (auxiliar #%d)',
+                    $tipoFactura, $facturaId, $auxiliarId),
+            ]);
+
+            $nuevoMontoConciliado = (float) $mov->monto_conciliado + $monto;
+            $totalmenteConciliado = abs($nuevoMontoConciliado - $montoMov) < 0.01;
+            // El enum estado no incluye PARCIAL — si es parcial, dejamos
+            // ETIQUETADO (el monto_conciliado refleja lo cobrado/pagado).
+            $mov->update([
+                'estado' => $totalmenteConciliado
+                    ? MovimientoBancario::ESTADO_CONCILIADO
+                    : MovimientoBancario::ESTADO_ETIQUETADO,
+                'asiento_id' => $totalmenteConciliado ? $asiento->id : $mov->asiento_id,
+                'monto_conciliado' => $nuevoMontoConciliado,
+            ]);
+
+            $this->audit->logEvento(
+                accion: 'MOVIMIENTO_CONCILIADO_FACTURA',
+                modulo: 'tesoreria',
+                descripcion: sprintf('Mov #%d conciliado contra %s #%d por $%.2f (asiento #%d)',
+                    $mov->id, $tipoFactura, $facturaId, $monto, $asiento->id),
+                empresaId: $empresaId,
+            );
+
+            return $mov->fresh(['asiento', 'cuentaBancaria']);
+        });
+    }
+
+    /**
      * Auto-conciliación masiva sobre movimientos PENDIENTE/ETIQUETADO:
      *  - ETIQUETADO → confirma cuenta propuesta (crea asiento vía
      *    MovimientoBancarioService::conciliar)

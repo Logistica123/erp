@@ -196,6 +196,40 @@ class MovimientosBancariosController
         return response()->json(['ok' => true, 'data' => $mov->load('asiento')]);
     }
 
+    /**
+     * v1.27 Sprint C — Sugerencias top-N de facturas candidatas.
+     */
+    public function sugerencias(Request $request, int $id): JsonResponse
+    {
+        $top = (int) $request->query('top', 10);
+        $top = max(1, min(50, $top));
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        $sugerencias = $this->concilService->sugerirFacturas($mov, $top);
+        return response()->json(['ok' => true, 'data' => $sugerencias]);
+    }
+
+    /**
+     * v1.27 Sprint C — Conciliar movimiento contra factura (venta o compra).
+     */
+    public function conciliarFactura(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'tipo_factura' => ['required', Rule::in(['VENTA', 'COMPRA'])],
+            'factura_id' => ['required', 'integer'],
+            'monto' => ['required', 'numeric', 'gt:0'],
+        ]);
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        try {
+            $mov = $this->concilService->conciliarContraFactura(
+                $mov, $data['tipo_factura'], (int) $data['factura_id'],
+                (float) $data['monto'], $request->user(),
+            );
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $mov->load('asiento')]);
+    }
+
     public function autoconciliar(Request $request): JsonResponse
     {
         $data = $request->validate([

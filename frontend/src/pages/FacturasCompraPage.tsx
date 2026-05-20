@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
 import { OpExternaCell, FechaPagoCell } from '@/components/factura/PagoInfoCells';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange } from 'lucide-react';
+import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange, FileDown } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +12,7 @@ import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Field, SelectField, FormError } from '@/components/ui/Field';
 import { api, ApiError } from '@/lib/api';
+import { auth } from '@/lib/auth';
 import { useApi, useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 
@@ -104,6 +105,10 @@ export function FacturasCompraPage() {
   const setOrigen = (v: string) => { setPage(1); setQueryParam('origen', v); };
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  // v1.49 — filtro adicional por fecha de imputación contable (usado típicamente
+  // para reportes mensuales y para el export Excel).
+  const [impDesde, setImpDesde] = useState('');
+  const [impHasta, setImpHasta] = useState('');
   // Addendum v1.13 + v1.14 — filtros enriquecidos
   const [noTomada, setNoTomada] = useState<'' | '0' | '1'>('');
   const [tipoGasto, setTipoGasto] = useState('');
@@ -119,17 +124,60 @@ export function FacturasCompraPage() {
     if (origen) p.set('origen', origen);
     if (desde)  p.set('desde', desde);
     if (hasta)  p.set('hasta', hasta);
+    if (impDesde) p.set('imp_desde', impDesde);
+    if (impHasta) p.set('imp_hasta', impHasta);
     if (noTomada !== '') p.set('no_tomada', noTomada);
     if (tipoGasto) p.set('tipo_gasto', tipoGasto);
     if (periodoTrab) p.set('periodo_trabajado', periodoTrab);
     if (juris) p.set('jurisdiccion', juris);
     p.set('page', String(page));
     return p.toString();
-  }, [estado, origen, desde, hasta, noTomada, tipoGasto, periodoTrab, juris, page]);
+  }, [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris, page]);
 
   // Reset page=1 cuando cambian los filtros (no la página).
   useEffect(() => { setPage(1); },
-    [estado, origen, desde, hasta, noTomada, tipoGasto, periodoTrab, juris]);
+    [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris]);
+
+  // v1.49 — query string SIN page (para el export — no nos importa la página).
+  const qsExport = useMemo(() => {
+    const p = new URLSearchParams();
+    if (estado) p.set('estado', estado);
+    if (origen) p.set('origen', origen);
+    if (desde)  p.set('desde', desde);
+    if (hasta)  p.set('hasta', hasta);
+    if (impDesde) p.set('imp_desde', impDesde);
+    if (impHasta) p.set('imp_hasta', impHasta);
+    if (noTomada !== '') p.set('no_tomada', noTomada);
+    if (tipoGasto) p.set('tipo_gasto', tipoGasto);
+    if (periodoTrab) p.set('periodo_trabajado', periodoTrab);
+    if (juris) p.set('jurisdiccion', juris);
+    return p.toString();
+  }, [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris]);
+
+  const [exportando, setExportando] = useState(false);
+  const exportarExcel = () => {
+    const url = `/api/erp/facturas-compra/export.xlsx${qsExport ? `?${qsExport}` : ''}`;
+    const token = auth.getToken();
+    setExportando(true);
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        const periodo = impDesde && impHasta ? `_imp_${impDesde}_a_${impHasta}` :
+          impDesde ? `_imp_desde_${impDesde}` : '';
+        a.download = `facturas_compra${periodo}.xlsx`;
+        a.click();
+      })
+      .catch((e) => {
+        // eslint-disable-next-line no-console
+        console.error('Export Excel falló', e);
+      })
+      .finally(() => setExportando(false));
+  };
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['facturas-compra', qs],
@@ -322,11 +370,17 @@ export function FacturasCompraPage() {
         <CardHeader
           title={<div className="flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-azure" /> Facturas de compra</div>}
           actions={
-            <Link to="/erp/facturas-compra/nueva">
-              <Button variant="primary" size="sm">
-                <Plus className="w-3 h-3" /> Cargar manual
+            <div className="flex gap-2">
+              {/* v1.49 — export Excel del listado filtrado. */}
+              <Button variant="outline" size="sm" onClick={exportarExcel} disabled={exportando}>
+                <FileDown className="w-3 h-3" /> {exportando ? 'Exportando…' : 'Exportar Excel'}
               </Button>
-            </Link>
+              <Link to="/erp/facturas-compra/nueva">
+                <Button variant="primary" size="sm">
+                  <Plus className="w-3 h-3" /> Cargar manual
+                </Button>
+              </Link>
+            </div>
           }
         />
         <CardBody className="p-4 space-y-3">
@@ -339,12 +393,19 @@ export function FacturasCompraPage() {
               onChange={(e) => setOrigen(e.target.value)}
               containerClassName="w-[180px]"
               options={ORIGENES.map((s) => ({ value: s, label: s }))} />
-            <Field label="Desde" type="date" value={desde}
+            <Field label="Emis. desde" type="date" value={desde}
               onChange={(e) => setDesde(e.target.value)}
-              containerClassName="w-[150px]" />
-            <Field label="Hasta" type="date" value={hasta}
+              containerClassName="w-[145px]" />
+            <Field label="Emis. hasta" type="date" value={hasta}
               onChange={(e) => setHasta(e.target.value)}
-              containerClassName="w-[150px]" />
+              containerClassName="w-[145px]" />
+            {/* v1.49 — filtros por fecha de imputación (clave para reportes mensuales). */}
+            <Field label="Imp. desde" type="date" value={impDesde}
+              onChange={(e) => setImpDesde(e.target.value)}
+              containerClassName="w-[145px]" />
+            <Field label="Imp. hasta" type="date" value={impHasta}
+              onChange={(e) => setImpHasta(e.target.value)}
+              containerClassName="w-[145px]" />
             {/* Addendum v1.13 + v1.14 */}
             <SelectField label="Tomado" value={noTomada} placeholder="Todas"
               onChange={(e) => setNoTomada(e.target.value as '' | '0' | '1')}

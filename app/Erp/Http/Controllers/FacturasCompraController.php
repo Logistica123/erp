@@ -58,43 +58,7 @@ class FacturasCompraController extends Controller
                 'f.op_externa', 'f.fecha_pago',
             ]);
 
-        if ($estado = $request->query('estado')) {
-            $q->where('f.estado', $estado);
-        }
-        if ($proveedor = $request->integer('proveedor_id')) {
-            $q->where('f.auxiliar_id', $proveedor);
-        }
-        if ($desde = $request->query('desde')) {
-            $q->where('f.fecha_emision', '>=', $desde);
-        }
-        if ($hasta = $request->query('hasta')) {
-            $q->where('f.fecha_emision', '<=', $hasta);
-        }
-        if ($origen = $request->query('origen')) {
-            $q->where('f.origen', $origen);
-        }
-        // Addendum v1.13 + v1.14 — filtros enriquecidos.
-        $noTomada = $request->query('no_tomada');
-        if ($noTomada === '0' || $noTomada === '1') {
-            $q->where('f.no_tomada', (int) $noTomada);
-        }
-        if ($tipoGasto = $request->query('tipo_gasto')) {
-            $q->where('f.tipo_gasto', $tipoGasto);
-        }
-        if ($periodoTrab = $request->query('periodo_trabajado')) {
-            // v1.27 — valor especial "__VACIOS__" = filtrar NULL/vacío.
-            if ($periodoTrab === '__VACIOS__') {
-                $q->where(function ($sub) {
-                    $sub->whereNull('f.periodo_trabajado_texto')
-                        ->orWhere('f.periodo_trabajado_texto', '');
-                });
-            } else {
-                $q->where('f.periodo_trabajado_texto', $periodoTrab);
-            }
-        }
-        if ($juris = $request->query('jurisdiccion')) {
-            $q->where('f.jurisdiccion_codigo', $juris);
-        }
+        $this->aplicarFiltrosIndex($q, $request);
 
         // v1.42 — paginación server-side (antes: limit(200) hardcodeado,
         // los imports grandes quedaban truncados sin avisar al usuario). El
@@ -611,6 +575,183 @@ class FacturasCompraController extends Controller
         \Illuminate\Support\Facades\Cache::forget("facturas_compra.periodos_trabajados.{$empresaId}");
 
         return response()->json(['ok' => true, 'data' => ['updated' => $facturas->count()]]);
+    }
+
+    /**
+     * v1.49 — Aplica los filtros del listado (compartidos por index y export).
+     * Soporta filtros por fecha de emisión (desde/hasta) y por fecha de
+     * imputación (imp_desde/imp_hasta) — son independientes; podés usar uno,
+     * el otro o ambos.
+     */
+    private function aplicarFiltrosIndex($q, Request $request): void
+    {
+        if ($estado = $request->query('estado')) {
+            $q->where('f.estado', $estado);
+        }
+        if ($proveedor = $request->integer('proveedor_id')) {
+            $q->where('f.auxiliar_id', $proveedor);
+        }
+        // Fecha de emisión.
+        if ($desde = $request->query('desde')) {
+            $q->where('f.fecha_emision', '>=', $desde);
+        }
+        if ($hasta = $request->query('hasta')) {
+            $q->where('f.fecha_emision', '<=', $hasta);
+        }
+        // v1.49 — Fecha de imputación contable (clave para reportes mensuales).
+        if ($impDesde = $request->query('imp_desde')) {
+            $q->where('f.fecha_imputacion', '>=', $impDesde);
+        }
+        if ($impHasta = $request->query('imp_hasta')) {
+            $q->where('f.fecha_imputacion', '<=', $impHasta);
+        }
+        if ($origen = $request->query('origen')) {
+            $q->where('f.origen', $origen);
+        }
+        $noTomada = $request->query('no_tomada');
+        if ($noTomada === '0' || $noTomada === '1') {
+            $q->where('f.no_tomada', (int) $noTomada);
+        }
+        if ($tipoGasto = $request->query('tipo_gasto')) {
+            $q->where('f.tipo_gasto', $tipoGasto);
+        }
+        if ($periodoTrab = $request->query('periodo_trabajado')) {
+            if ($periodoTrab === '__VACIOS__') {
+                $q->where(function ($sub) {
+                    $sub->whereNull('f.periodo_trabajado_texto')
+                        ->orWhere('f.periodo_trabajado_texto', '');
+                });
+            } else {
+                $q->where('f.periodo_trabajado_texto', $periodoTrab);
+            }
+        }
+        if ($juris = $request->query('jurisdiccion')) {
+            $q->where('f.jurisdiccion_codigo', $juris);
+        }
+    }
+
+    /**
+     * v1.49 — Exporta el listado de facturas de compra a XLSX respetando los
+     * mismos filtros del listado. Sin paginación: bajamos todo lo que matchea.
+     */
+    public function exportXlsx(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $this->mustHave($request, 'compras.facturas.ver');
+
+        $q = DB::table('erp_facturas_compra as f')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+            ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+            ->leftJoin('erp_monedas as m', 'm.id', '=', 'f.moneda_id')
+            ->leftJoin('erp_asientos as asi', 'asi.id', '=', 'f.asiento_id')
+            ->where('f.empresa_id', 1)
+            ->whereNull('f.deleted_at')
+            ->select([
+                'f.id', 'f.fecha_emision', 'f.fecha_imputacion',
+                'tc.codigo_interno as tipo_codigo', 'tc.letra',
+                'f.punto_venta', 'f.numero', 'f.cae',
+                'f.cuit_emisor', 'a.nombre as proveedor_nombre',
+                'm.codigo as moneda',
+                'f.imp_neto_gravado', 'f.imp_iva',
+                'f.imp_neto_gravado_21', 'f.imp_iva_21',
+                'f.imp_neto_gravado_10_5', 'f.imp_iva_10_5',
+                'f.imp_neto_gravado_27', 'f.imp_iva_27',
+                'f.imp_percepciones_iva', 'f.imp_percepciones_iibb',
+                'f.imp_no_gravado', 'f.imp_exento',
+                'f.imp_total',
+                'f.estado', 'f.origen', 'f.no_tomada',
+                'f.tipo_gasto', 'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo',
+                'f.op_externa', 'f.fecha_pago',
+                'f.observaciones', 'asi.numero as asiento_numero',
+            ]);
+
+        $this->aplicarFiltrosIndex($q, $request);
+
+        $rows = $q->orderBy('f.fecha_imputacion')->orderBy('f.id')->get();
+
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Facturas Compra');
+
+        $headers = [
+            'ID', 'Fecha Emisión', 'Fecha Imputación',
+            'Tipo', 'Letra', 'PV', 'Número', 'CAE',
+            'CUIT Proveedor', 'Proveedor',
+            'Moneda',
+            'Neto Gravado', 'IVA',
+            'Neto 21%', 'IVA 21%',
+            'Neto 10.5%', 'IVA 10.5%',
+            'Neto 27%', 'IVA 27%',
+            'Percep. IVA', 'Percep. IIBB',
+            'No Gravado', 'Exento',
+            'Total',
+            'Estado', 'Origen', 'No Tomada',
+            'Tipo Gasto', 'Período Trabajado', 'Juris. IIBB',
+            'OP Externa', 'Fecha Pago',
+            'Observaciones', 'Asiento #',
+        ];
+        $sheet->fromArray($headers, null, 'A1');
+
+        // Estilo header.
+        $headerRange = 'A1:'.\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers)).'1';
+        $sheet->getStyle($headerRange)->getFont()->setBold(true);
+        $sheet->getStyle($headerRange)->getFill()
+            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->getStartColor()->setRGB('E7EBF0');
+
+        $rowIdx = 2;
+        foreach ($rows as $r) {
+            $sheet->fromArray([
+                $r->id,
+                $this->isoToDmy($r->fecha_emision),
+                $this->isoToDmy($r->fecha_imputacion),
+                $r->tipo_codigo, $r->letra ?? '',
+                $r->punto_venta, $r->numero, $r->cae,
+                $r->cuit_emisor, $r->proveedor_nombre,
+                $r->moneda,
+                (float) $r->imp_neto_gravado, (float) $r->imp_iva,
+                (float) $r->imp_neto_gravado_21, (float) $r->imp_iva_21,
+                (float) $r->imp_neto_gravado_10_5, (float) $r->imp_iva_10_5,
+                (float) $r->imp_neto_gravado_27, (float) $r->imp_iva_27,
+                (float) $r->imp_percepciones_iva, (float) $r->imp_percepciones_iibb,
+                (float) $r->imp_no_gravado, (float) $r->imp_exento,
+                (float) $r->imp_total,
+                $r->estado, $r->origen, ((int) $r->no_tomada) === 1 ? 'NO' : 'SI',
+                $r->tipo_gasto, $r->periodo_trabajado_texto, $r->jurisdiccion_codigo,
+                $r->op_externa, $this->isoToDmy($r->fecha_pago),
+                $r->observaciones, $r->asiento_numero ? '#'.$r->asiento_numero : '',
+            ], null, 'A'.$rowIdx);
+            $rowIdx++;
+        }
+
+        // Formato moneda (columnas L..W = neto/iva/percep/total).
+        $colsNum = ['L','M','N','O','P','Q','R','S','T','U','V','W','X'];
+        foreach ($colsNum as $col) {
+            $sheet->getStyle("{$col}2:{$col}{$rowIdx}")
+                ->getNumberFormat()->setFormatCode('#,##0.00');
+        }
+        foreach (range('A', 'Z') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        $filename = sprintf('facturas_compra_%s.xlsx', now()->format('Ymd_His'));
+
+        return response()->stream(function () use ($spreadsheet) {
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save('php://output');
+        }, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
+    }
+
+    private function isoToDmy(?string $iso): ?string
+    {
+        if (! $iso) return null;
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $iso, $m)) {
+            return "{$m[3]}/{$m[2]}/{$m[1]}";
+        }
+        return $iso;
     }
 
     private function mustHave(Request $request, string $codigo): void

@@ -528,6 +528,9 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.facturas-compra.periodo-trabajado');
         Route::get('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'index'])
             ->name('erp.fc.index');
+        // v1.49 — export XLSX del listado con los mismos filtros aplicados.
+        Route::get('/facturas-compra/export.xlsx', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'exportXlsx'])
+            ->name('erp.fc.export-xlsx');
         Route::post('/facturas-compra', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'store'])
             ->name('erp.fc.store');
         Route::get('/facturas-compra/{id}', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'show'])

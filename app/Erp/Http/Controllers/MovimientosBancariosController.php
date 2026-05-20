@@ -181,6 +181,21 @@ class MovimientosBancariosController
         return response()->json(['ok' => true, 'data' => $mov]);
     }
 
+    /**
+     * v1.27 Sprint A — Conciliación directa para tipos auto.
+     * Usa erp_banco_config para resolver la cuenta contrapartida.
+     */
+    public function conciliarDirecto(Request $request, int $id): JsonResponse
+    {
+        $mov = MovimientoBancario::findOrFail($id);
+        try {
+            $mov = $this->concilService->conciliarDirecto($mov, $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $mov->load('asiento')]);
+    }
+
     public function autoconciliar(Request $request): JsonResponse
     {
         $data = $request->validate([

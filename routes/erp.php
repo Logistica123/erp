@@ -198,6 +198,9 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.mov-banc.etiquetar');
         Route::post('/movimientos-bancarios/{id}/conciliar', [MovimientosBancariosController::class, 'conciliar'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar');
+        // v1.27 Sprint A — conciliación directa para COMISION/IMPUESTO/INTERES.
+        Route::post('/movimientos-bancarios/{id}/conciliar-directo', [MovimientosBancariosController::class, 'conciliarDirecto'])
+            ->whereNumber('id')->name('erp.mov-banc.conciliar-directo');
         Route::post('/movimientos-bancarios/{id}/desconciliar', [MovimientosBancariosController::class, 'desconciliar'])
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.mov-banc.desconciliar');

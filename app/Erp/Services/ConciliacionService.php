@@ -240,6 +240,121 @@ class ConciliacionService
     }
 
     /**
+     * v1.27 Sprint A — Conciliación directa para tipos automáticos
+     * (COMISION_BANCARIA, IMPUESTO_DEBITO_CREDITO, INTERES_GANADO).
+     *
+     * Usa `erp_banco_config` para resolver la cuenta contrapartida. El
+     * operador concilia con 1 click sin elegir factura.
+     *
+     * Caso COMISION_BANCARIA / IMPUESTO_DEBITO_CREDITO:
+     *   movimiento es débito en banco → Debe Gasto / Haber Banco
+     * Caso INTERES_GANADO:
+     *   movimiento es crédito en banco → Debe Banco / Haber Resultado
+     */
+    public function conciliarDirecto(MovimientoBancario $mov, User $usuario): MovimientoBancario
+    {
+        if ($mov->estado === MovimientoBancario::ESTADO_CONCILIADO) {
+            throw new DomainException('MOVIMIENTO_YA_CONCILIADO');
+        }
+        $tipoAuto = $mov->tipo_operativo;
+        if (! in_array($tipoAuto, ['COMISION_BANCARIA', 'IMPUESTO_DEBITO_CREDITO', 'INTERES_GANADO'], true)) {
+            throw new DomainException("TIPO_NO_AUTO: el movimiento es {$tipoAuto}, no se concilia directo. Usa el flujo contra factura.");
+        }
+
+        $cfg = \App\Erp\Models\Tesoreria\BancoConfig::where('cuenta_bancaria_id', $mov->cuenta_bancaria_id)->first();
+        if (! $cfg) {
+            throw new DomainException("BANCO_CONFIG_AUSENTE: configurá las cuentas contables del banco en /erp/tesoreria/extracto-config.");
+        }
+        $contrapartidaId = match ($tipoAuto) {
+            'COMISION_BANCARIA' => $cfg->cuenta_gastos_bancarios_id,
+            'IMPUESTO_DEBITO_CREDITO' => $cfg->cuenta_imp_debito_credito_id,
+            'INTERES_GANADO' => $cfg->cuenta_intereses_ganados_id,
+        };
+
+        $cuentaBanco = $mov->cuentaBancaria;
+        $cuentaBancoContableId = $cuentaBanco->cuenta_contable_id;
+        $empresaId = $cuentaBanco->empresa_id;
+        $monto = (float) max($mov->debito, $mov->credito);
+        if ($monto <= 0) {
+            throw new DomainException("MOVIMIENTO_SIN_IMPORTE");
+        }
+
+        return DB::transaction(function () use ($mov, $usuario, $tipoAuto, $contrapartidaId, $cuentaBancoContableId, $empresaId, $monto) {
+            DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
+
+            // Si es egreso del banco (debito > 0): Debe contrapartida / Haber banco.
+            // Si es ingreso al banco (credito > 0): Debe banco / Haber contrapartida.
+            $esEgreso = (float) $mov->debito > 0.005;
+            $movsAsiento = [
+                [
+                    'cuenta_id' => $esEgreso ? $contrapartidaId : $cuentaBancoContableId,
+                    'centro_costo_id' => null,
+                    'auxiliar_id' => null,
+                    'debe' => $monto,
+                    'haber' => 0,
+                    'glosa' => $tipoAuto.' — '.($mov->concepto ?? ''),
+                ],
+                [
+                    'cuenta_id' => $esEgreso ? $cuentaBancoContableId : $contrapartidaId,
+                    'centro_costo_id' => null,
+                    'auxiliar_id' => null,
+                    'debe' => 0,
+                    'haber' => $monto,
+                    'glosa' => $tipoAuto.' — '.($mov->concepto ?? ''),
+                ],
+            ];
+
+            $diarioBan = DB::table('erp_diarios')
+                ->where('empresa_id', $empresaId)->where('codigo', 'BAN')
+                ->value('id')
+                ?? DB::table('erp_diarios')
+                    ->where('empresa_id', $empresaId)->where('codigo', 'GEN')
+                    ->value('id');
+            if (! $diarioBan) {
+                throw new DomainException('DIARIO_BAN_INEXISTENTE: creá un diario con código BAN o GEN.');
+            }
+
+            $asientoSvc = app(AsientoService::class);
+            $asiento = $asientoSvc->crearBorrador([
+                'empresa_id' => $empresaId,
+                'diario_id' => $diarioBan,
+                'fecha' => $mov->fecha,
+                'concepto' => "Conciliación directa {$tipoAuto} mov #{$mov->id}",
+                'movimientos' => $movsAsiento,
+                'user_id' => $usuario->id,
+            ]);
+            $asiento = $asientoSvc->contabilizar($asiento);
+
+            // Registro en erp_conciliaciones (referencia ASIENTO_MANUAL).
+            Conciliacion::create([
+                'movimiento_bancario_id' => $mov->id,
+                'referencia_tipo' => 'ASIENTO_MANUAL',
+                'referencia_id' => $asiento->id,
+                'importe_conciliado' => $monto,
+                'user_id' => $usuario->id,
+                'modo' => 'MANUAL',
+                'observacion' => "Conciliación directa tipo {$tipoAuto}",
+            ]);
+
+            $mov->update([
+                'estado' => MovimientoBancario::ESTADO_CONCILIADO,
+                'asiento_id' => $asiento->id,
+                'monto_conciliado' => $monto,
+            ]);
+
+            $this->audit->logEvento(
+                accion: 'MOVIMIENTO_CONCILIADO_DIRECTO',
+                modulo: 'tesoreria',
+                descripcion: sprintf('Mov #%d (%s) conciliado directo → asiento #%d',
+                    $mov->id, $tipoAuto, $asiento->id),
+                empresaId: $empresaId,
+            );
+
+            return $mov->fresh(['asiento', 'cuentaBancaria']);
+        });
+    }
+
+    /**
      * Auto-conciliación masiva sobre movimientos PENDIENTE/ETIQUETADO:
      *  - ETIQUETADO → confirma cuenta propuesta (crea asiento vía
      *    MovimientoBancarioService::conciliar)

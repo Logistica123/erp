@@ -26,6 +26,8 @@ class MovimientoBancario extends Model
         'cuit_contraparte', 'nombre_contraparte', 'persona_id', 'cliente_id',
         'cuenta_propia_id', 'referencia_externa', 'regla_aplicada_id',
         'confianza_match', 'dia_contable_id',
+        // v1.27 Sprint A
+        'tipo_operativo', 'monto_conciliado',
     ];
 
     protected $casts = [

@@ -195,7 +195,7 @@ class LibroIvaVentasImportService
         $errores = [];
         $warnings = [];
         $clientesNoMapeados = [];
-        $ok = 0; $skipped = 0; $clientesCreados = 0;
+        $ok = 0; $skipped = 0; $clientesCreados = 0; $duplicados = 0;
 
         DB::beginTransaction();
         try {
@@ -205,6 +205,14 @@ class LibroIvaVentasImportService
 
                 try {
                     $r = $this->parsearFila($rowRaw, $headerMap, $empresaId, $periodo, $import->id, $usuario);
+                    if (! empty($r['duplicado'])) {
+                        // v1.50.4 — Duplicado se reporta como warning y suma a
+                        // contador propio (no a $ok ni a $errores). El archivo
+                        // sigue procesando normalmente.
+                        $duplicados++;
+                        $warnings[] = ['row' => $rowNum, 'motivo' => $r['warning']];
+                        continue;
+                    }
                     if ($r['cliente_no_mapeado']) {
                         $clientesNoMapeados[] = ['row' => $rowNum, 'valor' => $r['cliente_no_mapeado']];
                     }
@@ -251,8 +259,8 @@ class LibroIvaVentasImportService
             accion: 'IMPORT_LIBRO_IVA_VENTAS',
             modulo: 'ventas',
             descripcion: sprintf(
-                'Import LIBRO_IVA_VENTAS #%d — %d ok, %d errores, %d clientes creados',
-                $import->id, $ok, count($errores), $clientesCreados
+                'Import LIBRO_IVA_VENTAS #%d — %d ok, %d errores, %d clientes creados, %d duplicados saltados',
+                $import->id, $ok, count($errores), $clientesCreados, $duplicados
             ),
             empresaId: $empresaId,
         );
@@ -263,6 +271,7 @@ class LibroIvaVentasImportService
             'stats' => [
                 'totales' => count($errores) > 0 ? 0 : $ok,
                 'skipped' => $skipped,
+                'duplicados' => $duplicados, // v1.50.4
                 'errores' => count($errores),
                 'warnings' => count($warnings),
                 'clientes_creados' => count($errores) > 0 ? 0 : $clientesCreados,
@@ -471,7 +480,12 @@ class LibroIvaVentasImportService
             ? DB::table('erp_centros_costo')->where('auxiliar_id', $clienteAuxId)->value('id')
             : null;
 
-        // Idempotencia: (tipo, PV, número) ya existente como factura emitida.
+        // v1.50.4 — Idempotencia: (tipo, PV, número) ya existente.
+        // Antes (v1.45) tirábamos DomainException → atomicidad rebota TODO el
+        // archivo. En ventas eso es contraproducente: el contador típicamente
+        // re-sube un archivo con un mes más amplio y las facturas ya cargadas
+        // bloqueaban todo. Ahora devolvemos como duplicado SKIPPED (warning,
+        // no error). El resto del archivo entra.
         $existe = DB::table('erp_facturas_venta')
             ->where('empresa_id', $empresaId)
             ->where('tipo_comprobante_id', $tipoCbteCod)
@@ -480,10 +494,15 @@ class LibroIvaVentasImportService
             ->whereNull('deleted_at')
             ->exists();
         if ($existe) {
-            throw new DomainException(sprintf(
-                'FACTURA_DUPLICADA: ya existe la factura (tipo=%d PV=%d nro=%d) en el sistema.',
-                $tipoCbteCod, $puntoVentaNum, $numero
-            ));
+            return [
+                'cliente_no_mapeado' => null,
+                'cliente_creado' => false,
+                'warning' => sprintf(
+                    'FACTURA_DUPLICADA: ya existe (tipo=%d PV=%d nro=%d) — saltada.',
+                    $tipoCbteCod, $puntoVentaNum, $numero,
+                ),
+                'duplicado' => true,
+            ];
         }
 
         // CAE (opcional).

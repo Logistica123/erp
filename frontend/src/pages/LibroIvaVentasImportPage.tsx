@@ -57,6 +57,7 @@ type ConfirmResp = {
   estado?: string;
   stats: {
     totales: number; skipped: number;
+    duplicados?: number;
     errores: number; warnings?: number;
     clientes_creados: number; clientes_no_mapeados: number;
   };
@@ -549,16 +550,14 @@ function Step3({ resultado, encodingDetectado }: { resultado: ConfirmResp; encod
 
       <div className="grid grid-cols-3 gap-2 text-[12px]">
         <Stat label="Facturas importadas" value={<Badge variant="success">{stats.totales}</Badge>} />
+        <Stat label="Duplicadas saltadas" value={
+          stats.duplicados ? <Badge variant="warning">{stats.duplicados}</Badge> : 0
+        } />
         <Stat label="Skipped (filas vacías)" value={stats.skipped} />
         <Stat label="Errores" value={
           stats.errores ? <Badge variant="danger">{stats.errores}</Badge> : 0
         } />
         <Stat label="Clientes creados" value={<Badge variant="success">{stats.clientes_creados}</Badge>} />
-        <Stat label="Clientes sin mapear" value={
-          stats.clientes_no_mapeados
-            ? <Badge variant="warning">{stats.clientes_no_mapeados}</Badge>
-            : 0
-        } />
         <Stat label="Warnings" value={
           stats.warnings ? <Badge variant="warning">{stats.warnings}</Badge> : 0
         } />

@@ -436,6 +436,9 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.fv.catalogos');
         Route::get('/facturas-venta', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'index'])
             ->name('erp.fv.index');
+        // v1.27 Sprint D §14 — export XLSX (espejo v1.49 compras).
+        Route::get('/facturas-venta/export.xlsx', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'exportXlsx'])
+            ->name('erp.fv.export-xlsx');
         Route::post('/facturas-venta/emitir', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'emitir'])
             ->name('erp.fv.emitir');
         // v1.17 — Carga manual (sin emitir contra ARCA).

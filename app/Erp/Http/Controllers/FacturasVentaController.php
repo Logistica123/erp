@@ -223,7 +223,129 @@ class FacturasVentaController extends Controller
 
     public function index(Request $request)
     {
+        $q = $this->baseQuery();
+        $this->aplicarFiltros($q, $request);
+
+        // v1.27 Sprint D — paginate server-side (antes limit(200) hardcoded,
+        // espejo del v1.42 compras).
+        $perPage = (int) $request->query('per_page', 50);
+        $perPage = max(10, min(500, $perPage));
+        $paginator = $q->orderByDesc('f.fecha_emision')
+            ->orderByDesc('f.id')
+            ->paginate($perPage)
+            ->withQueryString();
+
+        return response()->json([
+            'data' => $paginator->items(),
+            'current_page' => $paginator->currentPage(),
+            'per_page' => $paginator->perPage(),
+            'last_page' => $paginator->lastPage(),
+            'total' => $paginator->total(),
+        ]);
+    }
+
+    /**
+     * v1.27 Sprint D §14 — Export XLSX de facturas de venta (espejo v1.49).
+     */
+    public function exportXlsx(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
         $q = DB::table('erp_facturas_venta as f')
+            ->leftJoin('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+            ->leftJoin('erp_puntos_venta as pv', 'pv.id', '=', 'f.punto_venta_id')
+            ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+            ->leftJoin('erp_monedas as m', 'm.id', '=', 'f.moneda_id')
+            ->leftJoin('erp_asientos as asi', 'asi.id', '=', 'f.asiento_id')
+            ->where('f.empresa_id', 1)
+            ->whereNull('f.deleted_at')
+            ->select([
+                'f.id', 'f.fecha_emision',
+                'tc.codigo_interno as tipo_codigo', 'tc.letra',
+                'pv.numero as pto_vta', 'f.numero', 'f.cae',
+                'a.cuit as cliente_cuit', 'a.nombre as cliente_nombre',
+                'm.codigo as moneda',
+                'f.imp_neto_gravado', 'f.imp_iva',
+                'f.imp_neto_gravado_21', 'f.imp_iva_21',
+                'f.imp_neto_gravado_10_5', 'f.imp_iva_10_5',
+                'f.imp_neto_gravado_27', 'f.imp_iva_27',
+                'f.imp_no_gravado', 'f.imp_exento',
+                'f.imp_total',
+                'f.estado', 'f.origen', 'f.verificada_arca',
+                'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo',
+                'asi.numero as asiento_numero',
+            ]);
+
+        $this->aplicarFiltros($q, $request);
+        $rows = $q->orderBy('f.fecha_emision')->orderBy('f.id')->get();
+
+        $sheet = (new \PhpOffice\PhpSpreadsheet\Spreadsheet())->getActiveSheet();
+        $sheet->setTitle('Facturas Venta');
+        $headers = [
+            'ID', 'Fecha Emisión', 'Tipo', 'Letra', 'PV', 'Número', 'CAE',
+            'CUIT Cliente', 'Cliente', 'Moneda',
+            'Neto Gravado', 'IVA',
+            'Neto 21%', 'IVA 21%',
+            'Neto 10.5%', 'IVA 10.5%',
+            'Neto 27%', 'IVA 27%',
+            'No Gravado', 'Exento', 'Total',
+            'Estado', 'Origen', 'Verif. ARCA',
+            'Período Trabajado', 'Juris. IIBB',
+            'Asiento #',
+        ];
+        $sheet->fromArray($headers, null, 'A1');
+        $sheet->getStyle('A1:'.\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers)).'1')
+            ->getFont()->setBold(true);
+
+        $rowIdx = 2;
+        foreach ($rows as $r) {
+            $sheet->fromArray([
+                $r->id,
+                $this->isoToDmy($r->fecha_emision),
+                $r->tipo_codigo, $r->letra ?? '',
+                $r->pto_vta, $r->numero, $r->cae,
+                $r->cliente_cuit, $r->cliente_nombre,
+                $r->moneda,
+                (float) $r->imp_neto_gravado, (float) $r->imp_iva,
+                (float) ($r->imp_neto_gravado_21 ?? 0), (float) ($r->imp_iva_21 ?? 0),
+                (float) ($r->imp_neto_gravado_10_5 ?? 0), (float) ($r->imp_iva_10_5 ?? 0),
+                (float) ($r->imp_neto_gravado_27 ?? 0), (float) ($r->imp_iva_27 ?? 0),
+                (float) $r->imp_no_gravado, (float) $r->imp_exento,
+                (float) $r->imp_total,
+                $r->estado, $r->origen, ((int) $r->verificada_arca) === 1 ? 'SI' : 'NO',
+                $r->periodo_trabajado_texto, $r->jurisdiccion_codigo,
+                $r->asiento_numero ? '#'.$r->asiento_numero : '',
+            ], null, 'A'.$rowIdx);
+            $rowIdx++;
+        }
+        foreach (range('K', 'U') as $col) {
+            $sheet->getStyle("{$col}2:{$col}{$rowIdx}")
+                ->getNumberFormat()->setFormatCode('#,##0.00');
+        }
+        foreach (range('A', 'Z') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        $filename = sprintf('facturas_venta_%s.xlsx', now()->format('Ymd_His'));
+        return response()->stream(function () use ($sheet) {
+            (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($sheet->getParent()))->save('php://output');
+        }, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control' => 'no-store',
+        ]);
+    }
+
+    private function isoToDmy(?string $iso): ?string
+    {
+        if (! $iso) return null;
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $iso, $m)) {
+            return "{$m[3]}/{$m[2]}/{$m[1]}";
+        }
+        return $iso;
+    }
+
+    private function baseQuery()
+    {
+        return DB::table('erp_facturas_venta as f')
             ->leftJoin('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
             ->leftJoin('erp_puntos_venta as pv', 'pv.id', '=', 'f.punto_venta_id')
             ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
@@ -234,9 +356,7 @@ class FacturasVentaController extends Controller
             ->select([
                 'f.id', 'f.numero', 'f.cae', 'f.fecha_vto_cae', 'f.fecha_emision',
                 'f.imp_neto_gravado', 'f.imp_iva', 'f.imp_total', 'f.origen', 'f.estado',
-                'f.verificada_arca', // v1.18 U6
-                'f.es_fce', 'f.created_at',
-                // v1.27 — exponer período trabajado en el listado
+                'f.verificada_arca', 'f.es_fce', 'f.created_at',
                 'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo',
                 'tc.codigo_interno as tipo_codigo', 'tc.nombre as tipo_nombre', 'tc.letra',
                 'tc.clase as tipo_clase', 'tc.signo as tipo_signo',
@@ -245,12 +365,22 @@ class FacturasVentaController extends Controller
                 'm.codigo as moneda',
                 'f.asiento_id', 'asi.numero as asiento_numero', 'asi.estado as asiento_estado',
             ]);
+    }
 
+    private function aplicarFiltros($q, Request $request): void
+    {
         if ($desde = $request->query('desde')) {
             $q->where('f.fecha_emision', '>=', $desde);
         }
         if ($hasta = $request->query('hasta')) {
             $q->where('f.fecha_emision', '<=', $hasta);
+        }
+        // v1.27 Sprint D — filtros por imputación (espejo v1.49 compras).
+        if ($impDesde = $request->query('imp_desde')) {
+            $q->where('f.fecha_emision', '>=', $impDesde);
+        }
+        if ($impHasta = $request->query('imp_hasta')) {
+            $q->where('f.fecha_emision', '<=', $impHasta);
         }
         if ($estado = $request->query('estado')) {
             $q->where('f.estado', $estado);
@@ -258,7 +388,6 @@ class FacturasVentaController extends Controller
         if ($origen = $request->query('origen')) {
             $q->where('f.origen', $origen);
         }
-        // v1.27 — filtro por período trabajado (acepta __VACIOS__).
         if ($periodoTrab = $request->query('periodo_trabajado')) {
             if ($periodoTrab === '__VACIOS__') {
                 $q->where(function ($sub) {
@@ -269,10 +398,9 @@ class FacturasVentaController extends Controller
                 $q->where('f.periodo_trabajado_texto', $periodoTrab);
             }
         }
-
-        $data = $q->orderByDesc('f.fecha_emision')->orderByDesc('f.id')->limit(200)->get();
-
-        return response()->json(['data' => $data]);
+        if ($juris = $request->query('jurisdiccion')) {
+            $q->where('f.jurisdiccion_codigo', $juris);
+        }
     }
 
     public function show(int $id)

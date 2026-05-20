@@ -308,7 +308,22 @@ class LibroIvaVentasImportService
             ->where('numero', $puntoVentaNum)
             ->first(['id']);
         if (! $puntoVenta) {
-            throw new DomainException("PUNTO_VENTA_INEXISTENTE: nro={$puntoVentaNum}. Crealo desde Configuración → Puntos de venta.");
+            // v1.50.2 — Upsert automático del punto de venta cuando no existe.
+            // Antes (v1.45) rebotaba toda la fila. En la práctica, el contador
+            // sube el archivo con TODOS los PVs históricos en uso — auto-crear
+            // los faltantes con tipo_emision=MANUAL (porque vienen de facturas
+            // ya emitidas, no van a salir nuevos CAEs por este PV) y activo=1.
+            $pvId = DB::table('erp_puntos_venta')->insertGetId([
+                'empresa_id' => $empresaId,
+                'numero' => $puntoVentaNum,
+                'nombre' => sprintf('PV %d — auto (import Libro IVA)', $puntoVentaNum),
+                'tipo_emision' => 'MANUAL',
+                'activo' => 1,
+                'bloqueado' => 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $puntoVenta = (object) ['id' => $pvId];
         }
 
         $numero = (int) $this->parsearInt($this->get($r, $headerMap, 'numero desde'));

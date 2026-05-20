@@ -143,21 +143,36 @@ class LibroIvaVentasImportController
         $motivo = trim((string) $request->input('motivo', ''));
 
         if ($cascada && $facturasCount > 0) {
-            // Borrado en cascada: factura por factura, manualmente, reusando
-            // el flujo de anulación (que valida período abierto + revierte asiento).
-            DB::transaction(function () use ($imp, $motivo) {
-                $facturas = FacturaVenta::where('import_id', $imp->id)
-                    ->with('asiento')->get();
-                foreach ($facturas as $f) {
-                    if ($f->asiento_id) {
-                        DB::table('erp_movimientos_asiento')
-                            ->where('asiento_id', $f->asiento_id)->delete();
-                        DB::table('erp_asientos')->where('id', $f->asiento_id)->delete();
-                    }
-                    $f->delete();
+            // v1.50.5 — Borrado en cascada respetando el trigger trg_movimiento_ad
+            // (AFTER DELETE en erp_movimientos_asiento llama a sp_recalc_asiento
+            // que valida balance debe=haber). Patrón replicado del v1.22 §13
+            // compras: borrar el ASIENTO directamente y dejar que el CASCADE
+            // de la FK fk_mov_asiento limpie los movimientos. Antes intentábamos
+            // borrar movs uno por uno y el trigger rebotaba con "Asiento
+            // desbalanceado" después del primer DELETE.
+            $facturas = FacturaVenta::where('import_id', $imp->id)->get();
+            $facturaIds = $facturas->pluck('id')->all();
+            $asientoIds = $facturas->pluck('asiento_id')->filter()->unique()->values()->all();
+
+            DB::transaction(function () use ($imp, $motivo, $facturaIds, $asientoIds, $facturasCount) {
+                // 1) Romper FK factura.asiento_id antes de borrar el asiento.
+                DB::table('erp_facturas_venta')
+                    ->whereIn('id', $facturaIds)
+                    ->update(['asiento_id' => null]);
+
+                // 2) Borrar los asientos. erp_movimientos_asiento se va por
+                //    CASCADE (fk_mov_asiento ON DELETE CASCADE).
+                if (! empty($asientoIds)) {
+                    DB::table('erp_asientos')->whereIn('id', $asientoIds)->delete();
                 }
+
+                // 3) Borrar las facturas (forceDelete porque tiene SoftDeletes y
+                //    queremos liberar el UNIQUE de tipo+PV+nro).
+                FacturaVenta::whereIn('id', $facturaIds)->forceDelete();
+
+                // 4) Audit log y borrar el upload (libera el hash).
                 $this->audit->log('eliminado_cascada', $imp,
-                    ['facturas_count' => $facturas->count()], null,
+                    ['facturas_count' => $facturasCount, 'asientos_ids' => $asientoIds], null,
                     "Borrado cascada upload Libro IVA Ventas #{$imp->id}: ".
                     ($motivo ?: 'sin motivo'));
                 $imp->delete();

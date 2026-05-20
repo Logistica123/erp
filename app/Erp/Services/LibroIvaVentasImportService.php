@@ -345,31 +345,50 @@ class LibroIvaVentasImportService
         $otrosTributos = $this->parsearFloat($this->get($r, $headerMap, 'otros tributos'));
         $impIvaAgg = $this->parsearFloat($this->get($r, $headerMap, 'iva'));
 
-        // Desglose por alícuota (AFIP detalle).
-        $detalle = [
-            '27'  => ['neto' => $this->parsearFloat($this->get($r, $headerMap, 'imp. neto c/iva 27%')), 'factor' => 0.27],
-            '21'  => ['neto' => $this->parsearFloat($this->get($r, $headerMap, 'imp. neto c/iva 21%')), 'factor' => 0.21],
-            '10_5'=> ['neto' => $this->parsearFloat($this->get($r, $headerMap, 'imp. neto c/iva 10,5%')), 'factor' => 0.105],
-            '5'   => ['neto' => $this->parsearFloat($this->get($r, $headerMap, 'imp. neto c/iva 5%')), 'factor' => 0.05],
-            '2_5' => ['neto' => $this->parsearFloat($this->get($r, $headerMap, 'imp. neto c/iva 2,5%')), 'factor' => 0.025],
+        // v1.50.3 — Desglose por alícuota desde la AFIP "Mis Comprobantes Emitidos"
+        // detalle. Columnas reales (post-mojibake fix):
+        //   "Imp. Neto Gravado IVA 27%"  + "IVA 27%"
+        //   "Imp. Neto Gravado IVA 21%"  + "IVA 21%"
+        //   "Imp. Neto Gravado IVA 10,5%" + "IVA 10,5%"
+        //   "Imp. Neto Gravado IVA 5%"   + "IVA 5%"
+        //   "Imp. Neto Gravado IVA 2,5%" + "IVA 2,5%"
+        //
+        // Probamos varias variantes de los nombres porque AFIP usa coma o punto
+        // como separador decimal según el export, y a veces no incluye espacios
+        // entre "IVA" y el porcentaje.
+        $tasasLabels = [
+            '27'   => ['27'],
+            '21'   => ['21'],
+            '10_5' => ['10,5', '10.5'],
+            '5'    => ['5'],
+            '2_5'  => ['2,5', '2.5'],
         ];
-        // Si no encontramos con esos labels exactos, buscamos variantes con punto
-        // en lugar de coma decimal ("10.5%").
-        foreach ($detalle as $k => &$row) {
-            if ($row['neto'] == 0) {
-                $alt = $this->parsearFloat($this->get($r, $headerMap,
-                    'imp. neto c/iva '.str_replace('_', '.', $k).'%'));
-                if ($alt > 0) $row['neto'] = $alt;
+        $factores = ['27'=>0.27, '21'=>0.21, '10_5'=>0.105, '5'=>0.05, '2_5'=>0.025];
+        $detalle = [];
+        $ivaDetalle = [];
+        foreach ($tasasLabels as $key => $variantes) {
+            $neto = 0.0;
+            $iva = 0.0;
+            foreach ($variantes as $v) {
+                if ($neto == 0) {
+                    $neto = $this->parsearFloat($this->get($r, $headerMap, "imp. neto gravado iva {$v}%"));
+                }
+                if ($iva == 0) {
+                    $iva = $this->parsearFloat($this->get($r, $headerMap, "iva {$v}%"));
+                }
             }
+            $detalle[$key] = ['neto' => $neto, 'factor' => $factores[$key]];
+            $ivaDetalle[$key] = $iva;
         }
-        unset($row);
 
-        // Derivar IVA por alícuota a partir del neto detallado.
-        $impIva27 = round($detalle['27']['neto'] * 0.27, 2);
-        $impIva21 = round($detalle['21']['neto'] * 0.21, 2);
-        $impIva10_5 = round($detalle['10_5']['neto'] * 0.105, 2);
-        $impIva5 = round($detalle['5']['neto'] * 0.05, 2);
-        $impIva2_5 = round($detalle['2_5']['neto'] * 0.025, 2);
+        // v1.50.3 — IVA por alícuota: usar el monto del CSV si vino, sino
+        // derivar del neto × factor. Antes solo derivábamos, pero la AFIP ya
+        // lo trae explícito en "IVA X%" — preferir ese valor por exactitud.
+        $impIva27 = $ivaDetalle['27'] > 0 ? round($ivaDetalle['27'], 2) : round($detalle['27']['neto'] * 0.27, 2);
+        $impIva21 = $ivaDetalle['21'] > 0 ? round($ivaDetalle['21'], 2) : round($detalle['21']['neto'] * 0.21, 2);
+        $impIva10_5 = $ivaDetalle['10_5'] > 0 ? round($ivaDetalle['10_5'], 2) : round($detalle['10_5']['neto'] * 0.105, 2);
+        $impIva5 = $ivaDetalle['5'] > 0 ? round($ivaDetalle['5'], 2) : round($detalle['5']['neto'] * 0.05, 2);
+        $impIva2_5 = $ivaDetalle['2_5'] > 0 ? round($ivaDetalle['2_5'], 2) : round($detalle['2_5']['neto'] * 0.025, 2);
         $impIvaSuma = $impIva27 + $impIva21 + $impIva10_5 + $impIva5 + $impIva2_5;
         $netoDetalleSuma = $detalle['27']['neto'] + $detalle['21']['neto']
             + $detalle['10_5']['neto'] + $detalle['5']['neto'] + $detalle['2_5']['neto'];
@@ -428,10 +447,23 @@ class LibroIvaVentasImportService
                 $clienteNoMapeado = "{$docNro} (sin razón social)";
             }
         } elseif ($docTipo === 99) {
-            // Consumidor Final — no se mapea a auxiliar.
-            $clienteAuxId = null;
+            // v1.50.3 — Consumidor Final: usar auxiliar genérico "CF-GENERICO"
+            // (creado en seed inicial). Antes dejábamos NULL y violaba NOT NULL.
+            $clienteAuxId = DB::table('erp_auxiliares')
+                ->where('codigo', 'CF-GENERICO')->value('id');
         } else {
             $clienteNoMapeado = "doc_tipo={$docTipo} doc_nro={$docNro}";
+        }
+
+        // v1.50.3 — Si después de todo seguimos sin auxiliar (ej: cliente sin
+        // CUIT, sin razón social, doc_tipo desconocido), caemos al CF genérico
+        // para no violar el NOT NULL del schema.
+        if (! $clienteAuxId) {
+            $clienteAuxId = DB::table('erp_auxiliares')
+                ->where('codigo', 'CF-GENERICO')->value('id');
+            if (! $clienteNoMapeado) {
+                $clienteNoMapeado = "doc_tipo={$docTipo} doc_nro={$docNro} → CF-GENERICO";
+            }
         }
 
         // CC derivado del cliente (1:1).

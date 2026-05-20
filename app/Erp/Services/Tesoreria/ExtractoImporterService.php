@@ -38,6 +38,7 @@ class ExtractoImporterService
         private readonly ParserFactory $factory,
         private readonly AuditLogger $audit,
         private readonly MatchingContraparteService $matcher,
+        private readonly ExtractoTipoService $tipoSvc,
     ) {}
 
     /**
@@ -169,7 +170,14 @@ class ExtractoImporterService
         $importados = 0;
         $duplicados = 0;
 
+        $bancoCodigo = $cuenta->banco->codigo_parser ?? null;
         foreach ($movs as $m) {
+            // v1.27 Sprint B — inferir tipo_operativo del movimiento.
+            $tipoOp = $this->tipoSvc->inferir(
+                $bancoCodigo, $m->comprobanteBanco ?? null, $m->concepto,
+                (float) ($m->debito ?? 0), (float) ($m->credito ?? 0),
+            );
+
             $affected = DB::table('erp_movimientos_bancarios')->upsert(
                 [[
                     'extracto_id' => $extractoId,
@@ -181,6 +189,7 @@ class ExtractoImporterService
                     'credito' => $m->credito ?? 0,
                     'saldo' => $m->saldo,
                     'estado' => 'PENDIENTE',
+                    'tipo_operativo' => $tipoOp,
                     'cuit_contraparte' => $m->cuitContraparte,
                     'nombre_contraparte' => $m->nombreContraparte,
                     'referencia_externa' => $m->referencia,
@@ -189,7 +198,7 @@ class ExtractoImporterService
                     'updated_at' => $now,
                 ]],
                 ['cuenta_bancaria_id', 'hash_linea'],
-                ['extracto_id', 'updated_at']
+                ['extracto_id', 'tipo_operativo', 'updated_at']
             );
 
             // upsert() en Laravel devuelve 1 insert, 2 update (MySQL).

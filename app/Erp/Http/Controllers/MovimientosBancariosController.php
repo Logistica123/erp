@@ -315,21 +315,37 @@ class MovimientosBancariosController
         ])->all();
 
         $count = 0;
-        DB::transaction(function () use ($movs, $motivo, $snapshot, $request, &$count) {
+        $extractosHuerfanos = [];
+        DB::transaction(function () use ($movs, $motivo, $snapshot, $request, &$count, &$extractosHuerfanos) {
             DB::statement('SET @erp_current_user_id = ?', [$request->user()->id]);
-            // El movimiento referenciado en erp_conciliaciones está CASCADE
-            // si lo borrás. Pero los movs IGNORADO/PENDIENTE/ETIQUETADO no
-            // tienen conciliaciones reales (cubre el caso). Si las tuviera,
-            // el CASCADE limpia.
             $ids = $movs->pluck('id')->all();
+            // Capturar extracto_ids únicos ANTES de borrar (para chequear
+            // huérfanos después).
+            $extractoIds = $movs->pluck('extracto_id')->filter()->unique()->all();
             $count = DB::table('erp_movimientos_bancarios')->whereIn('id', $ids)->delete();
             $this->audit->log('MOVIMIENTO_BANCARIO_BORRADO_BULK',
                 $movs->first(), $snapshot, null,
                 sprintf('Borrado bulk de %d movimientos. Motivo: %s',
                     count($snapshot), $motivo !== '' ? $motivo : '(sin motivo)'));
+
+            // v1.27 §16 fix — cleanup de extractos huérfanos: si un
+            // extracto queda sin movimientos vivos (porque se borraron
+            // todos los suyos), también lo borramos. Esto libera el hash
+            // SHA-256 y permite re-cargar el mismo archivo desde cero.
+            foreach ($extractoIds as $extractoId) {
+                $movsRestantes = DB::table('erp_movimientos_bancarios')
+                    ->where('extracto_id', $extractoId)->count();
+                if ($movsRestantes === 0) {
+                    DB::table('erp_extractos_bancarios')->where('id', $extractoId)->delete();
+                    $extractosHuerfanos[] = $extractoId;
+                }
+            }
         });
 
-        return response()->json(['ok' => true, 'data' => ['borrados' => $count]]);
+        return response()->json(['ok' => true, 'data' => [
+            'borrados' => $count,
+            'extractos_eliminados' => $extractosHuerfanos,
+        ]]);
     }
 
     /**

@@ -67,7 +67,9 @@ type ConfirmResp = {
     numero?: number;
   }>;
   warnings?: Array<{ row?: number; motivo?: string }>; // v1.22
-  clientes_no_mapeados: Array<{ valor: string; filas: number[] }>;
+  // El backend envía un elemento por ocurrencia con { row, valor }. El
+  // frontend agrupa por valor antes de mostrar.
+  clientes_no_mapeados: Array<{ row?: number; valor: string }>;
 };
 
 const MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -689,28 +691,45 @@ function Step3({ resultado, encodingDetectado }: { resultado: ConfirmResp; encod
         } />
       </div>
 
-      {clientes_no_mapeados.length > 0 && (
-        <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3 space-y-1">
-          <div className="text-[12px] font-semibold text-warning">
-            Clientes no mapeados ({clientes_no_mapeados.length})
+      {clientes_no_mapeados.length > 0 && (() => {
+        // Fix bug "Cannot read properties of undefined (reading 'length')":
+        // el backend manda { row, valor } por ocurrencia, NO { valor, filas[] }.
+        // Agrupamos en el frontend por valor → array de filas.
+        const agrupados = (() => {
+          const mapa = new Map<string, number[]>();
+          for (const c of clientes_no_mapeados) {
+            const filas = mapa.get(c.valor) ?? [];
+            if (c.row !== undefined) filas.push(c.row);
+            mapa.set(c.valor, filas);
+          }
+          return Array.from(mapa.entries()).map(([valor, filas]) => ({ valor, filas }));
+        })();
+        return (
+          <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3 space-y-1">
+            <div className="text-[12px] font-semibold text-warning">
+              Clientes no mapeados ({agrupados.length})
+            </div>
+            <div className="text-[11px] text-ink-muted">
+              Estos valores del Excel del contador no coincidieron con ningún cliente de DistriApp.
+              Las facturas se importaron con <code>cliente_id=NULL</code>; podés mapearlas manualmente
+              desde el detalle de la factura.
+            </div>
+            <ul className="text-[11.5px] space-y-0.5 max-h-[120px] overflow-y-auto">
+              {agrupados.slice(0, 30).map((c, i) => (
+                <li key={i}>
+                  <code>"{c.valor}"</code> — {c.filas.length} fila{c.filas.length === 1 ? '' : 's'}
+                  {c.filas.length > 0 && c.filas.length <= 5 && (
+                    <span className="text-ink-muted"> (fila{c.filas.length === 1 ? '' : 's'} {c.filas.join(', ')})</span>
+                  )}
+                </li>
+              ))}
+              {agrupados.length > 30 && (
+                <li className="text-ink-muted">… y {agrupados.length - 30} más</li>
+              )}
+            </ul>
           </div>
-          <div className="text-[11px] text-ink-muted">
-            Estos valores del Excel del contador no coincidieron con ningún cliente de DistriApp.
-            Las facturas se importaron con <code>cliente_id=NULL</code>; podés mapearlas manualmente
-            desde el detalle de la factura.
-          </div>
-          <ul className="text-[11.5px] space-y-0.5 max-h-[120px] overflow-y-auto">
-            {clientes_no_mapeados.slice(0, 30).map((c, i) => (
-              <li key={i}>
-                <code>"{c.valor}"</code> — {c.filas.length} fila{c.filas.length === 1 ? '' : 's'}
-              </li>
-            ))}
-            {clientes_no_mapeados.length > 30 && (
-              <li className="text-ink-muted">… y {clientes_no_mapeados.length - 30} más</li>
-            )}
-          </ul>
-        </div>
-      )}
+        );
+      })()}
 
       {warnings.length > 0 && (
         <div className="border border-warning/30 bg-warning-bg/20 rounded-md p-3 space-y-2">

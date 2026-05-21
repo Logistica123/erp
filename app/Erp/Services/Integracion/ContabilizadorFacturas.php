@@ -461,6 +461,37 @@ class ContabilizadorFacturas
             'glosa' => 'Deuda con proveedor',
         ];
 
+        // Salvaguarda ASIENTO_MINIMO — cuenta líneas con importe > 0 (las que
+        // AsientoService::validarMovimientos cuenta efectivamente).
+        // Si quedó < 2 líneas (típicamente: solo proveedor con haber > 0 + 0
+        // líneas de débito porque neto/iva/percep/imp vinieron todos en 0),
+        // forzar línea de gasto = impTotal (espejo del fix v1.22 D-22-4 pero
+        // post-armado para cubrir casos que no entraron al sinIvaDiscriminado
+        // inicial). Sin esto, el AsientoService rebota la fila con
+        // ASIENTO_MINIMO y la atomicidad TODO-O-NADA voltea todo el import.
+        $lineasConImporte = array_filter($movs, fn ($m) => ($m['debe'] ?? 0) > 0 || ($m['haber'] ?? 0) > 0);
+        if (count($lineasConImporte) < 2 && $impTotal > 0) {
+            // Buscar si ya hay línea de gasto; sino agregarla.
+            $tieneGasto = false;
+            foreach ($movs as $m) {
+                if (($m['cuenta_id'] ?? null) === (int) $cuentaGasto && ($m['debe'] ?? 0) > 0) {
+                    $tieneGasto = true;
+                    break;
+                }
+            }
+            if (! $tieneGasto) {
+                array_unshift($movs, [
+                    'cuenta_id' => (int) $cuentaGasto,
+                    'centro_costo_id' => $this->admiteCc($cuentaGasto) ? ($f->centro_costo_id ?: $ccGeneral) : null,
+                    'auxiliar_id' => $this->admiteAuxiliar($cuentaGasto) ? $f->auxiliar_id : null,
+                    'debe' => $impTotal,
+                    'haber' => 0,
+                    'glosa' => 'Gastos / servicios (forzado por salvaguarda)',
+                ]);
+                $idxLineaGastoPrincipal = 0;
+            }
+        }
+
         // v1.24 D-23-1 + D-23-2 — tolerancia de redondeo $1. Los CSV de AFIP
         // traen totales por alícuota redondeados que pueden diferir del total
         // de la factura por unos centavos. Si |debe - haber| ≤ 1 ajustamos la

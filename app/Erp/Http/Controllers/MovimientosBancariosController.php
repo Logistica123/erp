@@ -124,6 +124,7 @@ class MovimientosBancariosController
      */
     public function conciliar(Request $request, int $id): JsonResponse
     {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
         $data = $request->validate([
             'referencia_tipo' => ['required', Rule::in([
                 'ORDEN_PAGO', 'COBRO', 'TRANSFERENCIA_INTERNA', 'ASIENTO_MANUAL', 'ECHEQ',
@@ -150,6 +151,7 @@ class MovimientosBancariosController
 
     public function desconciliar(Request $request, int $id): JsonResponse
     {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
         $data = $request->validate([
             'motivo' => ['required', 'string', 'min:3', 'max:300'],
         ]);
@@ -167,6 +169,7 @@ class MovimientosBancariosController
 
     public function ignorar(Request $request, int $id): JsonResponse
     {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
         $data = $request->validate([
             'motivo_ignorado_id' => ['required', 'integer'],
             'observacion' => ['nullable', 'string', 'max:1000'],
@@ -189,6 +192,7 @@ class MovimientosBancariosController
      */
     public function conciliarDirecto(Request $request, int $id): JsonResponse
     {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
         $mov = MovimientoBancario::findOrFail($id);
         try {
             $mov = $this->concilService->conciliarDirecto($mov, $request->user());
@@ -218,6 +222,7 @@ class MovimientosBancariosController
      */
     public function conciliarFactura(Request $request, int $id): JsonResponse
     {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
         $data = $request->validate([
             'tipo_factura' => ['required', Rule::in(['VENTA', 'COMPRA'])],
             'factura_id' => ['required', 'integer'],
@@ -453,6 +458,7 @@ class MovimientosBancariosController
 
     public function autoconciliar(Request $request): JsonResponse
     {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
         $data = $request->validate([
             'cuenta_bancaria_id' => ['required', 'integer', 'exists:erp_cuentas_bancarias,id'],
             'desde' => ['required', 'date'],
@@ -551,6 +557,17 @@ class MovimientosBancariosController
                 'sugerencia' => $r,
             ],
         ]);
+    }
+
+    private function requierePermiso(Request $request, string $codigo): void
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso($codigo)) {
+            abort(response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => "Falta permiso {$codigo}",
+            ]], 403));
+        }
     }
 
     private function domainError(DomainException $e): JsonResponse

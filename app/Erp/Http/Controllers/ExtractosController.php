@@ -24,6 +24,7 @@ class ExtractosController
 
     public function importar(Request $request): JsonResponse
     {
+        $this->requierePermiso($request, 'tesoreria.extractos.cargar');
         $data = $request->validate([
             'cuenta_id' => ['required', 'integer', 'exists:erp_cuentas_bancarias,id'],
             'archivo' => ['required', 'file', 'max:20480'], // 20 MB
@@ -83,6 +84,7 @@ class ExtractosController
 
     public function destroy(int $id): JsonResponse
     {
+        $this->requierePermiso(request(), 'tesoreria.extractos.borrar');
         $extracto = ExtractoBancario::findOrFail($id);
 
         $conciliados = MovimientoBancario::where('extracto_id', $extracto->id)
@@ -103,5 +105,16 @@ class ExtractosController
         $extracto->delete();
 
         return response()->json(['ok' => true]);
+    }
+
+    private function requierePermiso(Request $request, string $codigo): void
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso($codigo)) {
+            abort(response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => "Falta permiso {$codigo}",
+            ]], 403));
+        }
     }
 }

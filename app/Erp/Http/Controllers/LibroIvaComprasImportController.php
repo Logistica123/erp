@@ -30,6 +30,7 @@ class LibroIvaComprasImportController
 
     public function preview(Request $request): JsonResponse
     {
+        $this->mustHave($request, 'compras.libro_iva.importar');
         $data = $request->validate([
             'archivo' => ['required', 'file', 'max:51200'],
         ]);
@@ -47,6 +48,7 @@ class LibroIvaComprasImportController
 
     public function confirmar(Request $request): JsonResponse
     {
+        $this->mustHave($request, 'compras.libro_iva.importar');
         $data = $request->validate([
             'archivo' => ['required', 'file', 'max:51200'],
             'periodo_imputacion_id' => ['required', 'integer', 'exists:erp_periodos,id'],

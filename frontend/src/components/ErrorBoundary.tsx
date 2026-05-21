@@ -53,13 +53,18 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
 
               {this.state.error && (
-                <details className="text-[11px] text-red-900">
-                  <summary className="cursor-pointer font-medium">Detalle técnico</summary>
-                  <pre className="mt-2 p-2 bg-red-100 rounded overflow-x-auto whitespace-pre-wrap font-mono text-[10.5px]">
+                <>
+                  {/* Mensaje siempre visible — sin click para verlo */}
+                  <div className="text-[11.5px] text-red-900 bg-red-100 border border-red-200 rounded p-2 font-mono">
                     {this.state.error.message}
-                    {this.state.error.stack && '\n\n' + this.state.error.stack.split('\n').slice(0, 6).join('\n')}
-                  </pre>
-                </details>
+                  </div>
+                  <details className="text-[11px] text-red-900">
+                    <summary className="cursor-pointer font-medium">Stack trace completo</summary>
+                    <pre className="mt-2 p-2 bg-red-100 rounded overflow-x-auto whitespace-pre-wrap font-mono text-[10.5px]">
+                      {this.state.error.stack && this.state.error.stack.split('\n').slice(0, 15).join('\n')}
+                    </pre>
+                  </details>
+                </>
               )}
 
               <div className="flex gap-2 pt-1">

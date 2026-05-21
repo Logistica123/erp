@@ -29,6 +29,7 @@ class MovimientosBancariosController
         private readonly MovimientoBancarioService $service,
         private readonly ConciliacionService $concilService,
         private readonly MatchingContraparteService $matcher,
+        private readonly \App\Erp\Support\AuditLogger $audit,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -261,6 +262,134 @@ class MovimientosBancariosController
             ->get(['id', 'codigo', 'nombre', 'cuit', 'tipo']);
 
         return response()->json(['ok' => true, 'data' => $rows]);
+    }
+
+    /**
+     * v1.27 §16 — Borrado bulk de movimientos sin conciliar / ignorados.
+     * Requiere permiso `tesoreria.movimientos.borrar_bulk` (super_admin).
+     * Si alguno está CONCILIADO → 409 con lista de cuáles bloquean (no se
+     * borra ninguno).
+     */
+    public function borrarBulk(Request $request): JsonResponse
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso('tesoreria.movimientos.borrar_bulk')) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => 'Falta permiso tesoreria.movimientos.borrar_bulk',
+            ]], 403);
+        }
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:500'],
+            'ids.*' => ['integer'],
+            'motivo' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $ids = array_values(array_unique(array_map('intval', $data['ids'])));
+        $movs = MovimientoBancario::whereIn('id', $ids)->get();
+        if ($movs->isEmpty()) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_ENCONTRADOS', 'message' => 'Ninguno de los movimientos existe',
+            ]], 404);
+        }
+
+        // Validar estados: solo PENDIENTE/ETIQUETADO/IGNORADO se pueden borrar.
+        $bloqueantes = $movs->filter(fn ($m) => $m->estado === MovimientoBancario::ESTADO_CONCILIADO);
+        if ($bloqueantes->isNotEmpty()) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'MOVIMIENTOS_CONCILIADOS',
+                'message' => sprintf('%d movimientos están CONCILIADOS y no se pueden borrar. Desconciliá primero.',
+                    $bloqueantes->count()),
+                'ids' => $bloqueantes->pluck('id')->all(),
+            ]], 409);
+        }
+
+        $motivo = trim((string) ($data['motivo'] ?? ''));
+        $snapshot = $movs->map(fn ($m) => [
+            'id' => $m->id, 'fecha' => $m->fecha?->toDateString(),
+            'concepto' => $m->concepto, 'debito' => (float) $m->debito,
+            'credito' => (float) $m->credito, 'estado' => $m->estado,
+            'tipo_operativo' => $m->tipo_operativo,
+            'cuit_contraparte' => $m->cuit_contraparte,
+            'cuenta_bancaria_id' => $m->cuenta_bancaria_id,
+        ])->all();
+
+        $count = 0;
+        DB::transaction(function () use ($movs, $motivo, $snapshot, $request, &$count) {
+            DB::statement('SET @erp_current_user_id = ?', [$request->user()->id]);
+            // El movimiento referenciado en erp_conciliaciones está CASCADE
+            // si lo borrás. Pero los movs IGNORADO/PENDIENTE/ETIQUETADO no
+            // tienen conciliaciones reales (cubre el caso). Si las tuviera,
+            // el CASCADE limpia.
+            $ids = $movs->pluck('id')->all();
+            $count = DB::table('erp_movimientos_bancarios')->whereIn('id', $ids)->delete();
+            $this->audit->log('MOVIMIENTO_BANCARIO_BORRADO_BULK',
+                $movs->first(), $snapshot, null,
+                sprintf('Borrado bulk de %d movimientos. Motivo: %s',
+                    count($snapshot), $motivo !== '' ? $motivo : '(sin motivo)'));
+        });
+
+        return response()->json(['ok' => true, 'data' => ['borrados' => $count]]);
+    }
+
+    /**
+     * v1.27 §16 — Confirmar movimientos auto-etiquetados en bulk.
+     * Cada movimiento debe estar en estado ETIQUETADO con
+     * cuenta_contable_propuesta_id seteada. Genera un asiento por cada uno
+     * en una sola transacción.
+     */
+    public function confirmarAutoEtiquetados(Request $request): JsonResponse
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso('tesoreria.extractos.conciliar')) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => 'Falta permiso tesoreria.extractos.conciliar',
+            ]], 403);
+        }
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:200'],
+            'ids.*' => ['integer'],
+        ]);
+
+        $ids = array_values(array_unique(array_map('intval', $data['ids'])));
+        $movs = MovimientoBancario::whereIn('id', $ids)
+            ->where('estado', MovimientoBancario::ESTADO_ETIQUETADO)
+            ->whereNotNull('cuenta_contable_propuesta_id')
+            ->get();
+
+        if ($movs->count() !== count($ids)) {
+            $faltantes = array_diff($ids, $movs->pluck('id')->all());
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'MOVIMIENTOS_INVALIDOS',
+                'message' => 'Algunos movimientos no están en estado ETIQUETADO con cuenta propuesta',
+                'ids_problematicos' => array_values($faltantes),
+            ]], 422);
+        }
+
+        $asientosGenerados = [];
+        try {
+            DB::transaction(function () use ($movs, $request, &$asientosGenerados) {
+                foreach ($movs as $m) {
+                    // Reusar conciliar() del servicio con referencia ASIENTO_MANUAL
+                    // + cuenta_contable_contraparte_id = propuesta.
+                    $r = $this->concilService->conciliar($m, [
+                        'referencia_tipo' => 'ASIENTO_MANUAL',
+                        'cuenta_contable_contraparte_id' => $m->cuenta_contable_propuesta_id,
+                        'glosa' => 'Auto-etiquetado bulk · '.($m->concepto ?? ''),
+                        'observacion' => '[AUTO] confirmación bulk §16',
+                    ], $request->user());
+                    if ($r->asiento_id) $asientosGenerados[] = $r->asiento_id;
+                }
+            });
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json(['ok' => true, 'data' => [
+            'conciliados' => $movs->count(),
+            'asientos_generados' => $asientosGenerados,
+        ]]);
     }
 
     /**

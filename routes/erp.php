@@ -211,6 +211,11 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.mov-banc.buscar-auxiliar');
         Route::get('/movimientos-bancarios/facturas-pendientes', [MovimientosBancariosController::class, 'facturasPendientesAuxiliar'])
             ->name('erp.mov-banc.facturas-pendientes');
+        // v1.27 §16 — Borrar bulk + confirmar auto-etiquetados.
+        Route::delete('/movimientos-bancarios/bulk', [MovimientosBancariosController::class, 'borrarBulk'])
+            ->name('erp.mov-banc.borrar-bulk');
+        Route::post('/movimientos-bancarios/confirmar-auto-etiquetados', [MovimientosBancariosController::class, 'confirmarAutoEtiquetados'])
+            ->name('erp.mov-banc.confirmar-auto');
         Route::post('/movimientos-bancarios/{id}/desconciliar', [MovimientosBancariosController::class, 'desconciliar'])
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.mov-banc.desconciliar');

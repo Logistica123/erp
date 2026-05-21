@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertCircle, Check, Loader2, Plus, Upload, X, Zap, Search } from 'lucide-react';
+import { AlertCircle, Check, Loader2, Plus, Upload, X, Zap, Search, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -29,6 +29,8 @@ type MovimientoBancario = {
     | 'COMISION_BANCARIA' | 'IMPUESTO_DEBITO_CREDITO' | 'DEPOSITO' | 'EXTRACCION'
     | 'INTERES_GANADO' | 'OTRO';
   monto_conciliado: string | number;
+  // v1.27 §16 — cuando una regla auto-etiquetó el mov.
+  cuenta_contable_propuesta_id?: number | null;
 };
 
 // v1.27 Sprint C + §15 — modelo de sugerencias devueltas por GET /sugerencias.
@@ -106,6 +108,38 @@ export function ConciliacionPage() {
     onError: (e: ApiError) => setErr(e.message),
   });
 
+  // v1.27 §16 — permisos del operador (para mostrar/ocultar botón Borrar).
+  const { data: misPermisos } = useQuery<{ data?: Array<{ codigo: string }> } | Array<{ codigo: string }>>({
+    queryKey: ['mis-permisos'],
+    queryFn: () => api.get('/api/erp/mi-permisos'),
+  });
+  const puedeBorrarBulk = useMemo(() => {
+    const arr = Array.isArray(misPermisos)
+      ? misPermisos
+      : (misPermisos?.data ?? []);
+    return arr.some((p) => p.codigo === 'tesoreria.movimientos.borrar_bulk');
+  }, [misPermisos]);
+
+  // v1.27 §16 — confirmar bulk auto-etiquetados.
+  const autoEtiquetadosIds = useMemo(() => {
+    return (movs?.data ?? [])
+      .filter((m) => m.estado === 'ETIQUETADO' && (m as { cuenta_contable_propuesta_id?: number | null }).cuenta_contable_propuesta_id)
+      .map((m) => m.id);
+  }, [movs]);
+  const confirmarAutoMut = useMutation({
+    mutationFn: (ids: number[]) =>
+      api.post('/api/erp/movimientos-bancarios/confirmar-auto-etiquetados', { ids }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mov-banc'] });
+      qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
+      setErr(null);
+    },
+    onError: (e: ApiError) => setErr(e.message),
+  });
+
+  // v1.27 §16 — borrar bulk.
+  const [borrarBulkOpen, setBorrarBulkOpen] = useState(false);
+
   return (
     <>
       <div className="flex items-end justify-between mb-[18px]">
@@ -138,9 +172,31 @@ export function ConciliacionPage() {
           <Button size="sm" variant="secondary" onClick={() => setBulkAccion('IGNORAR')}>
             <X className="w-3 h-3" /> Ignorar todos…
           </Button>
+          {/* v1.27 §16 — Borrar bulk (solo super_admin) */}
+          {puedeBorrarBulk && (
+            <Button size="sm" variant="danger" onClick={() => setBorrarBulkOpen(true)}>
+              <Trash2 className="w-3 h-3" /> Borrar {selected.size}
+            </Button>
+          )}
           <button className="ml-auto text-ink-muted hover:text-ink-2 text-[11px]" onClick={() => setSelected(new Set())}>
             Limpiar selección
           </button>
+        </div>
+      )}
+
+      {/* v1.27 §16 — banner global "Confirmar auto-etiquetados" cuando hay ≥1 */}
+      {autoEtiquetadosIds.length > 0 && (
+        <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-md flex items-center gap-3 text-[12px]">
+          <Zap className="w-3.5 h-3.5 text-amber-700" />
+          <span className="font-medium text-amber-800">
+            {autoEtiquetadosIds.length} movimiento{autoEtiquetadosIds.length === 1 ? '' : 's'} auto-etiquetado{autoEtiquetadosIds.length === 1 ? '' : 's'} con cuenta sugerida.
+          </span>
+          <Button size="sm" variant="primary"
+            disabled={confirmarAutoMut.isPending}
+            onClick={() => confirmarAutoMut.mutate(autoEtiquetadosIds)}>
+            {confirmarAutoMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Confirmar {autoEtiquetadosIds.length} en bulk
+          </Button>
         </div>
       )}
 
@@ -315,6 +371,20 @@ export function ConciliacionPage() {
           qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
           qc.invalidateQueries({ queryKey: ['asientos'] });
           qc.invalidateQueries({ queryKey: ['health'] });
+        }}
+        onError={setErr}
+      />
+
+      {/* v1.27 §16 — modal de borrado bulk */}
+      <BorrarBulkModal
+        open={borrarBulkOpen}
+        ids={Array.from(selected)}
+        movs={(movs?.data ?? []).filter((m) => selected.has(m.id))}
+        onClose={() => setBorrarBulkOpen(false)}
+        onSuccess={() => {
+          setBorrarBulkOpen(false);
+          setSelected(new Set());
+          qc.invalidateQueries({ queryKey: ['mov-banc'] });
         }}
         onError={setErr}
       />
@@ -1391,3 +1461,93 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
   );
 }
 
+
+
+// v1.27 §16 — Modal de borrado bulk de movimientos.
+function BorrarBulkModal({ open, ids, movs, onClose, onSuccess, onError }: {
+  open: boolean;
+  ids: number[];
+  movs: MovimientoBancario[];
+  onClose: () => void;
+  onSuccess: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [motivo, setMotivo] = useState("");
+  const totalDebito = movs.reduce((a, m) => a + Number(m.debito || 0), 0);
+  const totalCredito = movs.reduce((a, m) => a + Number(m.credito || 0), 0);
+  const conciliados = movs.filter((m) => m.estado === "CONCILIADO");
+  const tieneConciliados = conciliados.length > 0;
+
+  const mut = useMutation({
+    mutationFn: () =>
+      api.delete(`/api/erp/movimientos-bancarios/bulk`, {
+        ids,
+        motivo: motivo.trim() || undefined,
+      }),
+    onSuccess: () => { setMotivo(""); onSuccess(); },
+    onError: (e: ApiError) => onError(e.message),
+  });
+
+  if (!open) return null;
+
+  return (
+    <Modal open={open} onClose={onClose} title={`🗑️ Borrar ${ids.length} movimiento${ids.length === 1 ? "" : "s"}`} size="lg">
+      <div className="space-y-3 text-[12px]">
+        <div className="text-ink-muted">
+          Vas a borrar <strong>{ids.length}</strong> movimientos definitivamente.
+        </div>
+        <dl className="grid grid-cols-[120px_1fr] gap-y-1 gap-x-2 text-[11px] bg-azure-soft/30 rounded p-2">
+          <dt className="text-ink-muted">Total débito</dt>
+          <dd className="font-semibold tabular text-danger">${fmtMoney(totalDebito)}</dd>
+          <dt className="text-ink-muted">Total crédito</dt>
+          <dd className="font-semibold tabular text-success">${fmtMoney(totalCredito)}</dd>
+        </dl>
+
+        <div className="max-h-[180px] overflow-y-auto border border-line rounded text-[11px]">
+          {movs.slice(0, 30).map((m) => (
+            <div key={m.id} className="flex items-center justify-between p-1.5 border-b border-line/40 last:border-b-0">
+              <div className="flex-1 truncate">
+                <span className="text-ink-muted">{m.fecha.slice(0, 10)}</span>{" · "}
+                <span className="text-ink-2">{m.concepto}</span>
+              </div>
+              <div className="tabular font-semibold ml-2">
+                {Number(m.debito) > 0 && <span className="text-danger">-${fmtMoney(Number(m.debito))}</span>}
+                {Number(m.credito) > 0 && <span className="text-success">+${fmtMoney(Number(m.credito))}</span>}
+              </div>
+            </div>
+          ))}
+          {movs.length > 30 && <div className="text-ink-muted italic p-1.5">… y {movs.length - 30} más</div>}
+        </div>
+
+        {tieneConciliados && (
+          <div className="border border-danger/40 bg-danger-bg/30 rounded p-2 text-[11.5px]">
+            ⚠ <strong>{conciliados.length} movimiento(s) están CONCILIADOS</strong> — no se pueden borrar.
+            Desconciliá primero o desmarcalos antes de confirmar.
+          </div>
+        )}
+
+        <div className="bg-red-50 border border-red-200 rounded p-2 text-[11px]">
+          ⚠ <strong>Acción IRREVERSIBLE.</strong> Los movimientos se eliminan físicamente.
+          Audit log queda con snapshot completo. Si querés re-cargar el archivo, ahora podés.
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">Motivo (opcional)</label>
+          <textarea rows={2} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            maxLength={500}
+            placeholder="Ej: Limpieza de tests del 2026-05-21"
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-line">
+          <Button variant="secondary" onClick={onClose} disabled={mut.isPending}>Cancelar</Button>
+          <Button variant="danger" disabled={mut.isPending || tieneConciliados}
+            onClick={() => mut.mutate()}>
+            <Trash2 className="w-3 h-3" />
+            Borrar {ids.length} {ids.length === 1 ? "movimiento" : "movimientos"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}

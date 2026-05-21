@@ -355,41 +355,200 @@ class ConciliacionService
     }
 
     /**
-     * v1.27 Sprint C — Sugiere top-N facturas (compra o venta) candidatas
-     * a conciliar contra un movimiento, ordenadas por proximidad de monto.
+     * v1.27 §15 — Sugiere top-N facturas usando matching por CUIT primero.
      *
-     * Filtros aplicados:
-     *  - Empresa de la cuenta bancaria.
-     *  - Estado factura !=ANULADA/PAGADA-COMPLETO (queda saldo pendiente).
-     *  - Solo facturas con auxiliar_id (no anónimas).
-     *  - Para TRANSFERENCIA_RECIBIDA → facturas de venta.
-     *  - Para TRANSFERENCIA_ENVIADA / PAGO_SERVICIO → facturas de compra.
-     *  - Si el cliente_id del movimiento está seteado (CM-3 matching),
-     *    prioriza facturas de ese cliente.
+     * Algoritmo:
+     *  1. Extraer CUIT del concepto del movimiento (con validación DV).
+     *  2. Si hay CUIT → buscar contraparte (auxiliar.cuit). Si existe:
+     *     filtrar facturas de ese auxiliar + ordenar por proximidad monto.
+     *  3. Si CUIT no detectado o sin facturas pendientes → fallback puro
+     *     por monto con flag `motivo_fallback`.
      *
-     * @return array<int, array{tipo:string, factura_id:int, ...}>
+     * Devuelve estructura enriquecida:
+     *   - sugerencias: array de facturas con campo cuit_coincide.
+     *   - cuit_detectado: el CUIT extraído (o null).
+     *   - contraparte: ['id', 'nombre', 'cuit'] si se mapeó (o null).
+     *   - motivo_fallback: null si todo OK, sino código (ej CUIT_NO_REGISTRADO).
      */
     public function sugerirFacturas(MovimientoBancario $mov, int $top = 10): array
     {
+        // Wrap del método legacy para mantener compat: si el caller quiere
+        // solo el array de sugerencias, lo extrae con ['sugerencias'].
+        $resultado = $this->sugerirFacturasConMatchingCuit($mov, $top);
+        return $resultado['sugerencias'];
+    }
+
+    /**
+     * v1.27 §15 — Versión enriquecida con metadata del matching.
+     */
+    public function sugerirFacturasConMatchingCuit(MovimientoBancario $mov, int $top = 10): array
+    {
         $monto = (float) max($mov->debito, $mov->credito);
-        if ($monto <= 0.005) return [];
+        if ($monto <= 0.005) {
+            return ['sugerencias' => [], 'cuit_detectado' => null, 'contraparte' => null,
+                'motivo_fallback' => 'MOV_SIN_IMPORTE'];
+        }
 
         $cuenta = $mov->cuentaBancaria;
         $empresaId = $cuenta?->empresa_id ?? 1;
         $tipo = $mov->tipo_operativo;
 
-        // Determinar si buscar facturas de VENTA o COMPRA.
         $buscarVenta = in_array($tipo, ['TRANSFERENCIA_RECIBIDA', 'DEPOSITO', 'OTRO'], true)
             && (float) $mov->credito > 0;
         $buscarCompra = in_array($tipo, ['TRANSFERENCIA_ENVIADA', 'PAGO_SERVICIO', 'OTRO'], true)
             && (float) $mov->debito > 0;
 
-        $result = [];
+        if (! $buscarVenta && ! $buscarCompra) {
+            return ['sugerencias' => [], 'cuit_detectado' => null, 'contraparte' => null,
+                'motivo_fallback' => 'TIPO_SIN_FACTURAS'];
+        }
 
-        if ($buscarVenta) {
-            // Facturas de venta con saldo pendiente. Calculamos saldo desde
-            // imp_total - SUMA(cobros). Por simplicidad inicial usamos
-            // imp_total (asumimos que el módulo de cobros marca estado).
+        // §15 — Paso 1: extraer CUIT del concepto.
+        $cuitDetectado = $this->extraerCuit($mov->concepto ?? '');
+
+        // §15 — Paso 2: si CUIT detectado, buscar contraparte.
+        $contraparte = null;
+        if ($cuitDetectado) {
+            $auxiliarRow = DB::table('erp_auxiliares')
+                ->where('empresa_id', $empresaId)
+                ->where('cuit', $cuitDetectado)
+                ->first(['id', 'nombre', 'cuit', 'tipo']);
+            if ($auxiliarRow) {
+                $contraparte = [
+                    'id' => $auxiliarRow->id,
+                    'nombre' => $auxiliarRow->nombre,
+                    'cuit' => $auxiliarRow->cuit,
+                    'tipo' => $auxiliarRow->tipo,
+                ];
+            }
+        }
+
+        // Si tenemos contraparte, filtrar facturas SOLO de ese auxiliar.
+        if ($contraparte) {
+            $sugerencias = $this->buscarFacturasDe($contraparte['id'], $buscarVenta, $buscarCompra,
+                $empresaId, $monto, $top);
+            foreach ($sugerencias as &$s) {
+                $s['cuit_coincide'] = true;
+            }
+            unset($s);
+
+            if (! empty($sugerencias)) {
+                return [
+                    'sugerencias' => $sugerencias,
+                    'cuit_detectado' => $cuitDetectado,
+                    'contraparte' => $contraparte,
+                    'motivo_fallback' => null,
+                ];
+            }
+            // CUIT match pero sin facturas pendientes.
+            return [
+                'sugerencias' => [],
+                'cuit_detectado' => $cuitDetectado,
+                'contraparte' => $contraparte,
+                'motivo_fallback' => 'CONTRAPARTE_SIN_FACTURAS_PENDIENTES',
+            ];
+        }
+
+        // §15 — Paso 3: fallback puro por monto.
+        $sugerencias = $this->buscarFacturasPorMonto($buscarVenta, $buscarCompra,
+            $empresaId, $monto, $top);
+        foreach ($sugerencias as &$s) {
+            $s['cuit_coincide'] = false;
+        }
+        unset($s);
+
+        return [
+            'sugerencias' => $sugerencias,
+            'cuit_detectado' => $cuitDetectado,
+            'contraparte' => null,
+            'motivo_fallback' => $cuitDetectado
+                ? 'CUIT_NO_REGISTRADO'
+                : 'CUIT_NO_DETECTADO_EN_CONCEPTO',
+        ];
+    }
+
+    /**
+     * §15 — Extrae el primer CUIT/CUIL válido del concepto.
+     * Acepta formato con o sin guiones. Valida dígito verificador.
+     */
+    private function extraerCuit(string $concepto): ?string
+    {
+        // Formato con guiones: XX-XXXXXXXX-X.
+        if (preg_match('/\b(\d{2})-?(\d{8})-?(\d{1})\b/', $concepto, $m)) {
+            $candidato = $m[1].$m[2].$m[3];
+            if ($this->validarDvCuit($candidato)) return $candidato;
+        }
+        // Formato sin guiones: 11 dígitos seguidos. Iteramos por si hay varios.
+        if (preg_match_all('/\b(\d{11})\b/', $concepto, $mm)) {
+            foreach ($mm[1] as $candidato) {
+                if ($this->validarDvCuit($candidato)) return $candidato;
+            }
+        }
+        return null;
+    }
+
+    private function validarDvCuit(string $cuit): bool
+    {
+        if (strlen($cuit) !== 11) return false;
+        $factores = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+        $suma = 0;
+        for ($i = 0; $i < 10; $i++) {
+            $suma += (int) $cuit[$i] * $factores[$i];
+        }
+        $resto = $suma % 11;
+        $dv = $resto === 0 ? 0 : ($resto === 1 ? 9 : 11 - $resto);
+        return $dv === (int) $cuit[10];
+    }
+
+    private function buscarFacturasDe(int $auxiliarId, bool $venta, bool $compra,
+        int $empresaId, float $monto, int $top): array
+    {
+        $result = [];
+        if ($venta) {
+            $facturas = DB::table('erp_facturas_venta as f')
+                ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+                ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+                ->where('f.empresa_id', $empresaId)
+                ->whereNull('f.deleted_at')
+                ->where('f.auxiliar_id', $auxiliarId)
+                ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL'])
+                ->select('f.id', 'f.numero', 'f.punto_venta_id', 'f.imp_total',
+                    'f.fecha_emision', 'f.auxiliar_id', 'a.nombre as cliente_nombre', 'a.cuit',
+                    'tc.codigo_interno as tipo_codigo', 'tc.letra')
+                ->orderByRaw('ABS(f.imp_total - ?)', [$monto])
+                ->limit($top)
+                ->get();
+            foreach ($facturas as $f) {
+                $result[] = $this->formatVenta($f, $monto);
+            }
+        }
+        if ($compra) {
+            $facturas = DB::table('erp_facturas_compra as f')
+                ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+                ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
+                ->where('f.empresa_id', $empresaId)
+                ->whereNull('f.deleted_at')
+                ->where('f.auxiliar_id', $auxiliarId)
+                ->whereIn('f.estado', ['RECIBIDA', 'CONTROLADA', 'PAGO_PARCIAL'])
+                ->select('f.id', 'f.numero', 'f.punto_venta', 'f.imp_total',
+                    'f.fecha_emision', 'f.cuit_emisor', 'f.razon_social_emisor', 'f.auxiliar_id',
+                    'tc.codigo_interno as tipo_codigo', 'tc.letra')
+                ->orderByRaw('ABS(f.imp_total - ?)', [$monto])
+                ->limit($top)
+                ->get();
+            foreach ($facturas as $f) {
+                $result[] = $this->formatCompra($f, $monto);
+            }
+        }
+        usort($result, fn ($a, $b) => $b['score'] <=> $a['score']);
+        return array_slice($result, 0, $top);
+    }
+
+    private function buscarFacturasPorMonto(bool $venta, bool $compra,
+        int $empresaId, float $monto, int $top): array
+    {
+        $result = [];
+        if ($venta) {
             $facturas = DB::table('erp_facturas_venta as f')
                 ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
                 ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
@@ -397,32 +556,16 @@ class ConciliacionService
                 ->whereNull('f.deleted_at')
                 ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL'])
                 ->select('f.id', 'f.numero', 'f.punto_venta_id', 'f.imp_total',
-                    'f.fecha_emision', 'f.auxiliar_id', 'a.nombre as cliente_nombre',
+                    'f.fecha_emision', 'f.auxiliar_id', 'a.nombre as cliente_nombre', 'a.cuit',
                     'tc.codigo_interno as tipo_codigo', 'tc.letra')
                 ->orderByRaw('ABS(f.imp_total - ?)', [$monto])
                 ->limit($top * 2)
                 ->get();
-
             foreach ($facturas as $f) {
-                $proximidad = $monto > 0 ? 1 - min(1, abs((float) $f->imp_total - $monto) / $monto) : 0;
-                $result[] = [
-                    'tipo' => 'FACTURA_VENTA',
-                    'factura_id' => $f->id,
-                    'numero' => $f->numero,
-                    'pv_id' => $f->punto_venta_id,
-                    'tipo_codigo' => $f->tipo_codigo,
-                    'letra' => $f->letra,
-                    'cliente_id' => $f->auxiliar_id,
-                    'cliente_nombre' => $f->cliente_nombre,
-                    'imp_total' => (float) $f->imp_total,
-                    'saldo_pendiente' => (float) $f->imp_total, // TODO: restar cobros parciales
-                    'fecha_emision' => $f->fecha_emision,
-                    'score' => round($proximidad * 100),
-                ];
+                $result[] = $this->formatVenta($f, $monto);
             }
         }
-
-        if ($buscarCompra) {
+        if ($compra) {
             $facturas = DB::table('erp_facturas_compra as f')
                 ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
                 ->leftJoin('erp_auxiliares as a', 'a.id', '=', 'f.auxiliar_id')
@@ -435,30 +578,52 @@ class ConciliacionService
                 ->orderByRaw('ABS(f.imp_total - ?)', [$monto])
                 ->limit($top * 2)
                 ->get();
-
             foreach ($facturas as $f) {
-                $proximidad = $monto > 0 ? 1 - min(1, abs((float) $f->imp_total - $monto) / $monto) : 0;
-                $result[] = [
-                    'tipo' => 'FACTURA_COMPRA',
-                    'factura_id' => $f->id,
-                    'numero' => $f->numero,
-                    'pv' => $f->punto_venta,
-                    'tipo_codigo' => $f->tipo_codigo,
-                    'letra' => $f->letra,
-                    'cuit' => $f->cuit_emisor,
-                    'proveedor_nombre' => $f->razon_social_emisor,
-                    'proveedor_id' => $f->auxiliar_id,
-                    'imp_total' => (float) $f->imp_total,
-                    'saldo_pendiente' => (float) $f->imp_total,
-                    'fecha_emision' => $f->fecha_emision,
-                    'score' => round($proximidad * 100),
-                ];
+                $result[] = $this->formatCompra($f, $monto);
             }
         }
-
-        // Ordenar por score DESC y devolver top.
         usort($result, fn ($a, $b) => $b['score'] <=> $a['score']);
         return array_slice($result, 0, $top);
+    }
+
+    private function formatVenta($f, float $monto): array
+    {
+        $proximidad = $monto > 0 ? 1 - min(1, abs((float) $f->imp_total - $monto) / $monto) : 0;
+        return [
+            'tipo' => 'FACTURA_VENTA',
+            'factura_id' => $f->id,
+            'numero' => $f->numero,
+            'pv_id' => $f->punto_venta_id,
+            'tipo_codigo' => $f->tipo_codigo,
+            'letra' => $f->letra,
+            'cliente_id' => $f->auxiliar_id,
+            'cliente_nombre' => $f->cliente_nombre,
+            'cuit' => $f->cuit ?? null,
+            'imp_total' => (float) $f->imp_total,
+            'saldo_pendiente' => (float) $f->imp_total,
+            'fecha_emision' => $f->fecha_emision,
+            'score' => round($proximidad * 100),
+        ];
+    }
+
+    private function formatCompra($f, float $monto): array
+    {
+        $proximidad = $monto > 0 ? 1 - min(1, abs((float) $f->imp_total - $monto) / $monto) : 0;
+        return [
+            'tipo' => 'FACTURA_COMPRA',
+            'factura_id' => $f->id,
+            'numero' => $f->numero,
+            'pv' => $f->punto_venta,
+            'tipo_codigo' => $f->tipo_codigo,
+            'letra' => $f->letra,
+            'cuit' => $f->cuit_emisor,
+            'proveedor_nombre' => $f->razon_social_emisor,
+            'proveedor_id' => $f->auxiliar_id,
+            'imp_total' => (float) $f->imp_total,
+            'saldo_pendiente' => (float) $f->imp_total,
+            'fecha_emision' => $f->fecha_emision,
+            'score' => round($proximidad * 100),
+        ];
     }
 
     /**

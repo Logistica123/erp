@@ -31,7 +31,7 @@ type MovimientoBancario = {
   monto_conciliado: string | number;
 };
 
-// v1.27 Sprint C — modelo de sugerencias devueltas por GET /sugerencias.
+// v1.27 Sprint C + §15 — modelo de sugerencias devueltas por GET /sugerencias.
 type Sugerencia = {
   tipo: 'FACTURA_VENTA' | 'FACTURA_COMPRA';
   factura_id: number;
@@ -45,6 +45,21 @@ type Sugerencia = {
   saldo_pendiente: number;
   fecha_emision: string;
   score: number;
+  cuit_coincide?: boolean; // §15
+};
+
+// §15 — respuesta enriquecida.
+type SugerenciasResp = {
+  sugerencias: Sugerencia[];
+  cuit_detectado: string | null;
+  contraparte: { id: number; nombre: string; cuit: string; tipo: string } | null;
+  motivo_fallback:
+    | null
+    | 'CUIT_NO_DETECTADO_EN_CONCEPTO'
+    | 'CUIT_NO_REGISTRADO'
+    | 'CONTRAPARTE_SIN_FACTURAS_PENDIENTES'
+    | 'TIPO_SIN_FACTURAS'
+    | 'MOV_SIN_IMPORTE';
 };
 type Cuenta = { id: number; codigo: string; nombre: string; imputable: boolean; admite_cc: boolean; admite_auxiliar: boolean };
 type Auxiliar = { id: number; codigo: string; nombre: string; tipo: string };
@@ -1056,7 +1071,7 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   const [seleccionada, setSeleccionada] = useState<Sugerencia | null>(null);
   const [monto, setMonto] = useState<string>('');
 
-  const { data: sugerencias, isLoading } = useQuery<{ data: Sugerencia[] }>({
+  const { data: sugerencias, isLoading } = useQuery<{ data: SugerenciasResp }>({
     queryKey: ['sugerencias', mov?.id],
     queryFn: () => api.get(`/api/erp/movimientos-bancarios/${mov!.id}/sugerencias?top=10`),
     enabled: !!mov,
@@ -1077,21 +1092,53 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
 
   if (!mov) return null;
 
+  const resp = sugerencias?.data;
+  const lista = resp?.sugerencias ?? [];
+
   return (
     <Modal open onClose={onClose} title={`Sugerencias para mov #${mov.id} · $${fmtMoney(montoMov)}`} size="lg">
       <div className="space-y-3 text-[12px]">
         <div className="text-ink-muted">
           {mov.concepto} · {mov.fecha.slice(0, 10)} · tipo: <code>{mov.tipo_operativo}</code>
         </div>
+
+        {/* §15 — Banner de matching de CUIT */}
+        {!isLoading && resp && (
+          <>
+            {resp.contraparte && !resp.motivo_fallback && (
+              <div className="border border-success/30 bg-success-bg/20 rounded p-2 text-[11.5px]">
+                ✓ <strong>CUIT detectado: {resp.cuit_detectado}</strong> — {resp.contraparte.nombre} ({resp.contraparte.tipo})
+              </div>
+            )}
+            {resp.motivo_fallback === 'CONTRAPARTE_SIN_FACTURAS_PENDIENTES' && resp.contraparte && (
+              <div className="border border-warning/30 bg-warning-bg/20 rounded p-2 text-[11.5px]">
+                ⓘ CUIT {resp.cuit_detectado} ({resp.contraparte.nombre}) no tiene facturas pendientes.
+                Cargá la factura primero o usá "Conciliar" general para asiento directo.
+              </div>
+            )}
+            {resp.motivo_fallback === 'CUIT_NO_REGISTRADO' && (
+              <div className="border border-warning/30 bg-warning-bg/20 rounded p-2 text-[11.5px]">
+                ⚠ CUIT {resp.cuit_detectado} no está registrado en Auxiliares.
+                Mostrando sugerencias por monto (verificá manualmente la coincidencia).
+              </div>
+            )}
+            {resp.motivo_fallback === 'CUIT_NO_DETECTADO_EN_CONCEPTO' && (
+              <div className="border border-warning/30 bg-warning-bg/20 rounded p-2 text-[11.5px]">
+                ⚠ No se detectó CUIT en el concepto. Mostrando sugerencias por monto solamente.
+              </div>
+            )}
+          </>
+        )}
+
         {isLoading && <div className="text-ink-muted">Buscando sugerencias…</div>}
-        {!isLoading && (sugerencias?.data ?? []).length === 0 && (
+        {!isLoading && lista.length === 0 && (
           <div className="border border-warning/30 bg-warning-bg/20 rounded p-2 text-[11.5px]">
             No se encontraron facturas con saldo pendiente cerca de este monto.
             Probá la opción "Conciliar" general (referencia ASIENTO_MANUAL) para elegir cuenta manualmente.
           </div>
         )}
         <div className="space-y-1 max-h-[300px] overflow-y-auto">
-          {(sugerencias?.data ?? []).map((s) => (
+          {lista.map((s) => (
             <label key={`${s.tipo}-${s.factura_id}`}
               className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition ${
                 seleccionada?.factura_id === s.factura_id && seleccionada.tipo === s.tipo
@@ -1101,11 +1148,22 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
               <input type="radio" checked={seleccionada?.factura_id === s.factura_id && seleccionada.tipo === s.tipo}
                 onChange={() => { setSeleccionada(s); setMonto(String(Math.min(s.saldo_pendiente, montoMov))); }} />
               <div className="flex-1">
-                <div className="font-medium text-ink-2">
+                <div className="font-medium text-ink-2 flex items-center gap-2">
                   {s.tipo_codigo} {s.letra ?? ''} {s.numero}
-                  <span className="ml-2 text-[10px] px-1 rounded bg-line">
+                  <span className="text-[10px] px-1 rounded bg-line">
                     {s.tipo === 'FACTURA_VENTA' ? 'VENTA' : 'COMPRA'}
                   </span>
+                  {/* §15 — badge de match de CUIT */}
+                  {s.cuit_coincide === true && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-success-bg/40 text-success font-medium">
+                      ✓ CUIT coincide
+                    </span>
+                  )}
+                  {s.cuit_coincide === false && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-line text-ink-muted">
+                      CUIT no coincide
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] text-ink-muted">
                   {s.cliente_nombre ?? s.proveedor_nombre ?? '—'}

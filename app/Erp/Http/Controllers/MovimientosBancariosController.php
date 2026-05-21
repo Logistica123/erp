@@ -197,15 +197,17 @@ class MovimientosBancariosController
     }
 
     /**
-     * v1.27 Sprint C — Sugerencias top-N de facturas candidatas.
+     * v1.27 Sprint C + §15 — Sugerencias top-N con matching por CUIT
+     * detectado en el concepto.
      */
     public function sugerencias(Request $request, int $id): JsonResponse
     {
         $top = (int) $request->query('top', 10);
         $top = max(1, min(50, $top));
         $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
-        $sugerencias = $this->concilService->sugerirFacturas($mov, $top);
-        return response()->json(['ok' => true, 'data' => $sugerencias]);
+        // §15: devolvemos la respuesta enriquecida (sugerencias + cuit + contraparte + motivo_fallback).
+        $r = $this->concilService->sugerirFacturasConMatchingCuit($mov, $top);
+        return response()->json(['ok' => true, 'data' => $r]);
     }
 
     /**

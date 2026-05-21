@@ -9,6 +9,7 @@ use App\Erp\Services\Tesoreria\MatchingContraparteService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -211,7 +212,8 @@ class MovimientosBancariosController
     }
 
     /**
-     * v1.27 Sprint C — Conciliar movimiento contra factura (venta o compra).
+     * v1.27 Sprint C + §15 — Conciliar movimiento contra factura (venta o compra).
+     * §15: opcional `motivo` cuando se concilia manualmente (sin match de CUIT).
      */
     public function conciliarFactura(Request $request, int $id): JsonResponse
     {
@@ -219,17 +221,89 @@ class MovimientosBancariosController
             'tipo_factura' => ['required', Rule::in(['VENTA', 'COMPRA'])],
             'factura_id' => ['required', 'integer'],
             'monto' => ['required', 'numeric', 'gt:0'],
+            'motivo' => ['nullable', 'string', 'min:10', 'max:500'], // §15
         ]);
         $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
         try {
             $mov = $this->concilService->conciliarContraFactura(
                 $mov, $data['tipo_factura'], (int) $data['factura_id'],
                 (float) $data['monto'], $request->user(),
+                $data['motivo'] ?? null,
             );
         } catch (DomainException $e) {
             return $this->domainError($e);
         }
         return response()->json(['ok' => true, 'data' => $mov->load('asiento')]);
+    }
+
+    /**
+     * v1.27 §15 — Búsqueda de auxiliares (Cliente o Proveedor) para el modal
+     * de conciliación manual. Filtra por nombre o CUIT.
+     */
+    public function buscarAuxiliares(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'tipo' => ['required', Rule::in(['Cliente', 'Proveedor'])],
+            'q' => ['required', 'string', 'min:2'],
+        ]);
+        $q = $data['q'];
+        $qDigitos = preg_replace('/[^0-9]/', '', $q);
+
+        $rows = DB::table('erp_auxiliares')
+            ->where('tipo', $data['tipo'])
+            ->where('activo', 1)
+            ->where(function ($w) use ($q, $qDigitos) {
+                $w->where('nombre', 'like', "%{$q}%");
+                if ($qDigitos !== '') $w->orWhere('cuit', 'like', "{$qDigitos}%");
+            })
+            ->orderBy('nombre')
+            ->limit(20)
+            ->get(['id', 'codigo', 'nombre', 'cuit', 'tipo']);
+
+        return response()->json(['ok' => true, 'data' => $rows]);
+    }
+
+    /**
+     * v1.27 §15 — Lista facturas pendientes de un auxiliar específico
+     * (para el modal de conciliación manual).
+     */
+    public function facturasPendientesAuxiliar(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'auxiliar_id' => ['required', 'integer'],
+            'tipo' => ['required', Rule::in(['VENTA', 'COMPRA'])],
+        ]);
+
+        $auxiliarId = (int) $data['auxiliar_id'];
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+
+        if ($data['tipo'] === 'VENTA') {
+            $rows = DB::table('erp_facturas_venta as f')
+                ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+                ->where('f.empresa_id', $empresaId)
+                ->where('f.auxiliar_id', $auxiliarId)
+                ->whereNull('f.deleted_at')
+                ->whereIn('f.estado', ['EMITIDA', 'CONTROLADA', 'COBRO_PARCIAL'])
+                ->select('f.id', 'f.numero', 'f.punto_venta_id', 'f.imp_total',
+                    'f.fecha_emision', 'tc.codigo_interno as tipo_codigo', 'tc.letra')
+                ->orderByDesc('f.fecha_emision')
+                ->limit(50)
+                ->get();
+        } else {
+            $rows = DB::table('erp_facturas_compra as f')
+                ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+                ->where('f.empresa_id', $empresaId)
+                ->where('f.auxiliar_id', $auxiliarId)
+                ->whereNull('f.deleted_at')
+                ->whereIn('f.estado', ['RECIBIDA', 'CONTROLADA', 'PAGO_PARCIAL'])
+                ->select('f.id', 'f.numero', 'f.punto_venta', 'f.imp_total',
+                    'f.fecha_emision', 'tc.codigo_interno as tipo_codigo', 'tc.letra')
+                ->orderByDesc('f.fecha_emision')
+                ->limit(50)
+                ->get();
+        }
+
+        return response()->json(['ok' => true, 'data' => $rows]);
     }
 
     public function autoconciliar(Request $request): JsonResponse

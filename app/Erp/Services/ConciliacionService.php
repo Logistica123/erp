@@ -627,12 +627,16 @@ class ConciliacionService
     }
 
     /**
-     * v1.27 Sprint C — Conciliar movimiento bancario contra una factura.
+     * v1.27 Sprint C + §15 — Conciliar movimiento bancario contra una factura.
      * Crea asiento de cobro (venta) o pago (compra) + registro en
-     * erp_conciliaciones. Soporta conciliación parcial: el monto se puede
-     * cobrar/pagar parcialmente y el saldo restante queda pendiente.
+     * erp_conciliaciones. Soporta conciliación parcial.
+     *
+     * §15: el parámetro $motivo es opcional. Si se proporciona, marca la
+     * conciliación como MANUAL en `observacion` (típico cuando el operador
+     * concilia contra una factura que NO matcheaba por CUIT — debe
+     * justificar la decisión).
      */
-    public function conciliarContraFactura(MovimientoBancario $mov, string $tipoFactura, int $facturaId, float $monto, User $usuario): MovimientoBancario
+    public function conciliarContraFactura(MovimientoBancario $mov, string $tipoFactura, int $facturaId, float $monto, User $usuario, ?string $motivo = null): MovimientoBancario
     {
         if ($mov->estado === MovimientoBancario::ESTADO_CONCILIADO) {
             throw new DomainException('MOVIMIENTO_YA_CONCILIADO');
@@ -649,7 +653,7 @@ class ConciliacionService
             throw new DomainException('MONTO_EXCEDE_SALDO_MOVIMIENTO');
         }
 
-        return DB::transaction(function () use ($mov, $tipoFactura, $facturaId, $monto, $usuario, $cuentaBanco, $empresaId, $montoMov) {
+        return DB::transaction(function () use ($mov, $tipoFactura, $facturaId, $monto, $usuario, $cuentaBanco, $empresaId, $montoMov, $motivo) {
             DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
 
             $tabla = $tipoFactura === 'VENTA' ? 'erp_facturas_venta' : 'erp_facturas_compra';
@@ -712,6 +716,11 @@ class ConciliacionService
             // No tenemos un Cobro/OP intermediario per se, pero el referencia_id
             // apunta a la factura. Para Sprint C usamos ASIENTO_MANUAL para
             // simplificar (la factura queda vinculada vía glosa + monto).
+            $obsBase = sprintf('Conciliación contra %s #%d (auxiliar #%d)',
+                $tipoFactura, $facturaId, $auxiliarId);
+            if ($motivo !== null && $motivo !== '') {
+                $obsBase .= ' · [MANUAL] '.$motivo;
+            }
             Conciliacion::create([
                 'movimiento_bancario_id' => $mov->id,
                 'referencia_tipo' => 'ASIENTO_MANUAL',
@@ -719,8 +728,7 @@ class ConciliacionService
                 'importe_conciliado' => $monto,
                 'user_id' => $usuario->id,
                 'modo' => 'MANUAL',
-                'observacion' => sprintf('Conciliación contra %s #%d (auxiliar #%d)',
-                    $tipoFactura, $facturaId, $auxiliarId),
+                'observacion' => $obsBase,
             ]);
 
             $nuevoMontoConciliado = (float) $mov->monto_conciliado + $monto;

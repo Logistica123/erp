@@ -206,6 +206,11 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.mov-banc.sugerencias');
         Route::post('/movimientos-bancarios/{id}/conciliar-factura', [MovimientosBancariosController::class, 'conciliarFactura'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar-factura');
+        // v1.27 §15 — Búsqueda de auxiliares + facturas pendientes para modal manual.
+        Route::get('/movimientos-bancarios/buscar-auxiliar', [MovimientosBancariosController::class, 'buscarAuxiliares'])
+            ->name('erp.mov-banc.buscar-auxiliar');
+        Route::get('/movimientos-bancarios/facturas-pendientes', [MovimientosBancariosController::class, 'facturasPendientesAuxiliar'])
+            ->name('erp.mov-banc.facturas-pendientes');
         Route::post('/movimientos-bancarios/{id}/desconciliar', [MovimientosBancariosController::class, 'desconciliar'])
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.mov-banc.desconciliar');

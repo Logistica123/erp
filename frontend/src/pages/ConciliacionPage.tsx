@@ -1070,6 +1070,7 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   const qc = useQueryClient();
   const [seleccionada, setSeleccionada] = useState<Sugerencia | null>(null);
   const [monto, setMonto] = useState<string>('');
+  const [manualOpen, setManualOpen] = useState(false);
 
   const { data: sugerencias, isLoading } = useQuery<{ data: SugerenciasResp }>({
     queryKey: ['sugerencias', mov?.id],
@@ -1137,6 +1138,15 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
             Probá la opción "Conciliar" general (referencia ASIENTO_MANUAL) para elegir cuenta manualmente.
           </div>
         )}
+        {/* §15 — Opción "Conciliar manual con motivo" siempre disponible */}
+        <div className="border-t border-line pt-2">
+          <button type="button"
+            onClick={() => setManualOpen(true)}
+            className="text-[11.5px] text-azure hover:underline">
+            ↪ Conciliar manualmente con motivo (elegir factura de otro proveedor/cliente)
+          </button>
+        </div>
+
         <div className="space-y-1 max-h-[300px] overflow-y-auto">
           {lista.map((s) => (
             <label key={`${s.tipo}-${s.factura_id}`}
@@ -1201,6 +1211,179 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
             onClick={() => conciliarMut.mutate()}>
             {conciliarMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
             Confirmar conciliación
+          </Button>
+        </div>
+      </div>
+
+      {/* §15.5 — modal de conciliación manual con motivo */}
+      <ConciliarManualModal
+        mov={mov}
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        onSuccess={() => { setManualOpen(false); onSuccess(); }}
+        onError={onError}
+      />
+    </Modal>
+  );
+}
+
+// v1.27 §15.5 — Modal de conciliación manual con motivo obligatorio.
+function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
+  mov: MovimientoBancario | null;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [tipoDestino, setTipoDestino] = useState<'VENTA' | 'COMPRA'>('COMPRA');
+  const [auxiliarQ, setAuxiliarQ] = useState('');
+  const [auxiliar, setAuxiliar] = useState<{ id: number; nombre: string; cuit: string | null } | null>(null);
+  const [facturaId, setFacturaId] = useState<number | null>(null);
+  const [monto, setMonto] = useState<string>('');
+  const [motivo, setMotivo] = useState('');
+
+  const montoMov = mov ? Math.max(Number(mov.debito), Number(mov.credito)) : 0;
+
+  // Inferir tipo destino del tipo_operativo del movimiento.
+  // Solo se ejecuta cuando se abre el modal.
+  useMemo(() => {
+    if (!mov || !open) return;
+    if (Number(mov.debito) > 0) setTipoDestino('COMPRA');
+    else if (Number(mov.credito) > 0) setTipoDestino('VENTA');
+    setMonto(String(montoMov));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mov?.id]);
+
+  const { data: auxRes } = useQuery<{ data: Array<{ id: number; nombre: string; cuit: string | null; codigo: string }> }>({
+    queryKey: ['buscar-aux', tipoDestino, auxiliarQ],
+    queryFn: () => api.get(`/api/erp/movimientos-bancarios/buscar-auxiliar?tipo=${tipoDestino === 'COMPRA' ? 'Proveedor' : 'Cliente'}&q=${encodeURIComponent(auxiliarQ)}`),
+    enabled: open && auxiliarQ.length >= 2,
+  });
+
+  const { data: facturasRes } = useQuery<{ data: Array<{ id: number; numero: number; imp_total: number; fecha_emision: string; tipo_codigo: string; letra: string | null }> }>({
+    queryKey: ['facturas-pend', auxiliar?.id, tipoDestino],
+    queryFn: () => api.get(`/api/erp/movimientos-bancarios/facturas-pendientes?auxiliar_id=${auxiliar!.id}&tipo=${tipoDestino}`),
+    enabled: !!auxiliar?.id,
+  });
+
+  const submitMut = useMutation({
+    mutationFn: () =>
+      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar-factura`, {
+        tipo_factura: tipoDestino,
+        factura_id: facturaId,
+        monto: Number(monto),
+        motivo: motivo.trim(),
+      }),
+    onSuccess: () => {
+      // Reset.
+      setAuxiliarQ(''); setAuxiliar(null); setFacturaId(null);
+      setMonto(''); setMotivo('');
+      onSuccess();
+    },
+    onError: (e: ApiError) => onError(e.message),
+  });
+
+  if (!mov) return null;
+  const valid = auxiliar && facturaId && Number(monto) > 0 && motivo.trim().length >= 10;
+
+  return (
+    <Modal open={open} onClose={onClose} title={`📝 Conciliar manualmente · Mov #${mov.id} · $${fmtMoney(montoMov)}`} size="lg">
+      <div className="space-y-3 text-[12px]">
+        <div className="border border-warning/30 bg-warning-bg/20 rounded p-2 text-[11px]">
+          Esta conciliación queda marcada como <strong>MANUAL</strong> con tu motivo en el audit log.
+          Usá esto solo si la sugerencia automática no encontró match correcto.
+        </div>
+
+        <div>
+          <div className="text-[11px] text-ink-muted mb-1">Tipo de destino</div>
+          <div className="flex gap-3">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" checked={tipoDestino === 'VENTA'} onChange={() => { setTipoDestino('VENTA'); setAuxiliar(null); setFacturaId(null); }} />
+              <span>Factura de venta</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" checked={tipoDestino === 'COMPRA'} onChange={() => { setTipoDestino('COMPRA'); setAuxiliar(null); setFacturaId(null); }} />
+              <span>Factura de compra</span>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[11px] text-ink-muted mb-1">
+            {tipoDestino === 'COMPRA' ? 'Proveedor *' : 'Cliente *'}
+          </div>
+          <input type="text" value={auxiliar ? `${auxiliar.nombre} (${auxiliar.cuit ?? 'sin CUIT'})` : auxiliarQ}
+            onChange={(e) => { setAuxiliar(null); setFacturaId(null); setAuxiliarQ(e.target.value); }}
+            placeholder="Buscar por nombre o CUIT (mín 2 chars)..."
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+          {!auxiliar && auxiliarQ.length >= 2 && (auxRes?.data ?? []).length > 0 && (
+            <div className="border border-line rounded mt-1 max-h-[150px] overflow-y-auto">
+              {(auxRes?.data ?? []).map((a) => (
+                <button key={a.id} type="button"
+                  onClick={() => { setAuxiliar({ id: a.id, nombre: a.nombre, cuit: a.cuit }); setAuxiliarQ(''); }}
+                  className="w-full text-left p-1.5 hover:bg-surface-hover border-b border-line/40 last:border-b-0">
+                  <div className="text-[11.5px] text-ink-2">{a.nombre}</div>
+                  <div className="text-[10px] text-ink-muted font-mono">{a.cuit ?? 'sin CUIT'} · {a.codigo}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {auxiliar && (
+          <div>
+            <div className="text-[11px] text-ink-muted mb-1">Factura pendiente *</div>
+            {(facturasRes?.data ?? []).length === 0 ? (
+              <div className="text-[11px] text-ink-muted italic">
+                Sin facturas pendientes para este {tipoDestino === 'COMPRA' ? 'proveedor' : 'cliente'}.
+              </div>
+            ) : (
+              <div className="border border-line rounded max-h-[180px] overflow-y-auto">
+                {(facturasRes?.data ?? []).map((f) => (
+                  <label key={f.id}
+                    className={`flex items-center gap-2 p-1.5 border-b border-line/40 last:border-b-0 cursor-pointer ${
+                      facturaId === f.id ? 'bg-azure-soft/30' : 'hover:bg-surface-hover'
+                    }`}>
+                    <input type="radio" checked={facturaId === f.id} onChange={() => setFacturaId(f.id)} />
+                    <div className="flex-1">
+                      <div className="text-[11.5px] text-ink-2">
+                        {f.tipo_codigo} {f.letra ?? ''} {f.numero} · {f.fecha_emision?.slice(0, 10)}
+                      </div>
+                    </div>
+                    <div className="font-semibold tabular text-[11.5px]">{fmtMoney(f.imp_total)}</div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div>
+          <div className="text-[11px] text-ink-muted mb-1">Monto a conciliar *</div>
+          <input type="number" step="0.01"
+            value={monto} onChange={(e) => setMonto(e.target.value)}
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+        </div>
+
+        <div>
+          <div className="text-[11px] text-ink-muted mb-1">
+            Motivo * <span className="text-[10px]">(mínimo 10 caracteres, queda en audit log)</span>
+          </div>
+          <textarea rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            maxLength={500}
+            placeholder="Ej: Pago de servicios extra acordado verbalmente, imputar a FC C 42 de Ruefli..."
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+          <div className="text-[10px] text-ink-muted mt-0.5">
+            {motivo.length} / 500 — {motivo.trim().length < 10 ? `faltan ${10 - motivo.trim().length}` : '✓'}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-line">
+          <Button variant="secondary" onClick={onClose} disabled={submitMut.isPending}>Cancelar</Button>
+          <Button variant="primary" disabled={!valid || submitMut.isPending}
+            onClick={() => submitMut.mutate()}>
+            {submitMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Confirmar conciliación manual
           </Button>
         </div>
       </div>

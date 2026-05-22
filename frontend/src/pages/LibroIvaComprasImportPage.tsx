@@ -48,6 +48,7 @@ type PreviewResp = {
   filas_con_tomado_no: number;
   periodo_afip: string | null;
   columnas_extras_detectadas: string[];
+  columnas_obligatorias_faltantes?: string[]; // v1.30
   import_existente: { id: number; importado_at: string; estado: string } | null;
 };
 
@@ -77,12 +78,17 @@ const MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 
 // v1.13 introdujo 4 columnas extras (tomado/cliente/observaciones/tipo).
 // v1.14 sumó 2 más (periodo trabajado/jurisdiccion).
-// v1.40 sumó 2 más (op + fecha de pago). Todas opcionales.
-const EXTRAS_OBLIGATORIAS = [
+// v1.40 sumó 2 más (op + fecha de pago).
+// v1.30 — separamos obligatorias vs opcionales (jurisdiccion + op + fecha de pago
+// siguen opcionales). El backend valida y bloquea si falta alguna obligatoria.
+const EXTRAS_TODAS = [
   'tomado', 'cliente', 'observaciones', 'tipo',
   'periodo trabajado', 'jurisdiccion',
   'op', 'fecha de pago',
 ];
+const EXTRAS_OBLIGATORIAS_SET = new Set([
+  'tomado', 'cliente', 'observaciones', 'tipo', 'periodo trabajado',
+]);
 
 const ESTADO_BADGES: Record<Import['estado'], 'success' | 'danger' | 'warning'> = {
   OK: 'success',
@@ -470,7 +476,8 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
             )}
             {step === 2 && (
               <Button variant="primary"
-                disabled={!periodoId || periodoCerrado || confirmMut.isPending}
+                disabled={!periodoId || periodoCerrado || confirmMut.isPending
+                  || (preview?.columnas_obligatorias_faltantes?.length ?? 0) > 0}
                 onClick={submitConfirmar}>
                 {confirmMut.isPending ? 'Importando…' : 'Confirmar e importar'}
               </Button>
@@ -545,6 +552,9 @@ function Step2({
 
   const detectadas = preview.columnas_extras_detectadas;
   const cobertura = (col: string) => detectadas.includes(col);
+  // v1.30 — el backend ya calcula faltantes; fallback si no vino.
+  const obligatoriasFaltantes = preview.columnas_obligatorias_faltantes
+    ?? Array.from(EXTRAS_OBLIGATORIAS_SET).filter((c) => !cobertura(c));
 
   return (
     <div className="space-y-4">
@@ -561,20 +571,36 @@ function Step2({
       <div className="border border-line rounded-md p-3 space-y-2 bg-surface-row">
         <div className="text-[12px] font-semibold text-navy-800">Columnas extras detectadas en el archivo</div>
         <div className="flex flex-wrap gap-2">
-          {EXTRAS_OBLIGATORIAS.map((c) => (
-            <div key={c} className={`text-[11.5px] px-2 py-1 rounded border flex items-center gap-1 ${
-              cobertura(c)
-                ? 'border-success/30 bg-success-bg/20 text-success'
-                : 'border-line bg-white text-ink-muted'
-            }`}>
-              {cobertura(c) ? <Check className="w-3 h-3" /> : '○'}
-              <code>{c}</code>
-            </div>
-          ))}
+          {EXTRAS_TODAS.map((c) => {
+            const obligatoria = EXTRAS_OBLIGATORIAS_SET.has(c);
+            const ok = cobertura(c);
+            const falta = obligatoria && !ok;
+            return (
+              <div key={c} className={`text-[11.5px] px-2 py-1 rounded border flex items-center gap-1 ${
+                ok
+                  ? 'border-success/30 bg-success-bg/20 text-success'
+                  : falta
+                    ? 'border-danger/40 bg-danger-bg/30 text-danger'
+                    : 'border-line bg-white text-ink-muted'
+              }`}>
+                {ok ? <Check className="w-3 h-3" /> : falta ? <AlertTriangle className="w-3 h-3" /> : '○'}
+                <code>{c}</code>
+                {obligatoria && <span className="text-[9.5px] opacity-70">*</span>}
+              </div>
+            );
+          })}
         </div>
-        {detectadas.length === 0 && (
-          <div className="text-[11px] text-ink-muted italic">
-            No se detectaron columnas extras — todas las facturas se procesarán como <code>Tomado=SI</code> (default).
+        <div className="text-[10.5px] text-ink-muted">
+          <span className="text-danger font-semibold">*</span> obligatorias (v1.30) — sin ellas el import se bloquea.
+          {' '}<code>jurisdiccion</code>, <code>op</code> y <code>fecha de pago</code> son opcionales.
+        </div>
+        {obligatoriasFaltantes.length > 0 && (
+          <div className="text-[11.5px] text-danger flex items-start gap-1.5 mt-1">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            <div>
+              Faltan columnas obligatorias: <strong>{obligatoriasFaltantes.join(', ')}</strong>.
+              <br />Completalas con bulk-edit del v1.26 o re-subí el CSV con las columnas faltantes.
+            </div>
           </div>
         )}
       </div>

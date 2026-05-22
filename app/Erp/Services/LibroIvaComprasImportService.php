@@ -95,6 +95,12 @@ class LibroIvaComprasImportService
         'op', 'fecha de pago',
     ];
 
+    // v1.30 D-30-7 — pasan a obligatorias para garantizar integridad de datos.
+    // Jurisdicción y OP/fecha de pago siguen opcionales.
+    private const HEADERS_OBLIGATORIAS = [
+        'tomado', 'cliente', 'observaciones', 'tipo', 'periodo trabajado',
+    ];
+
     public function __construct(
         private readonly ContabilizadorFacturas $contabilizador,
         private readonly FacturaCompraService $facturaSvc,
@@ -143,6 +149,12 @@ class LibroIvaComprasImportService
             if (isset($headerMap[$col])) $extras[] = $col;
         }
 
+        // v1.30 D-30-7 — bloqueo si falta alguna obligatoria.
+        $obligatoriasFaltantes = [];
+        foreach (self::HEADERS_OBLIGATORIAS as $col) {
+            if (! isset($headerMap[$col])) $obligatoriasFaltantes[] = $col;
+        }
+
         $tomadasSi = 0;
         $tomadasNo = 0;
         foreach ($rows as $r) {
@@ -160,6 +172,7 @@ class LibroIvaComprasImportService
             'filas_con_tomado_no' => $tomadasNo,
             'periodo_afip' => $this->detectarPeriodoNombre($nombreArchivo),
             'columnas_extras_detectadas' => $extras,
+            'columnas_obligatorias_faltantes' => $obligatoriasFaltantes, // v1.30
             'import_existente' => null,
         ];
     }
@@ -199,6 +212,19 @@ class LibroIvaComprasImportService
         $rows = $this->leerArchivo($pathTemporal);
         $headerRaw = array_shift($rows);
         $headerMap = $this->mapearHeader($headerRaw);
+
+        // v1.30 D-30-7 — bloqueo en backend si faltan columnas obligatorias.
+        $faltantes = [];
+        foreach (self::HEADERS_OBLIGATORIAS as $col) {
+            if (! isset($headerMap[$col])) $faltantes[] = $col;
+        }
+        if (! empty($faltantes)) {
+            throw new DomainException(
+                'COLUMNAS_OBLIGATORIAS_FALTANTES: el archivo no tiene las columnas '
+                .implode(', ', $faltantes)
+                .'. Completalas con bulk-edit o re-subí el CSV con las columnas faltantes.'
+            );
+        }
 
         $import = LibroIvaComprasImport::create([
             'empresa_id' => $empresaId,

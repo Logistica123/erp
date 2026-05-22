@@ -284,6 +284,320 @@ class LibroIvaVentasImportService
     }
 
     /**
+     * v1.30 — Modo "Control" del import de Ventas.
+     *
+     * NO inserta facturas. Lee el archivo de AFIP "Mis Comprobantes" + el período
+     * (YYYY-MM) y compara contra lo cargado en `erp_facturas_venta`. Devuelve 4
+     * buckets para que el operador resuelva manualmente.
+     *
+     * Clave de matching: (tipo_comprobante_cod, punto_venta_numero, numero).
+     * Tolerancia importe: $1 (cualquier diff >= 1 entra a "coinciden_con_diff").
+     *
+     * @return array{
+     *   periodo: string,
+     *   coinciden: int,
+     *   solo_sistema: list<array>,
+     *   solo_afip: list<array>,
+     *   coinciden_con_diff: list<array>,
+     * }
+     */
+    public function controlar(
+        string $pathTemporal,
+        string $periodoYyyymm,
+        int $empresaId = 1,
+    ): array {
+        if (! preg_match('/^\d{4}-\d{2}$/', $periodoYyyymm)) {
+            throw new DomainException('PERIODO_INVALIDO: usar formato YYYY-MM.');
+        }
+
+        $rows = $this->leerArchivo($pathTemporal);
+        if (empty($rows)) {
+            throw new DomainException('FORMATO_INVALIDO: archivo vacío.');
+        }
+
+        $headerRaw = array_shift($rows);
+        $headerMap = $this->mapearHeader($headerRaw);
+
+        $faltantes = [];
+        foreach (self::HEADERS_OBLIGATORIOS as $col) {
+            if (! isset($headerMap[$col])) $faltantes[] = $col;
+        }
+        if (! empty($faltantes)) {
+            throw new DomainException(
+                'HEADERS_FALTANTES: faltan columnas obligatorias: '.implode(', ', $faltantes)
+            );
+        }
+
+        // Index AFIP rows por clave.
+        $afipPorClave = [];
+        foreach ($rows as $idx => $r) {
+            if (! $this->filaTieneDatos($r)) continue;
+            $tipoCod = (int) $this->parsearInt($this->get($r, $headerMap, 'tipo de comprobante'));
+            $pvNum   = (int) $this->parsearInt($this->get($r, $headerMap, 'punto de venta'));
+            $numero  = (int) $this->parsearInt($this->get($r, $headerMap, 'numero desde'));
+            if (! $tipoCod || ! $pvNum || ! $numero) continue;
+            $clave = "{$tipoCod}|{$pvNum}|{$numero}";
+
+            $fechaEmision = (string) $this->parsearFecha(
+                $this->get($r, $headerMap, 'fecha de emision'), 'Fecha de Emisión',
+            );
+            $impTotal = $this->parsearFloat($this->get($r, $headerMap, 'imp. total'));
+            $docTipo  = (int) $this->parsearInt($this->get($r, $headerMap, 'tipo doc. receptor'));
+            $docNro   = trim((string) $this->get($r, $headerMap, 'nro. doc. receptor'));
+            $razon    = trim((string) $this->get($r, $headerMap, 'denominacion receptor'));
+            $cae      = trim((string) $this->get($r, $headerMap, 'cod. autorizacion')) ?: null;
+
+            $afipPorClave[$clave] = [
+                'tipo_comprobante_cod' => $tipoCod,
+                'punto_venta_numero' => $pvNum,
+                'numero' => $numero,
+                'fecha_emision' => $fechaEmision,
+                'doc_tipo' => $docTipo,
+                'doc_nro' => $docNro,
+                'razon_social' => $razon,
+                'imp_total' => $impTotal,
+                'cae' => $cae,
+                'fila_origen' => $idx + 2,
+            ];
+        }
+
+        // Sistema: facturas del período por mes de fecha_emision.
+        $sistema = DB::table('erp_facturas_venta as fv')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
+            ->join('erp_puntos_venta as pv', 'pv.id', '=', 'fv.punto_venta_id')
+            ->leftJoin('erp_auxiliares as aux', 'aux.id', '=', 'fv.auxiliar_id')
+            ->where('fv.empresa_id', $empresaId)
+            ->whereNull('fv.deleted_at')
+            ->where(DB::raw("DATE_FORMAT(fv.fecha_emision, '%Y-%m')"), $periodoYyyymm)
+            ->get([
+                'fv.id', 'fv.tipo_comprobante_id', 'fv.numero', 'fv.fecha_emision',
+                'fv.imp_total', 'fv.cae', 'fv.estado', 'fv.origen',
+                'tc.id as tc_id', 'pv.numero as pv_numero',
+                'aux.nombre as cliente_nombre', 'aux.cuit as cliente_cuit',
+            ]);
+
+        $sistemaPorClave = [];
+        foreach ($sistema as $row) {
+            $clave = "{$row->tc_id}|{$row->pv_numero}|{$row->numero}";
+            $sistemaPorClave[$clave] = $row;
+        }
+
+        $soloAfip = [];
+        $soloSistema = [];
+        $coincidenConDiff = [];
+        $coinciden = 0;
+
+        $clavesUnion = array_unique(array_merge(
+            array_keys($afipPorClave), array_keys($sistemaPorClave),
+        ));
+        foreach ($clavesUnion as $clave) {
+            $a = $afipPorClave[$clave] ?? null;
+            $s = $sistemaPorClave[$clave] ?? null;
+            if ($a && ! $s) {
+                $soloAfip[] = $a;
+            } elseif ($s && ! $a) {
+                $soloSistema[] = [
+                    'factura_id' => $s->id,
+                    'tipo_comprobante_id' => $s->tipo_comprobante_id,
+                    'punto_venta_numero' => $s->pv_numero,
+                    'numero' => $s->numero,
+                    'fecha_emision' => (string) $s->fecha_emision,
+                    'imp_total' => (float) $s->imp_total,
+                    'cae' => $s->cae,
+                    'estado' => $s->estado,
+                    'origen' => $s->origen,
+                    'cliente_nombre' => $s->cliente_nombre,
+                    'cliente_cuit' => $s->cliente_cuit,
+                ];
+            } else {
+                // Ambos lados. Comparar imp_total con tolerancia $1.
+                $diff = abs((float) $s->imp_total - (float) $a['imp_total']);
+                if ($diff >= 1.0) {
+                    $coincidenConDiff[] = [
+                        'factura_id' => $s->id,
+                        'tipo_comprobante_id' => $s->tipo_comprobante_id,
+                        'punto_venta_numero' => $s->pv_numero,
+                        'numero' => $s->numero,
+                        'sistema' => [
+                            'fecha_emision' => (string) $s->fecha_emision,
+                            'imp_total' => (float) $s->imp_total,
+                            'cae' => $s->cae,
+                        ],
+                        'afip' => [
+                            'fecha_emision' => $a['fecha_emision'],
+                            'imp_total' => $a['imp_total'],
+                            'cae' => $a['cae'],
+                        ],
+                        'diff' => round($diff, 2),
+                    ];
+                } else {
+                    $coinciden++;
+                }
+            }
+        }
+
+        return [
+            'periodo' => $periodoYyyymm,
+            'coinciden' => $coinciden,
+            'solo_sistema' => $soloSistema,
+            'solo_afip' => $soloAfip,
+            'coinciden_con_diff' => $coincidenConDiff,
+        ];
+    }
+
+    /**
+     * v1.30 — Importa solo las facturas faltantes (las "solo en AFIP") detectadas
+     * por el modo Control. Re-parsea el archivo y filtra por las claves indicadas.
+     *
+     * @param  list<array{tipo:int,pv:int,nro:int}>  $claves
+     */
+    public function importarFaltantesDesdeAfip(
+        string $pathTemporal,
+        string $nombreArchivo,
+        array $claves,
+        int $periodoImputacionId,
+        User $usuario,
+        int $empresaId = 1,
+    ): array {
+        if (empty($claves)) {
+            throw new DomainException('SIN_CLAVES: no se indicaron facturas a importar.');
+        }
+
+        $periodo = DB::table('erp_periodos')->where('id', $periodoImputacionId)->first();
+        if (! $periodo) throw new DomainException('PERIODO_NO_ENCONTRADO');
+        if (in_array($periodo->estado, ['CERRADO', 'BLOQUEADO'], true)) {
+            throw new DomainException('PERIODO_CERRADO: reabrilo desde Contabilidad → Períodos.');
+        }
+
+        $clavesSet = [];
+        foreach ($claves as $k) {
+            $tipo = (int) ($k['tipo'] ?? 0);
+            $pv = (int) ($k['pv'] ?? 0);
+            $nro = (int) ($k['nro'] ?? 0);
+            if ($tipo && $pv && $nro) {
+                $clavesSet["{$tipo}|{$pv}|{$nro}"] = true;
+            }
+        }
+        if (empty($clavesSet)) {
+            throw new DomainException('SIN_CLAVES: ninguna clave válida.');
+        }
+
+        $hash = hash_file('sha256', $pathTemporal);
+        $rows = $this->leerArchivo($pathTemporal);
+        $headerRaw = array_shift($rows);
+        $headerMap = $this->mapearHeader($headerRaw);
+
+        // Reutiliza el patrón de confirmar() pero filtrando filas.
+        $import = LibroIvaVentasImport::create([
+            'empresa_id' => $empresaId,
+            'archivo_nombre' => $nombreArchivo.' (control: importar faltantes)',
+            'archivo_hash' => $hash.'-control-'.now()->format('YmdHis'),
+            'encoding_detectado' => $this->lastEncoding,
+            'periodo_afip' => $this->detectarPeriodoNombre($nombreArchivo),
+            'periodo_imputacion_id' => $periodoImputacionId,
+            'importado_por' => $usuario->id,
+            'importado_at' => now(),
+            'estado' => LibroIvaVentasImport::ESTADO_PROCESANDO,
+        ]);
+
+        $rutaStorage = sprintf('erp/libro_iva_ventas_import/%d/%d_%s',
+            $empresaId, $import->id, basename($nombreArchivo));
+        Storage::disk('local')->put($rutaStorage, file_get_contents($pathTemporal));
+
+        $errores = []; $warnings = []; $clientesNoMapeados = [];
+        $ok = 0; $skipped = 0; $clientesCreados = 0; $duplicados = 0;
+
+        DB::beginTransaction();
+        try {
+            foreach ($rows as $idx => $rowRaw) {
+                $rowNum = $idx + 2;
+                if (! $this->filaTieneDatos($rowRaw)) { $skipped++; continue; }
+
+                $tipoCod = (int) $this->parsearInt($this->get($rowRaw, $headerMap, 'tipo de comprobante'));
+                $pvNum   = (int) $this->parsearInt($this->get($rowRaw, $headerMap, 'punto de venta'));
+                $numero  = (int) $this->parsearInt($this->get($rowRaw, $headerMap, 'numero desde'));
+                $clave = "{$tipoCod}|{$pvNum}|{$numero}";
+                if (! isset($clavesSet[$clave])) { $skipped++; continue; }
+
+                try {
+                    $r = $this->parsearFila($rowRaw, $headerMap, $empresaId, $periodo, $import->id, $usuario);
+                    if (! empty($r['duplicado'])) {
+                        $duplicados++;
+                        $warnings[] = ['row' => $rowNum, 'motivo' => $r['warning']];
+                        continue;
+                    }
+                    if ($r['cliente_no_mapeado']) {
+                        $clientesNoMapeados[] = ['row' => $rowNum, 'valor' => $r['cliente_no_mapeado']];
+                    }
+                    if ($r['cliente_creado']) $clientesCreados++;
+                    if (! empty($r['warning'])) {
+                        $warnings[] = ['row' => $rowNum, 'motivo' => $r['warning']];
+                    }
+                    $ok++;
+                } catch (\Throwable $e) {
+                    $errores[] = ['row' => $rowNum, 'motivo' => $e->getMessage()];
+                }
+            }
+
+            if (count($errores) > 0) {
+                DB::rollBack();
+            } else {
+                DB::commit();
+            }
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            throw $e;
+        }
+
+        $estado = count($errores) > 0
+            ? LibroIvaVentasImport::ESTADO_ERROR_TOTAL
+            : (count($warnings) > 0
+                ? LibroIvaVentasImport::ESTADO_OK_CON_WARNINGS
+                : LibroIvaVentasImport::ESTADO_COMPLETO);
+
+        $import->update([
+            'filas_totales' => count($errores) > 0 ? 0 : $ok,
+            'filas_ok' => count($errores) > 0 ? 0 : $ok,
+            'filas_skipped' => $skipped,
+            'filas_error' => count($errores),
+            'warnings_count' => count($warnings),
+            'errores_detalle' => $errores,
+            'warnings_detalle' => $warnings,
+            'clientes_no_mapeados' => count($errores) > 0 ? [] : $clientesNoMapeados,
+            'clientes_creados' => count($errores) > 0 ? 0 : $clientesCreados,
+            'estado' => $estado,
+        ]);
+
+        $this->audit->logEvento(
+            accion: 'IMPORT_LIBRO_IVA_VENTAS_CONTROL',
+            modulo: 'ventas',
+            descripcion: sprintf(
+                'Import faltantes via Control #%d — %d ok, %d errores, %d claves solicitadas',
+                $import->id, $ok, count($errores), count($clavesSet),
+            ),
+            empresaId: $empresaId,
+        );
+
+        return [
+            'import_id' => $import->id,
+            'estado' => $estado,
+            'stats' => [
+                'totales' => count($errores) > 0 ? 0 : $ok,
+                'skipped' => $skipped,
+                'duplicados' => $duplicados,
+                'errores' => count($errores),
+                'warnings' => count($warnings),
+                'clientes_creados' => count($errores) > 0 ? 0 : $clientesCreados,
+                'clientes_no_mapeados' => count($errores) > 0 ? 0 : count($clientesNoMapeados),
+                'claves_solicitadas' => count($clavesSet),
+            ],
+            'errores' => $errores,
+            'warnings' => $warnings,
+            'clientes_no_mapeados' => count($errores) > 0 ? [] : $clientesNoMapeados,
+        ];
+    }
+
+    /**
      * Procesa una fila del CSV. Inserta factura + genera asiento.
      */
     private function parsearFila(

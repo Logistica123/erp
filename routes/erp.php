@@ -409,6 +409,11 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.livv.preview');
         Route::post('/libro-iva-ventas/import/confirmar', [LibroIvaVentasImportController::class, 'confirmar'])
             ->name('erp.livv.confirmar');
+        // v1.30 — modo "Control": comparar archivo AFIP vs sistema (no inserta).
+        Route::post('/libro-iva-ventas/import/control', [LibroIvaVentasImportController::class, 'controlar'])
+            ->name('erp.livv.control');
+        Route::post('/libro-iva-ventas/import/control/importar-faltantes', [LibroIvaVentasImportController::class, 'importarFaltantes'])
+            ->name('erp.livv.control.importar-faltantes');
         Route::get('/libro-iva-ventas/imports', [LibroIvaVentasImportController::class, 'imports'])
             ->name('erp.livv.imports');
         Route::get('/libro-iva-ventas/imports/{id}/errores.csv', [LibroIvaVentasImportController::class, 'descargarErrores'])

@@ -67,6 +67,60 @@ class LibroIvaVentasImportController
         }
     }
 
+    /**
+     * v1.30 — Modo "Control": compara archivo AFIP "Mis Comprobantes" contra
+     * lo cargado en el ERP, sin insertar. Devuelve 4 buckets para que el
+     * operador resuelva manualmente.
+     */
+    public function controlar(Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'ventas.import.control');
+        $data = $request->validate([
+            'archivo' => ['required', 'file', 'max:51200'],
+            'periodo' => ['required', 'string', 'regex:/^\d{4}-\d{2}$/'],
+        ]);
+        try {
+            $r = $this->svc->controlar(
+                $data['archivo']->getRealPath(),
+                (string) $data['periodo'],
+                (int) ($request->header('X-Empresa-Id') ?: 1),
+            );
+            return response()->json(['ok' => true, 'data' => $r]);
+        } catch (DomainException $e) {
+            return $this->errorDomain($e);
+        }
+    }
+
+    /**
+     * v1.30 — Importa las facturas faltantes ("solo en AFIP") detectadas por
+     * controlar(). El frontend re-envía el archivo + lista de claves.
+     */
+    public function importarFaltantes(Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'ventas.libro_iva.importar');
+        $data = $request->validate([
+            'archivo' => ['required', 'file', 'max:51200'],
+            'periodo_imputacion_id' => ['required', 'integer', 'exists:erp_periodos,id'],
+            'claves' => ['required', 'array', 'min:1', 'max:1000'],
+            'claves.*.tipo' => ['required', 'integer', 'min:1'],
+            'claves.*.pv' => ['required', 'integer', 'min:1'],
+            'claves.*.nro' => ['required', 'integer', 'min:1'],
+        ]);
+        try {
+            $r = $this->svc->importarFaltantesDesdeAfip(
+                $data['archivo']->getRealPath(),
+                $data['archivo']->getClientOriginalName(),
+                $data['claves'],
+                (int) $data['periodo_imputacion_id'],
+                $request->user(),
+                (int) ($request->header('X-Empresa-Id') ?: 1),
+            );
+            return response()->json(['ok' => true, 'data' => $r], 201);
+        } catch (DomainException $e) {
+            return $this->errorDomain($e);
+        }
+    }
+
     public function imports(Request $request): JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);

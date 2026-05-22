@@ -60,6 +60,7 @@ type ConfirmResp = {
     duplicados?: number;
     errores: number; warnings?: number;
     clientes_creados: number; clientes_no_mapeados: number;
+    claves_solicitadas?: number; // v1.30 control
   };
   errores: Array<{
     row?: number; fila?: number;
@@ -67,6 +68,32 @@ type ConfirmResp = {
   }>;
   warnings?: Array<{ row?: number; motivo?: string }>;
   clientes_no_mapeados: Array<{ valor: string; row?: number }>;
+};
+
+// v1.30 — respuesta del modo Control.
+type ControlResp = {
+  periodo: string;
+  coinciden: number;
+  solo_sistema: Array<{
+    factura_id: number; tipo_comprobante_id: number;
+    punto_venta_numero: number; numero: number;
+    fecha_emision: string; imp_total: number;
+    cae: string | null; estado: string; origen: string;
+    cliente_nombre: string | null; cliente_cuit: string | null;
+  }>;
+  solo_afip: Array<{
+    tipo_comprobante_cod: number; punto_venta_numero: number; numero: number;
+    fecha_emision: string; doc_tipo: number; doc_nro: string;
+    razon_social: string; imp_total: number; cae: string | null;
+    fila_origen: number;
+  }>;
+  coinciden_con_diff: Array<{
+    factura_id: number; tipo_comprobante_id: number;
+    punto_venta_numero: number; numero: number;
+    sistema: { fecha_emision: string; imp_total: number; cae: string | null };
+    afip: { fecha_emision: string; imp_total: number; cae: string | null };
+    diff: number;
+  }>;
 };
 
 const MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -283,10 +310,15 @@ function BorrarImportModal({ imp, onClose }: { imp: Import; onClose: () => void 
 
 function ImportWizardModal({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [modo, setModo] = useState<'introducir' | 'control'>('introducir'); // v1.30
   const [archivo, setArchivo] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewResp | null>(null);
   const [periodoId, setPeriodoId] = useState('');
   const [resultado, setResultado] = useState<ConfirmResp | null>(null);
+  // v1.30 — modo control
+  const [controlPeriodo, setControlPeriodo] = useState(''); // YYYY-MM
+  const [controlResp, setControlResp] = useState<ControlResp | null>(null);
+  const [clavesAImportar, setClavesAImportar] = useState<Set<string>>(new Set());
 
   const toast = useToast();
   const invalidate = useInvalidate(['libro-iva-ventas-imports']);
@@ -323,6 +355,25 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
     }
   );
 
+  // v1.30 — modo Control: compara archivo AFIP vs sistema.
+  const controlMut = useApiMutation<ControlResp, FormData>(
+    (fd) => api.post('/api/erp/libro-iva-ventas/import/control', fd),
+    {
+      onSuccess: (r) => {
+        setControlResp(r);
+        // Auto-preselecciono todas las "solo en AFIP" (caso típico: importar todo).
+        const claves = new Set(
+          r.solo_afip.map((f) => `${f.tipo_comprobante_cod}|${f.punto_venta_numero}|${f.numero}`),
+        );
+        setClavesAImportar(claves);
+        const abierto = periodos?.find((p) => p.estado === 'ABIERTO');
+        if (abierto) setPeriodoId(String(abierto.id));
+        setStep(2);
+      },
+      onError: (e) => toast.error('Error en modo Control', errorMessage(e)),
+    },
+  );
+
   const confirmMut = useApiMutation<ConfirmResp, FormData>(
     (fd) => api.post('/api/erp/libro-iva-ventas/import/confirmar', fd),
     {
@@ -344,21 +395,73 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
     }
   );
 
+  // v1.30 — importar faltantes del modo Control.
+  const importarFaltantesMut = useApiMutation<ConfirmResp, FormData>(
+    (fd) => api.post('/api/erp/libro-iva-ventas/import/control/importar-faltantes', fd),
+    {
+      onSuccess: (r) => {
+        setResultado(r);
+        setStep(3);
+        invalidate();
+        if (r.estado === 'ERROR_TOTAL' || r.stats.errores > 0) {
+          toast.error('Import faltantes rechazado',
+            `${r.stats.errores} errores. Nada se importó (TODO-O-NADA).`);
+        } else {
+          toast.success('Importadas las faltantes',
+            `${r.stats.totales} facturas importadas (de ${r.stats.claves_solicitadas} pedidas)`);
+        }
+      },
+      onError: (e) => toast.error('Error al importar faltantes', (e as ApiError).message),
+    },
+  );
+
   const submitPreview = () => {
     if (!archivo) return;
+    if (modo === 'control') {
+      if (!controlPeriodo.match(/^\d{4}-\d{2}$/)) {
+        toast.error('Período inválido', 'Usá formato YYYY-MM (ej: 2026-04).');
+        return;
+      }
+      const fd = new FormData();
+      fd.append('archivo', archivo);
+      fd.append('periodo', controlPeriodo);
+      controlMut.mutate(fd);
+      return;
+    }
     const fd = new FormData();
     fd.append('archivo', archivo);
     previewMut.mutate(fd);
   };
   const submitConfirmar = () => {
     if (!archivo || !periodoId) return;
+    if (modo === 'control') {
+      if (clavesAImportar.size === 0) {
+        toast.error('Sin selección', 'Marcá al menos una factura para importar.');
+        return;
+      }
+      const fd = new FormData();
+      fd.append('archivo', archivo);
+      fd.append('periodo_imputacion_id', periodoId);
+      Array.from(clavesAImportar).forEach((clave, i) => {
+        const [tipo, pv, nro] = clave.split('|');
+        fd.append(`claves[${i}][tipo]`, tipo);
+        fd.append(`claves[${i}][pv]`, pv);
+        fd.append(`claves[${i}][nro]`, nro);
+      });
+      importarFaltantesMut.mutate(fd);
+      return;
+    }
     const fd = new FormData();
     fd.append('archivo', archivo);
     fd.append('periodo_imputacion_id', periodoId);
     confirmMut.mutate(fd);
   };
 
-  const titulo = step === 1 ? 'Subir archivo' : step === 2 ? 'Revisar y confirmar' : 'Resultado';
+  const titulo = step === 1
+    ? (modo === 'control' ? 'Control vs AFIP — subir archivo' : 'Subir archivo')
+    : step === 2
+      ? (modo === 'control' ? 'Reporte de control' : 'Revisar y confirmar')
+      : 'Resultado';
 
   return (
     <Modal open onClose={onClose} size="lg"
@@ -390,11 +493,29 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
           </>
         )
       }>
-      {step === 1 && <Step1 archivo={archivo} setArchivo={setArchivo} error={previewMut.error} />}
-      {step === 2 && preview && (
+      {step === 1 && (
+        <Step1
+          archivo={archivo} setArchivo={setArchivo}
+          modo={modo} setModo={setModo}
+          controlPeriodo={controlPeriodo} setControlPeriodo={setControlPeriodo}
+          error={previewMut.error ?? controlMut.error}
+        />
+      )}
+      {step === 2 && modo === 'introducir' && preview && (
         <Step2 preview={preview} periodos={periodos ?? []}
           periodoId={periodoId} setPeriodoId={setPeriodoId}
           periodoCerrado={periodoCerrado} error={confirmMut.error} />
+      )}
+      {step === 2 && modo === 'control' && controlResp && (
+        <Step2Control
+          control={controlResp}
+          periodos={periodos ?? []}
+          periodoId={periodoId} setPeriodoId={setPeriodoId}
+          periodoCerrado={periodoCerrado}
+          clavesAImportar={clavesAImportar}
+          setClavesAImportar={setClavesAImportar}
+          error={importarFaltantesMut.error}
+        />
       )}
       {step === 3 && resultado && (
         <Step3 resultado={resultado} encodingDetectado={preview?.encoding_detectado ?? null} />
@@ -403,18 +524,71 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Step1({ archivo, setArchivo, error }: {
+function Step1({
+  archivo, setArchivo, modo, setModo,
+  controlPeriodo, setControlPeriodo, error,
+}: {
   archivo: File | null;
   setArchivo: (f: File | null) => void;
+  modo: 'introducir' | 'control';
+  setModo: (m: 'introducir' | 'control') => void;
+  controlPeriodo: string;
+  setControlPeriodo: (s: string) => void;
   error: ApiError | null;
 }) {
   return (
     <div className="space-y-3">
-      <div className="text-[12px] text-ink-muted">
-        Subí el CSV/Excel de AFIP "Mis Comprobantes Emitidos". El contador puede sumar
-        3 columnas extras opcionales: <code>COD JURISD</code>, <code>COMENTARIO</code>,{' '}
-        <code>PERIODO TRABAJADO</code>. Hasta 50 MB.
+      {/* v1.30 — selector de tipo de import */}
+      <div className="border border-line rounded-md p-3 space-y-2 bg-surface-row">
+        <div className="text-[12px] font-semibold text-navy-800">Tipo de import</div>
+        <label className="flex items-start gap-2 text-[12px] cursor-pointer">
+          <input type="radio" checked={modo === 'introducir'}
+            onChange={() => setModo('introducir')} className="mt-0.5" />
+          <div>
+            <strong>Introducir datos</strong>
+            <div className="text-[11px] text-ink-muted">
+              Subir facturas que faltan en el sistema (típico: aún no se emiten por WSFE).
+            </div>
+          </div>
+        </label>
+        <label className="flex items-start gap-2 text-[12px] cursor-pointer">
+          <input type="radio" checked={modo === 'control'}
+            onChange={() => setModo('control')} className="mt-0.5" />
+          <div>
+            <strong>Control</strong>
+            <div className="text-[11px] text-ink-muted">
+              Comparar el archivo de AFIP "Mis Comprobantes" contra lo cargado en el ERP.
+              Detecta facturas faltantes en sistema (oportunidad) o sobrantes (alerta grave).
+            </div>
+          </div>
+        </label>
       </div>
+
+      <div className="text-[12px] text-ink-muted">
+        {modo === 'introducir' ? (
+          <>Subí el CSV/Excel de AFIP "Mis Comprobantes Emitidos". El contador puede sumar
+          3 columnas extras opcionales: <code>COD JURISD</code>, <code>COMENTARIO</code>,{' '}
+          <code>PERIODO TRABAJADO</code>. Hasta 50 MB.</>
+        ) : (
+          <>Subí el archivo de AFIP "Mis Comprobantes Emitidos" del período que querés controlar.
+          El sistema lo compara contra <code>erp_facturas_venta</code> y reporta diferencias.</>
+        )}
+      </div>
+
+      {modo === 'control' && (
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">
+            Período a controlar (YYYY-MM) <span className="text-danger">*</span>
+          </label>
+          <input type="text" value={controlPeriodo} onChange={(e) => setControlPeriodo(e.target.value)}
+            placeholder="2026-04" maxLength={7}
+            className="w-32 px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure font-mono" />
+          <div className="text-[10.5px] text-ink-muted mt-0.5">
+            El reporte va a comparar las facturas del ERP cuyo <code>fecha_emision</code> caiga en ese mes.
+          </div>
+        </div>
+      )}
+
       <div className="border-2 border-dashed border-line rounded-lg p-6 text-center space-y-2 bg-surface-row">
         <FileSpreadsheet className="w-8 h-8 mx-auto text-ink-muted" />
         <input type="file"
@@ -428,6 +602,221 @@ function Step1({ archivo, setArchivo, error }: {
         )}
       </div>
       <FormError error={error ? errorMessage(error) : null} />
+    </div>
+  );
+}
+
+// v1.30 — Step 2 del modo "Control": reporte de 4 buckets + selección bulk
+// de "solo en AFIP" para importar.
+function Step2Control({
+  control, periodos, periodoId, setPeriodoId, periodoCerrado,
+  clavesAImportar, setClavesAImportar, error,
+}: {
+  control: ControlResp;
+  periodos: Periodo[];
+  periodoId: string;
+  setPeriodoId: (s: string) => void;
+  periodoCerrado: boolean;
+  clavesAImportar: Set<string>;
+  setClavesAImportar: (s: Set<string>) => void;
+  error: ApiError | null;
+}) {
+  const opciones = periodos.map((p) => ({
+    value: String(p.id),
+    label: `${MESES[p.mes]} ${p.anio} (${p.estado})`,
+  }));
+  const total = control.coinciden + control.solo_sistema.length
+    + control.solo_afip.length + control.coinciden_con_diff.length;
+
+  const toggleClave = (clave: string) => {
+    const next = new Set(clavesAImportar);
+    if (next.has(clave)) next.delete(clave); else next.add(clave);
+    setClavesAImportar(next);
+  };
+  const toggleTodas = () => {
+    if (clavesAImportar.size === control.solo_afip.length) {
+      setClavesAImportar(new Set());
+    } else {
+      setClavesAImportar(new Set(
+        control.solo_afip.map((f) => `${f.tipo_comprobante_cod}|${f.punto_venta_numero}|${f.numero}`),
+      ));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="text-[12px]">
+        Control de facturas vs AFIP — período <strong>{control.periodo}</strong>{' '}
+        ({total} facturas comparadas en total)
+      </div>
+
+      <div className="grid grid-cols-4 gap-2">
+        <BucketCard label="Coinciden" value={control.coinciden}
+          variant="success" icon="✓" />
+        <BucketCard label="Solo en sistema" value={control.solo_sistema.length}
+          variant="danger" icon="⚠" hint="alerta grave" />
+        <BucketCard label="Solo en AFIP" value={control.solo_afip.length}
+          variant="azure" icon="💡" hint="oportunidad" />
+        <BucketCard label="Con diferencias" value={control.coinciden_con_diff.length}
+          variant="warning" icon="⚠" hint="importes" />
+      </div>
+
+      {/* Solo en sistema — alerta grave */}
+      {control.solo_sistema.length > 0 && (
+        <div className="border border-danger/40 bg-danger-bg/20 rounded-md p-3 space-y-2">
+          <div className="flex items-center gap-1.5 text-[12px] font-semibold text-danger">
+            <AlertTriangle className="w-4 h-4" /> Solo en sistema ({control.solo_sistema.length}) — ALERTA GRAVE
+          </div>
+          <div className="text-[11px] text-ink-muted">
+            Estas facturas existen en el ERP pero <strong>NO en AFIP</strong>. Investigá:
+            error de carga, factura fantasma, duplicado, etc. Para eliminarlas usá el botón Trash
+            de Facturación (requiere super_admin).
+          </div>
+          <div className="max-h-40 overflow-auto border border-danger/20 rounded bg-white">
+            <table className="w-full text-[11px]">
+              <thead className="bg-danger-bg/30 sticky top-0">
+                <tr><th className="px-2 py-1 text-left">Tipo</th><th className="text-left">PV-Nro</th>
+                  <th className="text-left">Fecha</th><th className="text-right">Total</th>
+                  <th className="text-left">Cliente</th><th className="text-left">Origen</th></tr>
+              </thead>
+              <tbody>
+                {control.solo_sistema.map((f) => (
+                  <tr key={f.factura_id} className="border-t border-danger/10">
+                    <td className="px-2 py-0.5 font-mono">{f.tipo_comprobante_id}</td>
+                    <td className="font-mono">{String(f.punto_venta_numero).padStart(4, '0')}-{String(f.numero).padStart(8, '0')}</td>
+                    <td>{f.fecha_emision}</td>
+                    <td className="text-right tabular">${f.imp_total.toLocaleString('es-AR')}</td>
+                    <td>{f.cliente_nombre ?? '—'}</td>
+                    <td className="text-[10px]">{f.origen}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Coinciden con diff */}
+      {control.coinciden_con_diff.length > 0 && (
+        <div className="border border-warning/40 bg-warning-bg/20 rounded-md p-3 space-y-2">
+          <div className="text-[12px] font-semibold text-warning">
+            Coinciden con diferencias de importe ({control.coinciden_con_diff.length})
+          </div>
+          <div className="max-h-32 overflow-auto border border-warning/20 rounded bg-white">
+            <table className="w-full text-[11px]">
+              <thead className="bg-warning-bg/30"><tr>
+                <th className="px-2 py-1 text-left">PV-Nro</th>
+                <th className="text-right">Sistema</th>
+                <th className="text-right">AFIP</th>
+                <th className="text-right">Diff</th>
+              </tr></thead>
+              <tbody>
+                {control.coinciden_con_diff.map((f) => (
+                  <tr key={f.factura_id} className="border-t border-warning/10">
+                    <td className="px-2 py-0.5 font-mono">
+                      {f.tipo_comprobante_id} · {String(f.punto_venta_numero).padStart(4, '0')}-{String(f.numero).padStart(8, '0')}
+                    </td>
+                    <td className="text-right tabular">${f.sistema.imp_total.toLocaleString('es-AR')}</td>
+                    <td className="text-right tabular">${f.afip.imp_total.toLocaleString('es-AR')}</td>
+                    <td className="text-right tabular text-warning font-semibold">${f.diff.toLocaleString('es-AR')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Solo en AFIP — importables */}
+      {control.solo_afip.length > 0 && (
+        <div className="border border-azure/40 bg-azure-soft/20 rounded-md p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[12px] font-semibold text-azure">
+              📥 Solo en AFIP ({control.solo_afip.length}) — importables
+            </div>
+            <Button variant="ghost" size="sm" onClick={toggleTodas}>
+              {clavesAImportar.size === control.solo_afip.length ? 'Deseleccionar todas' : 'Seleccionar todas'}
+            </Button>
+          </div>
+          <div className="max-h-60 overflow-auto border border-azure/20 rounded bg-white">
+            <table className="w-full text-[11px]">
+              <thead className="bg-azure-soft/30 sticky top-0"><tr>
+                <th className="px-2 py-1 w-8"></th>
+                <th className="text-left">Tipo</th>
+                <th className="text-left">PV-Nro</th>
+                <th className="text-left">Fecha</th>
+                <th className="text-right">Total</th>
+                <th className="text-left">CUIT</th>
+                <th className="text-left">Razón social</th>
+              </tr></thead>
+              <tbody>
+                {control.solo_afip.map((f) => {
+                  const clave = `${f.tipo_comprobante_cod}|${f.punto_venta_numero}|${f.numero}`;
+                  const sel = clavesAImportar.has(clave);
+                  return (
+                    <tr key={clave} className={`border-t border-azure/10 cursor-pointer ${sel ? 'bg-azure-soft/30' : 'hover:bg-azure-soft/10'}`}
+                      onClick={() => toggleClave(clave)}>
+                      <td className="px-2 py-0.5"><input type="checkbox" checked={sel} readOnly /></td>
+                      <td className="font-mono">{f.tipo_comprobante_cod}</td>
+                      <td className="font-mono">{String(f.punto_venta_numero).padStart(4, '0')}-{String(f.numero).padStart(8, '0')}</td>
+                      <td>{f.fecha_emision}</td>
+                      <td className="text-right tabular">${f.imp_total.toLocaleString('es-AR')}</td>
+                      <td className="font-mono">{f.doc_nro}</td>
+                      <td>{f.razon_social}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pt-2 border-t border-azure/20 space-y-2">
+            <SelectField label="Período de imputación contable (para las facturas a importar)"
+              required value={periodoId} placeholder="Elegí un período"
+              onChange={(e) => setPeriodoId(e.target.value)}
+              options={opciones}
+              containerClassName="w-full" />
+            {periodoCerrado && (
+              <div className="text-[11px] text-danger">
+                Período cerrado — reabrilo desde Contabilidad → Períodos antes de importar.
+              </div>
+            )}
+            <div className="text-[11px] text-ink-muted">
+              {clavesAImportar.size} de {control.solo_afip.length} seleccionadas para importar.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {control.solo_afip.length === 0
+        && control.solo_sistema.length === 0
+        && control.coinciden_con_diff.length === 0 && (
+        <div className="border border-success/30 bg-success-bg/20 rounded p-3 text-[12px] text-success">
+          ✓ Todo coincide perfecto entre el ERP y AFIP para el período {control.periodo}.
+        </div>
+      )}
+
+      <FormError error={error ? errorMessage(error) : null} />
+    </div>
+  );
+}
+
+function BucketCard({ label, value, variant, icon, hint }: {
+  label: string; value: number;
+  variant: 'success' | 'danger' | 'warning' | 'azure';
+  icon: string; hint?: string;
+}) {
+  const colors = {
+    success: 'border-success/30 bg-success-bg/20 text-success',
+    danger: 'border-danger/30 bg-danger-bg/20 text-danger',
+    warning: 'border-warning/30 bg-warning-bg/20 text-warning',
+    azure: 'border-azure/30 bg-azure-soft/20 text-azure',
+  };
+  return (
+    <div className={`border rounded p-2 ${colors[variant]}`}>
+      <div className="text-[11px] flex items-center gap-1">{icon} {label}</div>
+      <div className="text-[20px] font-bold tabular">{value}</div>
+      {hint && <div className="text-[10px] opacity-70">{hint}</div>}
     </div>
   );
 }

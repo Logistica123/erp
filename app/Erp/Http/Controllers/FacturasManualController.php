@@ -2,6 +2,7 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Services\PadronService;
 use App\Erp\Services\Pdf\VentaPdfExtractor;
 use App\Erp\Support\AuditLogger;
 use DomainException;
@@ -36,6 +37,7 @@ class FacturasManualController
         private readonly AuditLogger $audit,
         private readonly HttpClient $http,
         private readonly VentaPdfExtractor $pdfExtractor,
+        private readonly PadronService $padron, // v1.28
     ) {}
 
     /**
@@ -327,9 +329,38 @@ class FacturasManualController
             'observaciones' => ['nullable', 'string'],
             'periodo_trabajado_texto' => ['nullable', 'string', 'max:20'],
             'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
+            // v1.28 — override APOC con motivo (sólo si el CUIT no está ACTIVO).
+            'apoc_override_motivo' => ['nullable', 'string', 'min:10', 'max:500'],
         ]);
 
         $empresaId = $this->empresaId($request);
+
+        // v1.28 — validación APOC sobre el CUIT del emisor (proveedor).
+        $apocEstado = null;
+        $apocOverrideAplica = false;
+        try {
+            $cache = $this->padron->consultar($data['cuit_emisor'], $empresaId);
+            $apocEstado = (string) ($cache->estado_cuit ?? '') ?: null;
+        } catch (\Throwable $e) {
+            $apocEstado = null; // WS caído o inválido — no bloquea, queda null.
+        }
+        if ($apocEstado !== null && $apocEstado !== 'ACTIVO') {
+            if (empty($data['apoc_override_motivo'])) {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'APOC_CUIT_NO_ACTIVO',
+                    'message' => "El CUIT {$data['cuit_emisor']} está {$apocEstado} en padrón AFIP. "
+                        . 'Para cargar la factura, mandá apoc_override_motivo (mín 10 chars).',
+                    'apoc_estado' => $apocEstado,
+                ]], 422);
+            }
+            if (! $this->permiso($request, 'compras.facturas.cargar_manual_override_apoc')) {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'NO_AUTORIZADO',
+                    'message' => 'Falta permiso compras.facturas.cargar_manual_override_apoc para hacer override de un CUIT no activo.',
+                ]], 403);
+            }
+            $apocOverrideAplica = true;
+        }
 
         // v1.37 — derivar periodo_id real desde fecha_imputacion.
         // Antes el form pasaba periodo_id elegido por el operador, pero podía
@@ -483,6 +514,11 @@ class FacturasManualController
             'jurisdiccion_codigo' => $data['jurisdiccion_codigo'] ?? null,
             'verificada_arca' => 0,
             'created_by_user_id' => $request->user()->id,
+            // v1.28 — tracking APOC al momento de cargar.
+            'apoc_estado_al_cargar' => $apocEstado,
+            'apoc_override' => $apocOverrideAplica ? 1 : 0,
+            'apoc_override_motivo' => $apocOverrideAplica ? ($data['apoc_override_motivo'] ?? null) : null,
+            'apoc_override_por_user_id' => $apocOverrideAplica ? $request->user()->id : null,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

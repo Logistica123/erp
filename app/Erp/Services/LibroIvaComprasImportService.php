@@ -105,6 +105,7 @@ class LibroIvaComprasImportService
         private readonly ContabilizadorFacturas $contabilizador,
         private readonly FacturaCompraService $facturaSvc,
         private readonly AuditLogger $audit,
+        private readonly PadronService $padron, // v1.28
     ) {}
 
     /**
@@ -157,10 +158,31 @@ class LibroIvaComprasImportService
 
         $tomadasSi = 0;
         $tomadasNo = 0;
-        foreach ($rows as $r) {
+        $cuitsPorFilas = []; // v1.28 — para mapear inactivos a filas afectadas.
+        foreach ($rows as $idx => $r) {
             if (! $this->filaTieneDatos($r)) continue;
             $tomado = $this->leerTomado($r, $headerMap);
             $tomado ? $tomadasSi++ : $tomadasNo++;
+            $cuitRaw = preg_replace('/[^0-9]/', '', (string) $this->get($r, $headerMap, 'nro. doc. vendedor'));
+            if (strlen((string) $cuitRaw) === 11) {
+                $cuitsPorFilas[$cuitRaw][] = $idx + 2;
+            }
+        }
+
+        // v1.28 — Consulta APOC bulk de los CUITs únicos del archivo. El
+        // cache PadronCache (TTL 30d) evita martillar el WS en imports
+        // repetidos. Si el WS está caído, ws_caido=true habilita override.
+        $apocResult = empty($obligatoriasFaltantes)
+            ? $this->padron->consultarBulk(array_keys($cuitsPorFilas), $empresaId)
+            : ['total' => 0, 'activos' => [], 'inactivos' => [], 'errores' => [], 'ws_caido' => false];
+        $apocInactivos = [];
+        foreach ($apocResult['inactivos'] as $inact) {
+            $apocInactivos[] = [
+                'cuit' => $inact['cuit'],
+                'estado' => $inact['estado'],
+                'razon_social' => $inact['razon_social'],
+                'filas_afectadas' => $cuitsPorFilas[$inact['cuit']] ?? [],
+            ];
         }
 
         return [
@@ -173,6 +195,14 @@ class LibroIvaComprasImportService
             'periodo_afip' => $this->detectarPeriodoNombre($nombreArchivo),
             'columnas_extras_detectadas' => $extras,
             'columnas_obligatorias_faltantes' => $obligatoriasFaltantes, // v1.30
+            // v1.28 — resultado de consulta APOC bulk.
+            'apoc' => [
+                'total_consultados' => $apocResult['total'],
+                'activos_count' => count($apocResult['activos']),
+                'inactivos' => $apocInactivos,
+                'errores' => $apocResult['errores'],
+                'ws_caido' => $apocResult['ws_caido'],
+            ],
             'import_existente' => null,
         ];
     }
@@ -189,6 +219,7 @@ class LibroIvaComprasImportService
         User $usuario,
         bool $confirmarPeriodoCerrado = false,
         int $empresaId = 1,
+        ?string $apocOverrideMotivo = null, // v1.28 D-28-6
     ): array {
         $hash = hash_file('sha256', $pathTemporal);
         if (LibroIvaComprasImport::where('empresa_id', $empresaId)->where('archivo_hash', $hash)->exists()) {
@@ -259,7 +290,7 @@ class LibroIvaComprasImportService
                 if (! $this->filaTieneDatos($rowRaw)) { $skipped++; continue; }
 
                 try {
-                    $r = $this->parsearFila($rowRaw, $headerMap, $empresaId, $periodo, $import->id, $usuario);
+                    $r = $this->parsearFila($rowRaw, $headerMap, $empresaId, $periodo, $import->id, $usuario, $apocOverrideMotivo);
                     if ($r['cliente_no_mapeado']) {
                         $clientesNoMapeados[] = ['row' => $rowNum, 'valor' => $r['cliente_no_mapeado']];
                     }
@@ -733,6 +764,7 @@ class LibroIvaComprasImportService
      */
     private function parsearFila(
         array $r, array $headerMap, int $empresaId, object $periodo, int $importId, User $usuario,
+        ?string $apocOverrideMotivo = null, // v1.28
     ): array {
         $tomada = $this->leerTomado($r, $headerMap);
 
@@ -766,6 +798,29 @@ class LibroIvaComprasImportService
         $numero = (int) ($this->get($r, $headerMap, 'numero de comprobante') ?: 0);
         $cuit = preg_replace('/[^0-9]/', '', (string) $this->get($r, $headerMap, 'nro. doc. vendedor'));
         $razonSocial = trim((string) $this->get($r, $headerMap, 'denominacion vendedor'));
+
+        // v1.28 — Validación APOC. El cache se llenó en preview() por consultarBulk;
+        // acá leemos del PadronCache (cached) y aplicamos override si vino.
+        $apocEstado = null;
+        $apocOverrideAplica = false;
+        if (strlen((string) $cuit) === 11) {
+            try {
+                $cache = $this->padron->consultar($cuit, $empresaId);
+                $apocEstado = (string) ($cache->estado_cuit ?? '') ?: null;
+            } catch (\Throwable $e) {
+                // Gateway caído / CUIT inválido: dejamos estado=null + warning.
+                $apocEstado = null;
+            }
+            if ($apocEstado !== null && $apocEstado !== 'ACTIVO') {
+                if (! $apocOverrideMotivo) {
+                    throw new DomainException(sprintf(
+                        'APOC_CUIT_NO_ACTIVO: CUIT %s está %s en padrón AFIP. Requiere override con motivo.',
+                        $cuit, $apocEstado,
+                    ));
+                }
+                $apocOverrideAplica = true;
+            }
+        }
 
         // Upsert proveedor (idempotente por CUIT).
         [$proveedorAuxId, $proveedorCreado] = $this->upsertProveedor($empresaId, $cuit, $razonSocial);
@@ -971,6 +1026,11 @@ class LibroIvaComprasImportService
             'fecha_pago' => $fechaPago,
             'import_id' => $importId,
             'created_by_user_id' => $usuario->id,
+            // v1.28 — Tracking APOC al momento de cargar.
+            'apoc_estado_al_cargar' => $apocEstado,
+            'apoc_override' => $apocOverrideAplica ? 1 : 0,
+            'apoc_override_motivo' => $apocOverrideAplica ? $apocOverrideMotivo : null,
+            'apoc_override_por_user_id' => $apocOverrideAplica ? $usuario->id : null,
         ]);
 
         // Asiento solo si tomada=SI.

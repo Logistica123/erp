@@ -49,6 +49,13 @@ type PreviewResp = {
   periodo_afip: string | null;
   columnas_extras_detectadas: string[];
   columnas_obligatorias_faltantes?: string[]; // v1.30
+  apoc?: { // v1.28
+    total_consultados: number;
+    activos_count: number;
+    inactivos: Array<{ cuit: string; estado: string; razon_social: string | null; filas_afectadas: number[] }>;
+    errores: Array<{ cuit: string; motivo: string }>;
+    ws_caido: boolean;
+  };
   import_existente: { id: number; importado_at: string; estado: string } | null;
 };
 
@@ -371,6 +378,8 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
   // v1.19 D-19-3: checkbox de bypass eliminado. Si el período es cerrado,
   // el botón Confirmar queda disabled + mensaje claro.
   const [resultado, setResultado] = useState<ConfirmResp | null>(null);
+  // v1.28 — override APOC con motivo (sólo se envía si hay inactivos).
+  const [apocOverrideMotivo, setApocOverrideMotivo] = useState('');
 
   const toast = useToast();
   const invalidate = useInvalidate(['libro-iva-compras-imports']);
@@ -447,8 +456,16 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
     fd.append('archivo', archivo);
     fd.append('periodo_imputacion_id', periodoId);
     // v1.19: no se envía confirmar_periodo_cerrado — el bypass se eliminó.
+    // v1.28 — Si hay APOC inactivos y el operador escribió motivo, lo enviamos.
+    if (preview?.apoc && preview.apoc.inactivos.length > 0 && apocOverrideMotivo.trim().length >= 10) {
+      fd.append('apoc_override_motivo', apocOverrideMotivo.trim());
+    }
     confirmMut.mutate(fd);
   };
+
+  // v1.28 — bloqueo extra del botón si hay inactivos sin motivo válido.
+  const apocBloquea = (preview?.apoc?.inactivos?.length ?? 0) > 0
+    && apocOverrideMotivo.trim().length < 10;
 
   const titulo = step === 1 ? 'Subir archivo'
     : step === 2 ? 'Revisar y confirmar'
@@ -477,7 +494,8 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
             {step === 2 && (
               <Button variant="primary"
                 disabled={!periodoId || periodoCerrado || confirmMut.isPending
-                  || (preview?.columnas_obligatorias_faltantes?.length ?? 0) > 0}
+                  || (preview?.columnas_obligatorias_faltantes?.length ?? 0) > 0
+                  || apocBloquea}
                 onClick={submitConfirmar}>
                 {confirmMut.isPending ? 'Importando…' : 'Confirmar e importar'}
               </Button>
@@ -494,6 +512,8 @@ function ImportWizardModal({ onClose }: { onClose: () => void }) {
           periodoId={periodoId}
           setPeriodoId={setPeriodoId}
           periodoCerrado={periodoCerrado}
+          apocOverrideMotivo={apocOverrideMotivo}
+          setApocOverrideMotivo={setApocOverrideMotivo}
           error={confirmMut.error}
         />
       )}
@@ -536,13 +556,15 @@ function Step1({ archivo, setArchivo, error }: {
 
 function Step2({
   preview, periodos, periodoId, setPeriodoId,
-  periodoCerrado, error,
+  periodoCerrado, apocOverrideMotivo, setApocOverrideMotivo, error,
 }: {
   preview: PreviewResp;
   periodos: Periodo[];
   periodoId: string;
   setPeriodoId: (s: string) => void;
   periodoCerrado: boolean;
+  apocOverrideMotivo: string;
+  setApocOverrideMotivo: (s: string) => void;
   error: ApiError | null;
 }) {
   const opciones = periodos.map((p) => ({
@@ -608,6 +630,77 @@ function Step2({
       {preview.periodo_afip && (
         <div className="text-[11.5px] text-ink-muted">
           Período AFIP detectado del nombre del archivo: <strong>{preview.periodo_afip}</strong>
+        </div>
+      )}
+
+      {/* v1.28 — Validación APOC AFIP */}
+      {preview.apoc && (
+        <div className="border border-line rounded-md p-3 space-y-2 bg-surface-row">
+          <div className="text-[12px] font-semibold text-navy-800">
+            Validación APOC AFIP
+            <span className="ml-2 text-[10.5px] text-ink-muted">
+              ({preview.apoc.total_consultados} CUITs únicos · cache 30d)
+            </span>
+          </div>
+
+          {preview.apoc.ws_caido && (
+            <div className="border border-danger/40 bg-danger-bg/20 rounded p-2 text-[11.5px] text-danger flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>WS APOC AFIP no responde.</strong> Reintentá más tarde o contactá soporte.
+                Mientras el WS esté caído, se requiere override + motivo para importar.
+              </div>
+            </div>
+          )}
+
+          {preview.apoc.inactivos.length === 0 && !preview.apoc.ws_caido && (
+            <div className="text-[11.5px] text-success flex items-center gap-1">
+              <Check className="w-3.5 h-3.5" />
+              Todos los CUITs están <strong>ACTIVOS</strong> en padrón AFIP.
+            </div>
+          )}
+
+          {preview.apoc.inactivos.length > 0 && (
+            <div className="border border-warning/40 bg-warning-bg/20 rounded p-2 space-y-1.5">
+              <div className="text-[11.5px] font-semibold text-warning flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                {preview.apoc.inactivos.length} CUIT{preview.apoc.inactivos.length === 1 ? '' : 's'} no activo{preview.apoc.inactivos.length === 1 ? '' : 's'} en padrón
+              </div>
+              <div className="max-h-40 overflow-auto border border-warning/20 rounded bg-white">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-warning-bg/30 sticky top-0"><tr>
+                    <th className="px-2 py-1 text-left">CUIT</th>
+                    <th className="text-left">Estado AFIP</th>
+                    <th className="text-left">Razón social</th>
+                    <th className="text-right">Filas afectadas</th>
+                  </tr></thead>
+                  <tbody>
+                    {preview.apoc.inactivos.map((i) => (
+                      <tr key={i.cuit} className="border-t border-warning/10">
+                        <td className="px-2 py-0.5 font-mono">{i.cuit}</td>
+                        <td className="font-semibold text-warning">{i.estado}</td>
+                        <td>{i.razon_social ?? '—'}</td>
+                        <td className="text-right tabular">{i.filas_afectadas.length}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="pt-1">
+                <label className="block text-[11px] text-ink-muted mb-1">
+                  Motivo del override (obligatorio · mín 10 chars) <span className="text-danger">*</span>
+                </label>
+                <textarea rows={2} value={apocOverrideMotivo} onChange={(e) => setApocOverrideMotivo(e.target.value)}
+                  maxLength={500}
+                  placeholder="Ej: el proveedor regularizó posteriormente; comprobante histórico, etc."
+                  className="w-full px-2 py-1 text-[11.5px] border border-warning/40 rounded focus:outline-none focus:border-warning" />
+                <div className="text-[10px] text-ink-muted mt-0.5">
+                  {apocOverrideMotivo.length} / 500 — {apocOverrideMotivo.trim().length < 10 ? `faltan ${10 - apocOverrideMotivo.trim().length}` : '✓'}
+                  {' · '}requiere permiso <code>compras.libro_iva.import_override_apoc</code>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

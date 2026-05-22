@@ -42,6 +42,82 @@ class PadronService
         return $this->refrescar($cuit, $empresaId);
     }
 
+    /**
+     * v1.28 — Consulta APOC en bulk para el wizard del Libro IVA Compras.
+     * Devuelve los estados de todos los CUITs únicos pasados, agrupados por
+     * estado. La consulta es secuencial pero apoyada en el cache de 30 días
+     * (PadronCache), así que en la práctica solo los CUITs nuevos hacen
+     * llamada efectiva al gateway.
+     *
+     * Si el WS APOC falla para un CUIT (gateway down), el cuit cae en
+     * `errores` y se reporta al operador. NO bloquea el batch.
+     *
+     * @param  list<string>  $cuits
+     * @return array{
+     *   total: int,
+     *   consultados_at: string,
+     *   activos: list<string>,
+     *   inactivos: list<array{cuit:string,estado:string,razon_social:?string}>,
+     *   errores: list<array{cuit:string,motivo:string}>,
+     *   ws_caido: bool,
+     * }
+     */
+    public function consultarBulk(array $cuits, int $empresaId = 1): array
+    {
+        $activos = [];
+        $inactivos = [];
+        $errores = [];
+        $procesados = [];
+        $wsCaido = false;
+        $erroresGatewayConsecutivos = 0;
+
+        foreach ($cuits as $cuit) {
+            $norm = preg_replace('/[^0-9]/', '', (string) $cuit);
+            if (strlen($norm) !== 11) {
+                $errores[] = ['cuit' => $cuit, 'motivo' => 'CUIT_INVALIDO'];
+                continue;
+            }
+            if (isset($procesados[$norm])) continue;
+            $procesados[$norm] = true;
+
+            try {
+                $cache = $this->consultar($norm, $empresaId);
+                $erroresGatewayConsecutivos = 0; // resetear al éxito.
+                $estado = (string) ($cache->estado_cuit ?? '');
+                if ($estado === 'ACTIVO') {
+                    $activos[] = $norm;
+                } else {
+                    $inactivos[] = [
+                        'cuit' => $norm,
+                        'estado' => $estado ?: 'DESCONOCIDO',
+                        'razon_social' => $cache->razon_social ?? null,
+                    ];
+                }
+            } catch (DomainException $e) {
+                $msg = $e->getMessage();
+                $errores[] = ['cuit' => $norm, 'motivo' => $msg];
+                if (str_contains($msg, 'PADRON_GATEWAY_ERROR')) {
+                    $erroresGatewayConsecutivos++;
+                    if ($erroresGatewayConsecutivos >= 3) {
+                        // D-28-9: si el WS está caído (3 errores seguidos),
+                        // dejamos de intentar y reportamos.
+                        $wsCaido = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return [
+            'total' => count($procesados),
+            'consultados_at' => now()->toIso8601String(),
+            'activos' => $activos,
+            'inactivos' => $inactivos,
+            'errores' => $errores,
+            'ws_caido' => $wsCaido,
+        ];
+    }
+
     public function refrescar(string $cuit, int $empresaId = 1): PadronCache
     {
         $cuit = preg_replace('/[^0-9]/', '', $cuit);

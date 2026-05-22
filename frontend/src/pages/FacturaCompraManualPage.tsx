@@ -38,6 +38,9 @@ export function FacturaCompraManualPage() {
   // v1.38 M2 — modo "registrar y cargar otro": no navega tras success y
   // preserva CUIT, razón social, fecha emisión, fecha imputación.
   const [cargarOtroMode, setCargarOtroMode] = useState(false);
+  // v1.28 — APOC: estado del CUIT en padrón AFIP + override.
+  const [apocEstado, setApocEstado] = useState<string | null>(null); // null=desconocido
+  const [apocOverrideMotivo, setApocOverrideMotivo] = useState('');
 
   // Catálogos.
   const { data: tipos } = useQuery<{ data: Tipo[] }>({
@@ -156,9 +159,17 @@ export function FacturaCompraManualPage() {
     },
   });
 
+  // v1.28 — consulta APOC AFIP al perder foco del CUIT. Usa el cache de 30d.
+  const apocLookup = useMutation<{ data: { estado_cuit: string | null; razon_social: string | null } }, ApiError, string>({
+    mutationFn: (cuit) => api.post('/api/erp/padrones/consultar', { cuit }),
+    onSuccess: (r) => setApocEstado(r.data.estado_cuit ?? null),
+    onError: () => setApocEstado(null), // WS caído → null (no bloquea, backend valida).
+  });
+
   const handleCuitBlur = () => {
     if (/^\d{11}$/.test(form.cuit_emisor) && !proveedorLookup.isPending) {
       proveedorLookup.mutate(form.cuit_emisor);
+      apocLookup.mutate(form.cuit_emisor); // v1.28
     }
   };
 
@@ -197,6 +208,9 @@ export function FacturaCompraManualPage() {
       observaciones: form.observaciones || undefined,
       periodo_trabajado_texto: form.periodo_trabajado_texto || undefined,
       jurisdiccion_codigo: form.jurisdiccion_codigo || undefined,
+      // v1.28 — si el CUIT no está ACTIVO, mandamos el motivo de override.
+      apoc_override_motivo: (apocEstado && apocEstado !== 'ACTIVO' && apocOverrideMotivo.trim().length >= 10)
+        ? apocOverrideMotivo.trim() : undefined,
     }),
     onSuccess: (r) => {
       toast.success('Factura registrada', `Manual #${r.data.id}`);
@@ -250,11 +264,15 @@ export function FacturaCompraManualPage() {
   });
 
   const necesitaCcManual = !form.cliente_auxiliar_id;
+  // v1.28 — APOC bloquea si CUIT no ACTIVO y motivo de override es insuficiente.
+  const apocBloquea = apocEstado !== null && apocEstado !== 'ACTIVO'
+    && apocOverrideMotivo.trim().length < 10;
   const valid = form.tipo_comprobante_id && form.punto_venta > 0 && form.numero > 0
     && form.fecha_emision && form.fecha_imputacion && form.periodo_id
     && /^\d{11}$/.test(form.cuit_emisor) && form.razon_social_emisor
     && form.imp_total > 0
-    && (!necesitaCcManual || form.centro_costo_id > 0);
+    && (!necesitaCcManual || form.centro_costo_id > 0)
+    && !apocBloquea;
 
   return (
     <div className="p-6 max-w-4xl space-y-4">
@@ -347,6 +365,37 @@ export function FacturaCompraManualPage() {
             )}
             {proveedorLookup.isPending && (
               <div className="text-[11.5px] text-ink-muted mt-1">Buscando proveedor…</div>
+            )}
+
+            {/* v1.28 — Estado APOC del CUIT */}
+            {apocLookup.isPending && (
+              <div className="text-[11.5px] text-ink-muted mt-1">🔍 Verificando APOC AFIP…</div>
+            )}
+            {apocEstado === 'ACTIVO' && (
+              <div className="text-[11.5px] text-success mt-1">
+                ✓ CUIT <strong>ACTIVO</strong> en padrón AFIP.
+              </div>
+            )}
+            {apocEstado && apocEstado !== 'ACTIVO' && (
+              <div className="mt-2 border border-warning/40 bg-warning-bg/20 rounded p-2 space-y-1.5">
+                <div className="flex items-start gap-1.5 text-[12px] font-semibold text-warning">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <div>
+                    Este CUIT figura como <strong>{apocEstado}</strong> en padrón AFIP.
+                    <div className="text-[11px] font-normal text-ink">
+                      Cargar igual implica que el IVA crédito fiscal puede no ser computable.
+                      Requiere motivo de override (mín 10 chars) + permiso <code>compras.facturas.cargar_manual_override_apoc</code>.
+                    </div>
+                  </div>
+                </div>
+                <textarea rows={2} value={apocOverrideMotivo} onChange={(e) => setApocOverrideMotivo(e.target.value)}
+                  maxLength={500}
+                  placeholder="Ej: factura previa a la baja de oficio; proveedor en proceso de regularización; etc."
+                  className="w-full px-2 py-1 text-[11.5px] border border-warning/40 rounded focus:outline-none focus:border-warning" />
+                <div className="text-[10px] text-ink-muted">
+                  {apocOverrideMotivo.length} / 500 — {apocOverrideMotivo.trim().length < 10 ? `faltan ${10 - apocOverrideMotivo.trim().length} chars` : '✓ ok'}
+                </div>
+              </div>
             )}
           </div>
 

@@ -53,7 +53,15 @@ class LibroIvaComprasImportController
             'archivo' => ['required', 'file', 'max:51200'],
             'periodo_imputacion_id' => ['required', 'integer', 'exists:erp_periodos,id'],
             'confirmar_periodo_cerrado' => ['nullable', 'boolean'],
+            // v1.28 — Override APOC con motivo.
+            'apoc_override_motivo' => ['nullable', 'string', 'min:10', 'max:500'],
         ]);
+
+        // v1.28 — Si vino motivo de override, exigir permiso especial.
+        if (! empty($data['apoc_override_motivo'])) {
+            $this->mustHave($request, 'compras.libro_iva.import_override_apoc');
+        }
+
         try {
             $r = $this->svc->confirmar(
                 $data['archivo']->getRealPath(),
@@ -62,6 +70,7 @@ class LibroIvaComprasImportController
                 $request->user(),
                 (bool) ($data['confirmar_periodo_cerrado'] ?? false),
                 (int) ($request->header('X-Empresa-Id') ?: 1),
+                $data['apoc_override_motivo'] ?? null,
             );
             return response()->json(['ok' => true, 'data' => $r], 201);
         } catch (DomainException $e) {
@@ -314,6 +323,7 @@ class LibroIvaComprasImportController
             'PERIODO_CERRADO_SIN_PERMISO' => 403,
             'CONFIRMACION_REQUERIDA' => 422,
             'PERIODO_NO_ENCONTRADO' => 404,
+            'APOC_CUIT_NO_ACTIVO' => 422, // v1.28
             default => 422,
         };
         return response()->json(['ok' => false, 'error' => [

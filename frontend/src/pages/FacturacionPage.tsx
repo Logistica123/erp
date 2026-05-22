@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Loader2, FileText, ExternalLink, Plus, DollarSign, CalendarRange } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Plus, DollarSign, CalendarRange, Trash2, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/useApi';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
@@ -111,6 +111,8 @@ export function FacturacionPage() {
     setSearchParams(p, { replace: true });
   };
   const [cobroFactura, setCobroFactura] = useState<Factura | null>(null);
+  // v1.29 — modal de eliminación con doble confirmación para WS con CAE.
+  const [eliminarFactura, setEliminarFactura] = useState<Factura | null>(null);
   // v1.27 — bulk select + edición.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [editarPeriodoOpen, setEditarPeriodoOpen] = useState(false);
@@ -121,6 +123,10 @@ export function FacturacionPage() {
     '/api/erp/mi-permisos',
   );
   const puedeEditarPeriodo = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.editar');
+  // v1.29 — permisos para eliminar (3 escalones según origen + CAE).
+  const puedeEliminarWs = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.eliminar_ws');
+  const puedeEliminarSinCae = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.eliminar_sin_cae');
+  const puedeBorrarManual = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.borrar_masivo');
   const { data: periodosDistinct } = useApi<string[]>(
     ['facturas-venta-periodos-trabajados'],
     '/api/erp/facturas-venta/periodos-trabajados',
@@ -407,11 +413,21 @@ export function FacturacionPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {f.estado === 'EMITIDA' && f.tipo_clase === 'FACTURA' && (
-                          <Button size="sm" variant="outline" onClick={() => setCobroFactura(f)}>
-                            <DollarSign className="w-3 h-3" /> Cobrar
-                          </Button>
-                        )}
+                        <div className="flex gap-1 flex-wrap">
+                          {f.estado === 'EMITIDA' && f.tipo_clase === 'FACTURA' && (
+                            <Button size="sm" variant="outline" onClick={() => setCobroFactura(f)}>
+                              <DollarSign className="w-3 h-3" /> Cobrar
+                            </Button>
+                          )}
+                          {/* v1.29 — Eliminar con permiso condicional. El backend
+                              valida el permiso real. Mostramos el botón siempre
+                              y dejamos que el modal maneje el caso 403. */}
+                          {(puedeEliminarWs || puedeEliminarSinCae || puedeBorrarManual) && (
+                            <Button size="sm" variant="ghost" onClick={() => setEliminarFactura(f)}>
+                              <Trash2 className="w-3 h-3 text-danger" />
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -440,6 +456,16 @@ export function FacturacionPage() {
           onDone={() => { setSelectedIds(new Set()); setEditarPeriodoOpen(false); }}
         />
       )}
+
+      {/* v1.29 — Modal de eliminación con doble confirmación para WS con CAE */}
+      <EliminarFacturaModal
+        factura={eliminarFactura}
+        onClose={() => setEliminarFactura(null)}
+        onSuccess={() => {
+          setEliminarFactura(null);
+          qc.invalidateQueries({ queryKey: ['facturas-venta'] });
+        }}
+      />
     </div>
   );
 }
@@ -610,6 +636,115 @@ function CobroModal({
           </Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+
+// v1.29 — Modal de eliminación con doble confirmación (texto "ELIMINAR" + motivo ≥20 chars)
+function EliminarFacturaModal({ factura, onClose, onSuccess }: {
+  factura: Factura | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [confirmText, setConfirmText] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!factura) return null;
+
+  const esWs = ['EMITIDA', 'WSFE', 'WS', 'WSFE_ERP', 'MIS_COMPROBANTES'].includes(factura.origen);
+  const tieneCae = !!factura.cae;
+  const caeVigente = tieneCae && factura.estado !== 'EMISION_FALLIDA' && factura.estado !== 'ANULADA_POR_NC';
+  const requiereDoble = esWs && caeVigente;
+
+  const submitMut = useMutation({
+    mutationFn: () =>
+      api.delete(`/api/erp/facturas-venta/${factura.id}`, requiereDoble
+        ? { confirm_text: confirmText, motivo: motivo.trim() }
+        : { motivo: motivo.trim() || undefined }),
+    onSuccess: () => {
+      setConfirmText(''); setMotivo(''); setErr(null);
+      onSuccess();
+    },
+    onError: (e: ApiError) => setErr(e.message),
+  });
+
+  const valid = requiereDoble
+    ? (confirmText === 'ELIMINAR' && motivo.trim().length >= 20)
+    : true;
+
+  return (
+    <Modal open onClose={onClose}
+      title={requiereDoble ? '⚠⚠ Eliminar factura WS con CAE válido' : `Eliminar factura ${factura.tipo_codigo} ${factura.numero}`}
+      size="lg">
+      <div className="space-y-3 text-[12px]">
+        {requiereDoble && (
+          <div className="border border-danger/40 bg-danger-bg/30 rounded p-2 text-[11.5px] space-y-1">
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>Esta factura tiene CAE válido emitido por ARCA.</strong>
+                <br />Eliminarla rompe la cadena fiscal. Lo correcto es emitir una Nota de Crédito (NC).
+                <br />Si insistís en eliminarla, escribí <code className="bg-danger/10 px-1">ELIMINAR</code> en mayúsculas y un motivo de al menos 20 caracteres.
+              </div>
+            </div>
+          </div>
+        )}
+
+        <dl className="grid grid-cols-[140px_1fr] gap-y-1 gap-x-2 text-[11px] bg-azure-soft/30 rounded p-2">
+          <dt className="text-ink-muted">Tipo</dt><dd>{factura.tipo_codigo} {factura.letra ?? ''} {factura.numero}</dd>
+          <dt className="text-ink-muted">Origen</dt><dd>{factura.origen}</dd>
+          <dt className="text-ink-muted">CAE</dt><dd className="font-mono">{factura.cae ?? '— sin CAE —'}</dd>
+          <dt className="text-ink-muted">Estado</dt><dd>{factura.estado}</dd>
+          <dt className="text-ink-muted">Total</dt><dd className="font-semibold tabular">${fmtMoney(Number(factura.imp_total))}</dd>
+        </dl>
+
+        {requiereDoble && (
+          <div>
+            <label className="block text-[11px] text-ink-muted mb-1">
+              Escribí "ELIMINAR" para confirmar
+            </label>
+            <input type="text" value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="ELIMINAR"
+              className={`w-full px-2 py-1 text-[12px] border rounded focus:outline-none ${
+                confirmText === 'ELIMINAR' ? 'border-success focus:border-success' :
+                confirmText ? 'border-danger focus:border-danger' :
+                'border-azure-soft focus:border-azure'
+              }`} />
+          </div>
+        )}
+
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">
+            Motivo {requiereDoble ? '* (mínimo 20 chars)' : '(opcional)'}
+          </label>
+          <textarea rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            maxLength={500}
+            placeholder="Ej: Factura emitida por error a CUIT incorrecto; cliente solicitó eliminación; ya se emitió la NC compensatoria #..."
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+          {requiereDoble && (
+            <div className="text-[10px] text-ink-muted mt-0.5">
+              {motivo.length} / 500 — {motivo.trim().length < 20 ? `faltan ${20 - motivo.trim().length}` : '✓'}
+            </div>
+          )}
+        </div>
+
+        {err && (
+          <div className="border border-danger/30 bg-danger-bg/20 rounded p-2 text-[11.5px] text-danger">
+            {err}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-line">
+          <Button variant="secondary" onClick={onClose} disabled={submitMut.isPending}>Cancelar</Button>
+          <Button variant="danger" disabled={!valid || submitMut.isPending}
+            onClick={() => submitMut.mutate()}>
+            {submitMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+            Eliminar definitivamente
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }

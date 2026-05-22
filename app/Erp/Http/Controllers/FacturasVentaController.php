@@ -118,6 +118,102 @@ class FacturasVentaController extends Controller
         return response()->json(['error' => ['code' => $code, 'message' => $e->getMessage()]], 409);
     }
 
+    /**
+     * v1.29 — DELETE de factura de venta con lógica condicional por origen + CAE.
+     *
+     * - origen=MANUAL → permiso `compras.facturas.borrar_masivo` (super_admin/contador)
+     * - origen WS con CAE válido → permiso `ventas.facturas.eliminar_ws` (sensible=2)
+     * - origen WS sin CAE (ERROR_EMISION) → permiso `ventas.facturas.eliminar_sin_cae`
+     *
+     * Body requerido para WS con CAE válido: { confirm_text: "ELIMINAR", motivo: ≥20 chars }.
+     */
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $factura = FacturaVenta::where('empresa_id', 1)->findOrFail($id);
+
+        // Clasificación.
+        $esWs = in_array($factura->origen, ['EMITIDA', 'WSFE', 'WS', 'WSFE_ERP', 'MIS_COMPROBANTES'], true);
+        $tieneCae = ! empty($factura->cae);
+        $caeVigente = $tieneCae
+            && $factura->estado !== 'EMISION_FALLIDA'
+            && $factura->estado !== 'ANULADA_POR_NC';
+
+        // Resolver permiso requerido.
+        if (! $esWs) {
+            $permiso = 'compras.facturas.borrar_masivo'; // reutilizamos del v1.22 §13
+        } elseif ($esWs && $caeVigente) {
+            $permiso = 'ventas.facturas.eliminar_ws';
+        } else {
+            $permiso = 'ventas.facturas.eliminar_sin_cae';
+        }
+
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso($permiso)) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => $esWs && $caeVigente
+                    ? 'Las facturas emitidas por Web Service no se pueden eliminar. Para anular, emití una Nota de Crédito. Si la factura quedó sin CAE válido, contactá a Sebastián para autorización temporal.'
+                    : "Falta permiso {$permiso}",
+            ]], 403);
+        }
+
+        // Validación adicional para el caso sensible=2 (WS con CAE).
+        if ($esWs && $caeVigente) {
+            $data = $request->validate([
+                'confirm_text' => ['required', 'string', 'in:ELIMINAR'],
+                'motivo' => ['required', 'string', 'min:20', 'max:500'],
+            ]);
+        } else {
+            $data = $request->validate([
+                'motivo' => ['nullable', 'string', 'max:500'],
+            ]);
+        }
+        $motivo = trim((string) ($data['motivo'] ?? ''));
+
+        // Snapshot completo antes del DELETE.
+        $snapshot = [
+            'id' => $factura->id,
+            'numero' => $factura->numero,
+            'tipo_comprobante_id' => $factura->tipo_comprobante_id,
+            'punto_venta_id' => $factura->punto_venta_id,
+            'fecha_emision' => $factura->fecha_emision?->toDateString(),
+            'imp_total' => (float) $factura->imp_total,
+            'origen' => $factura->origen,
+            'estado' => $factura->estado,
+            'cae' => $factura->cae,
+            'asiento_id' => $factura->asiento_id,
+            'auxiliar_id' => $factura->auxiliar_id,
+        ];
+
+        $descripcion = sprintf(
+            '%s factura venta #%d (origen=%s, cae=%s). Permiso: %s. Motivo: %s',
+            $esWs ? '[WS]' : '[MANUAL]', $factura->id,
+            $factura->origen, $factura->cae ?? 'SIN_CAE',
+            $permiso, $motivo ?: 'sin motivo',
+        );
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($factura, $snapshot, $descripcion, $request, $permiso) {
+            \Illuminate\Support\Facades\DB::statement('SET @erp_current_user_id = ?', [$request->user()->id]);
+
+            // Borrar asiento si existe (CASCADE en movimientos por trigger v1.50.5).
+            if ($factura->asiento_id) {
+                \Illuminate\Support\Facades\DB::table('erp_facturas_venta')
+                    ->where('id', $factura->id)
+                    ->update(['asiento_id' => null]);
+                \Illuminate\Support\Facades\DB::table('erp_asientos')
+                    ->where('id', $factura->asiento_id)->delete();
+            }
+
+            $this->audit->log('factura_venta_eliminada', $factura, $snapshot, null, $descripcion);
+            $factura->forceDelete();
+
+            // Marcar el permiso temporal como usado (si vino de uno temporal).
+            $request->user()->erpPerfil?->marcarPermisoTemporalUsado($permiso);
+        });
+
+        return response()->json(null, 204);
+    }
+
     public function cobrar(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([

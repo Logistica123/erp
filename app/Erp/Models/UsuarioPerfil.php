@@ -56,9 +56,36 @@ class UsuarioPerfil extends Model
 
     public function tienePermiso(string $codigo): bool
     {
-        return $this->roles()
+        // Permisos por rol.
+        $porRol = $this->roles()
             ->whereHas('permisos', fn ($q) => $q->where('codigo', $codigo))
             ->exists();
+        if ($porRol) return true;
+
+        // v1.29 — Permisos temporales (concesión por usuario con expiración).
+        // Sebastián otorga el permiso a un user específico por X horas. Vencido
+        // o revocado, el permiso desaparece automáticamente.
+        return \Illuminate\Support\Facades\DB::table('erp_permisos_temporales')
+            ->where('user_id', $this->user_id)
+            ->where('permiso_codigo', $codigo)
+            ->where('expira_at', '>', now())
+            ->whereNull('revocado_at')
+            ->exists();
+    }
+
+    /**
+     * v1.29 — Marca un permiso temporal como usado (al ejecutarse la acción).
+     * No falla si no hay permiso temporal activo (puede venir del rol).
+     */
+    public function marcarPermisoTemporalUsado(string $codigo): void
+    {
+        \Illuminate\Support\Facades\DB::table('erp_permisos_temporales')
+            ->where('user_id', $this->user_id)
+            ->where('permiso_codigo', $codigo)
+            ->where('expira_at', '>', now())
+            ->whereNull('revocado_at')
+            ->whereNull('usado_at')
+            ->update(['usado_at' => now()]);
     }
 
     public function estaBloqueado(): bool

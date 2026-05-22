@@ -440,6 +440,16 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.facturas-venta.periodos-trabajados');
         Route::patch('/facturas-venta/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodosTrabajadosBulk'])
             ->name('erp.facturas-venta.periodos-trabajados.bulk');
+        // v1.29 — DELETE factura venta con permisos condicionales.
+        Route::delete('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.fv.destroy');
+        // v1.29 — ABM permisos temporales (super_admin only).
+        Route::get('/admin/permisos-temporales', [\App\Erp\Http\Controllers\PermisosTemporalesController::class, 'index'])
+            ->name('erp.admin.permisos-temp.index');
+        Route::post('/admin/permisos-temporales', [\App\Erp\Http\Controllers\PermisosTemporalesController::class, 'store'])
+            ->name('erp.admin.permisos-temp.store');
+        Route::delete('/admin/permisos-temporales/{id}', [\App\Erp\Http\Controllers\PermisosTemporalesController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.admin.permisos-temp.destroy');
         Route::patch('/facturas-venta/{id}/periodo-trabajado', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodoTrabajado'])
             ->whereNumber('id')->name('erp.facturas-venta.periodo-trabajado');
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])

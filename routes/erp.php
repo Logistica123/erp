@@ -285,6 +285,22 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/cobros/{id}/anular', [CobrosController::class, 'anular'])
             ->whereNumber('id')->name('erp.cobros.anular');
 
+        // v1.31 — Recibos (cobranza unificada con NC + retenciones).
+        Route::get('/tesoreria/recibos', [\App\Erp\Http\Controllers\RecibosController::class, 'index'])
+            ->name('erp.recibos.index');
+        Route::post('/tesoreria/recibos/auto-imputar-nc', [\App\Erp\Http\Controllers\RecibosController::class, 'autoImputarNc'])
+            ->name('erp.recibos.auto-imputar-nc');
+        Route::post('/tesoreria/recibos', [\App\Erp\Http\Controllers\RecibosController::class, 'store'])
+            ->name('erp.recibos.store');
+        Route::get('/tesoreria/recibos/{id}', [\App\Erp\Http\Controllers\RecibosController::class, 'show'])
+            ->whereNumber('id')->name('erp.recibos.show');
+        Route::post('/tesoreria/recibos/{id}/emitir', [\App\Erp\Http\Controllers\RecibosController::class, 'emitir'])
+            ->whereNumber('id')->name('erp.recibos.emitir');
+        Route::post('/tesoreria/recibos/{id}/anular', [\App\Erp\Http\Controllers\RecibosController::class, 'anular'])
+            ->whereNumber('id')->name('erp.recibos.anular');
+        Route::get('/clientes/{id}/notas-credito-libres', [\App\Erp\Http\Controllers\RecibosController::class, 'ncLibresCliente'])
+            ->whereNumber('id')->name('erp.clientes.nc-libres');
+
         // ADDENDUM v1.15 Sprint O — Imputación de Notas de Crédito.
         Route::get('/imputaciones-nc', [ImputacionesNcController::class, 'index'])
             ->name('erp.imputaciones-nc.index');

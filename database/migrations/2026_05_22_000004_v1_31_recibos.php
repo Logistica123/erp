@@ -24,7 +24,12 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('erp_recibos', function (Blueprint $table) {
+        // erp_cuentas_bancarias.id puede ser int (prod) o bigint (local) por
+        // drift histórico. Detectamos el tipo real para tipear medio_cobro_id
+        // igual y que el FK matchee en ambos entornos.
+        $tipoCbId = $this->detectarTipoColumna('erp_cuentas_bancarias', 'id');
+
+        Schema::create('erp_recibos', function (Blueprint $table) use ($tipoCbId) {
             $table->bigIncrements('id');
             $table->unsignedBigInteger('empresa_id');
             $table->string('numero_correlativo', 20)->unique()
@@ -42,8 +47,13 @@ return new class extends Migration
                 ->comment('Lo efectivamente cobrado. 0 si NC + ret cubren todo.');
             $table->decimal('saldo_factura_post', 18, 2)
                 ->comment('Saldo de la factura DESPUÉS de aplicar este recibo');
-            $table->unsignedBigInteger('medio_cobro_id')->nullable()
-                ->comment('FK erp_cuentas_bancarias. NULL si monto_cobrado=0');
+            if ($tipoCbId === 'int') {
+                $table->unsignedInteger('medio_cobro_id')->nullable()
+                    ->comment('FK erp_cuentas_bancarias. NULL si monto_cobrado=0');
+            } else {
+                $table->unsignedBigInteger('medio_cobro_id')->nullable()
+                    ->comment('FK erp_cuentas_bancarias. NULL si monto_cobrado=0');
+            }
             $table->string('cae', 20)->nullable();
             $table->enum('estado', ['BORRADOR', 'EMITIDO', 'CONCILIADO', 'ANULADO'])
                 ->default('BORRADOR');
@@ -197,6 +207,19 @@ return new class extends Migration
                 'migracion_fecha' => now(),
             ]);
         }
+    }
+
+    /**
+     * Devuelve 'int' o 'bigint' según el DATA_TYPE de la columna en INFORMATION_SCHEMA.
+     */
+    private function detectarTipoColumna(string $tabla, string $columna): string
+    {
+        $row = DB::selectOne(
+            "SELECT DATA_TYPE as t FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1",
+            [$tabla, $columna],
+        );
+        return $row && strtolower((string) $row->t) === 'int' ? 'int' : 'bigint';
     }
 
     public function down(): void

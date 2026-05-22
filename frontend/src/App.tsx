@@ -22,6 +22,7 @@ import { OrdenesPagoPage } from './pages/OrdenesPagoPage';
 import { PeriodosPage } from './pages/PeriodosPage';
 import { PlanCuentasPage } from './pages/PlanCuentasPage';
 import { CobrosPage } from './pages/CobrosPage';
+import { RecibosPage } from './pages/RecibosPage';
 import { EcheqPage } from './pages/EcheqPage';
 import { TransferenciasPage } from './pages/TransferenciasPage';
 import { ArqueosPage } from './pages/ArqueosPage';
@@ -140,6 +141,8 @@ export default function App() {
 
               {/* F2 — Tesorería */}
               <Route path="/erp/cobros" element={<CobrosPage />} handle={{ crumb: 'Cobros' }} />
+              {/* v1.31 — Recibos (cobranza unificada NC + retenciones) */}
+              <Route path="/erp/tesoreria/recibos" element={<RecibosPage />} handle={{ crumb: 'Recibos' }} />
               <Route path="/erp/echeq" element={<EcheqPage />} handle={{ crumb: 'eCheq' }} />
               <Route path="/erp/transferencias" element={<TransferenciasPage />} handle={{ crumb: 'Transferencias' }} />
               <Route path="/erp/arqueos" element={<ArqueosPage />} handle={{ crumb: 'Arqueos' }} />

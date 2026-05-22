@@ -48,6 +48,7 @@ export const sections: NavSection[] = [
     items: [
       { to: '/erp/bancos', label: 'Bancos y Cajas', icon: Landmark },
       { to: '/erp/cobros', label: 'Cobros', icon: Wallet },
+      { to: '/erp/tesoreria/recibos', label: 'Recibos', icon: Receipt },
       { to: '/erp/ordenes-pago', label: 'Órdenes de pago', icon: ArrowLeftRight },
       { to: '/erp/echeq', label: 'eCheq', icon: Banknote },
       { to: '/erp/transferencias', label: 'Transferencias int.', icon: Split },

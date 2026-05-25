@@ -1,522 +1,782 @@
-import { useMemo, useState } from 'react';
-import { Receipt, Plus, Eye, Ban, AlertTriangle, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Receipt, Plus, Search, Printer, RotateCcw, Trash2, Ban, AlertTriangle } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { DataTable, fmtMoney, fmtDate, type Column } from '@/components/ui/DataTable';
 import { Modal } from '@/components/ui/Modal';
-import { Field, SelectField, FormError } from '@/components/ui/Field';
+import { Field, SelectField } from '@/components/ui/Field';
+import { fmtMoney } from '@/lib/cn';
 import { api, ApiError } from '@/lib/api';
-import { useApi, useApiMutation, useInvalidate, errorMessage } from '@/hooks/useApi';
+import { useApi, useApiMutation, useInvalidate } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 
 /**
- * v1.31 — Pantalla de Recibos. Cobranza unificada: factura + NC aplicadas +
- * retenciones + cobro neto en un solo documento. Reemplaza el flow de cobros
- * sueltos del v1.15 (que sigue operativo en /erp/cobros para back-compat).
+ * v1.32 — Recibos al modelo de DistriApp.
+ * Layout 2 columnas: lista lateral + form/preview en vivo.
+ * Soporta múltiples comprobantes imputados + retenciones simples (IVA/IIBB/Gan).
+ * Numeración PV-NRO sincronizada cross-platform con DistriApp.
  */
 
-type Recibo = {
-  id: number;
-  numero_correlativo: string;
-  fecha_emision: string;
-  cliente_auxiliar_id: number;
-  factura_venta_id: number;
-  total_factura: number;
-  total_nc_aplicadas: number;
-  total_retenciones: number;
-  monto_cobrable: number;
-  monto_cobrado: number;
-  saldo_factura_post: number;
-  medio_cobro_id: number | null;
-  estado: 'BORRADOR' | 'EMITIDO' | 'CONCILIADO' | 'ANULADO';
-  cliente?: { id: number; nombre: string; cuit: string | null };
-  factura?: { id: number; numero: number; imp_total: number };
-  observaciones?: string | null;
+type Cliente = {
+  id: number; codigo: string; nombre: string; cuit: string | null;
+  direccion_1: string; direccion_2: string;
 };
-
-type Cliente = { id: number; codigo: string; nombre: string };
-type FacturaVenta = {
-  id: number;
-  tipo_codigo: string;
-  letra: string | null;
-  punto_venta_numero: number;
-  numero: number;
-  imp_total: number;
-  estado: string;
-  fecha_emision: string;
+type FacturaImputable = {
+  id: number; tipo: string; numero_completo: string;
+  fecha_emision: string; imp_total: number; saldo: number; estado: string; origen: string;
+};
+type Recibo = {
+  id: number; punto_venta: string | null; numero: string | null;
+  numero_correlativo: string; numero_legacy: string | null;
+  fecha_emision: string; cliente_auxiliar_id: number;
+  total_factura: number; total_nc_aplicadas: number; total_retenciones: number;
+  retencion_iva_total: number; retencion_iibb_total: number; retencion_ganancias_total: number;
+  monto_cobrado: number; estado: 'BORRADOR' | 'EMITIDO' | 'CONCILIADO' | 'ANULADO';
+  cliente?: Cliente;
+  detalle_cobro: string | null;
+};
+type ReciboDetalle = Recibo & {
+  comprobantes_imputados?: Array<{
+    id: number; factura_venta_id: number; monto_imputado: number;
+    total_factura: number; fecha_factura: string; numero_factura_snapshot: string;
+  }>;
+  snapshot_empresa_razon_social?: string | null;
+  snapshot_empresa_cuit?: string | null;
+  snapshot_empresa_direccion_1?: string | null;
+  snapshot_empresa_direccion_2?: string | null;
+  snapshot_empresa_condicion_iva?: string | null;
+  snapshot_empresa_inicio_actividad?: string | null;
+  snapshot_cliente_razon_social?: string | null;
+  snapshot_cliente_cuit?: string | null;
+  snapshot_cliente_direccion_1?: string | null;
+  snapshot_cliente_direccion_2?: string | null;
+  snapshot_cliente_condicion_iva?: string | null;
 };
 type CuentaBancaria = { id: number; nombre: string };
-type NcLibre = {
-  id: number; tipo: string; numero: number; fecha_emision: string;
-  imp_total: number; saldo_imputable: number;
+
+type ProximoNumero = {
+  punto_venta: string; numero: string;
+  max_local: number; max_distriapp: number; consultado_distriapp: boolean;
 };
-type CuentaContable = { id: number; codigo: string; nombre: string };
 
 const ESTADO_BADGE: Record<Recibo['estado'], 'success' | 'warning' | 'info' | 'danger'> = {
-  BORRADOR: 'warning',
-  EMITIDO: 'success',
-  CONCILIADO: 'info',
-  ANULADO: 'danger',
+  BORRADOR: 'warning', EMITIDO: 'success', CONCILIADO: 'info', ANULADO: 'danger',
 };
 
-export function RecibosPage() {
-  const [estado, setEstado] = useState('');
-  const [clienteId] = useState(''); // reservado para filtro futuro por cliente
-  const [nuevoOpen, setNuevoOpen] = useState(false);
-  const [verId, setVerId] = useState<number | null>(null);
-  const [anularTarget, setAnularTarget] = useState<Recibo | null>(null);
+// Empresa snapshot por defecto (se rellena desde /erp_empresas).
+const EMPRESA_DEFAULTS = {
+  razon_social: 'LOGISTICA ARGENTINA SRL',
+  cuit: '30-71706098-5',
+  direccion_1: 'SAN CAYETANO 3470',
+  direccion_2: 'SAN CAYETANO - CORRIENTES',
+  condicion_iva: 'I.V.A. RESPONSABLE INSCRIPTO',
+  inicio_actividad: '2020-08-11',
+};
 
-  const qs = useMemo(() => {
-    const p = new URLSearchParams();
-    if (estado) p.set('estado', estado);
-    if (clienteId) p.set('cliente_id', clienteId);
-    return p.toString();
-  }, [estado, clienteId]);
+type Draft = {
+  puntoVenta: string;
+  numero: string;
+  fecha: string;
+  fechaCobro: string;
+  detalleCobro: string;
+  empresaNombre: string;
+  empresaCuit: string;
+  empresaDireccion1: string;
+  empresaDireccion2: string;
+  empresaIva: string;
+  empresaInicioActividad: string;
+  clienteId: string;
+  clienteNombre: string;
+  clienteCuit: string;
+  clienteIva: string;
+  clienteDireccion1: string;
+  clienteDireccion2: string;
+  comprobantes: Array<{ factura_venta_id: number; numeroFactura: string; fecha: string; totalFactura: number; imputado: number }>;
+  retencionIva: string;
+  retencionIibb: string;
+  retencionGanancias: string;
+  importeRecibido: string;
+  medioCobroId: string;
+  observaciones: string;
+  autoIncrementar: boolean;
+};
 
-  const { data, isLoading, error } = useApi<Recibo[]>(
-    ['recibos', qs],
-    `/api/erp/tesoreria/recibos${qs ? `?${qs}` : ''}`,
-  );
+const DRAFT_INICIAL: Draft = {
+  puntoVenta: '0001',
+  numero: '',
+  fecha: new Date().toISOString().slice(0, 10),
+  fechaCobro: new Date().toISOString().slice(0, 10),
+  detalleCobro: '',
+  empresaNombre: EMPRESA_DEFAULTS.razon_social,
+  empresaCuit: EMPRESA_DEFAULTS.cuit,
+  empresaDireccion1: EMPRESA_DEFAULTS.direccion_1,
+  empresaDireccion2: EMPRESA_DEFAULTS.direccion_2,
+  empresaIva: EMPRESA_DEFAULTS.condicion_iva,
+  empresaInicioActividad: EMPRESA_DEFAULTS.inicio_actividad,
+  clienteId: '',
+  clienteNombre: '',
+  clienteCuit: '',
+  clienteIva: 'RESP. INSCRIPTO',
+  clienteDireccion1: '',
+  clienteDireccion2: '',
+  comprobantes: [],
+  retencionIva: '',
+  retencionIibb: '',
+  retencionGanancias: '',
+  importeRecibido: '',
+  medioCobroId: '',
+  observaciones: '',
+  autoIncrementar: true,
+};
 
-  const columns: Column<Recibo>[] = [
-    { key: 'numero_correlativo', header: 'Nº Recibo', width: '160px',
-      render: (r) => <code className="text-[11px]">{r.numero_correlativo}</code> },
-    { key: 'fecha_emision', header: 'Fecha', width: '90px', render: (r) => fmtDate(r.fecha_emision) },
-    { key: 'cliente', header: 'Cliente', render: (r) => r.cliente?.nombre ?? `#${r.cliente_auxiliar_id}` },
-    { key: 'factura', header: 'Factura', width: '110px',
-      render: (r) => <span className="text-[11.5px]">FV #{r.factura?.numero ?? r.factura_venta_id}</span> },
-    { key: 'total_factura', header: 'Total', align: 'right', width: '100px',
-      render: (r) => `$${fmtMoney(r.total_factura)}` },
-    { key: 'total_nc_aplicadas', header: 'NC', align: 'right', width: '90px',
-      render: (r) => r.total_nc_aplicadas > 0 ? `$${fmtMoney(r.total_nc_aplicadas)}` : '—' },
-    { key: 'total_retenciones', header: 'Ret', align: 'right', width: '90px',
-      render: (r) => r.total_retenciones > 0 ? `$${fmtMoney(r.total_retenciones)}` : '—' },
-    { key: 'monto_cobrado', header: 'Cobrado', align: 'right', width: '110px',
-      render: (r) => <strong>${fmtMoney(r.monto_cobrado)}</strong> },
-    { key: 'estado', header: 'Estado', width: '110px',
-      render: (r) => <Badge variant={ESTADO_BADGE[r.estado]}>{r.estado}</Badge> },
-    { key: 'acciones', header: '', width: '80px',
-      render: (r) => (
-        <div className="flex gap-1">
-          <button onClick={() => setVerId(r.id)} title="Ver"><Eye className="w-3.5 h-3.5 text-azure" /></button>
-          {r.estado === 'EMITIDO' && (
-            <button onClick={() => setAnularTarget(r)} title="Anular">
-              <Ban className="w-3.5 h-3.5 text-danger" />
-            </button>
-          )}
-        </div>
-      ) },
-  ];
-
-  return (
-    <div className="p-4 space-y-3">
-      <Card>
-        <CardHeader title={
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Receipt className="w-4 h-4 text-azure" /> Recibos (v1.31)
-            </div>
-            <Button variant="primary" size="sm" onClick={() => setNuevoOpen(true)}>
-              <Plus className="w-3 h-3" /> Nuevo recibo
-            </Button>
-          </div>
-        } />
-        <CardBody className="space-y-2">
-          <div className="text-[11.5px] text-ink-muted bg-info-bg/20 border border-info/20 rounded p-2">
-            Cobranza unificada: junta factura + NC aplicadas + retenciones + cobro neto en un solo documento.
-            Es la fuente única para conciliar contra el extracto bancario. La pantalla de Cobros (v1.15)
-            sigue disponible para back-compat pero el flujo recomendado es Recibos.
-          </div>
-
-          <div className="flex gap-2 items-end">
-            <SelectField label="Estado" value={estado} onChange={(e) => setEstado(e.target.value)}
-              options={[
-                { value: '', label: 'Todos' },
-                { value: 'BORRADOR', label: 'BORRADOR' },
-                { value: 'EMITIDO', label: 'EMITIDO' },
-                { value: 'CONCILIADO', label: 'CONCILIADO' },
-                { value: 'ANULADO', label: 'ANULADO' },
-              ]}
-              containerClassName="w-40" />
-          </div>
-
-          {error ? (
-            <FormError error={errorMessage(error)} />
-          ) : (
-            <DataTable<Recibo>
-              rows={data ?? []}
-              columns={columns}
-              loading={isLoading}
-              empty="Sin recibos."
-            />
-          )}
-        </CardBody>
-      </Card>
-
-      {nuevoOpen && <NuevoReciboModal onClose={() => setNuevoOpen(false)} />}
-      {verId !== null && <DetalleReciboModal id={verId} onClose={() => setVerId(null)} />}
-      {anularTarget && <AnularReciboModal recibo={anularTarget} onClose={() => setAnularTarget(null)} />}
-    </div>
-  );
+function parseMontoEs(s: string | number | null | undefined): number {
+  if (s === null || s === undefined || s === '') return 0;
+  if (typeof s === 'number') return s;
+  return Number(String(s).replace(/\./g, '').replace(',', '.')) || 0;
+}
+function fmtFecha(s?: string | null): string {
+  if (!s) return '—';
+  const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
 }
 
-function NuevoReciboModal({ onClose }: { onClose: () => void }) {
+export function RecibosPage() {
   const toast = useToast();
   const invalidate = useInvalidate(['recibos']);
-  const [clienteId, setClienteId] = useState('');
-  const [facturaId, setFacturaId] = useState('');
-  const [montoCobrado, setMontoCobrado] = useState('');
-  const [medioCobroId, setMedioCobroId] = useState('');
-  const [observaciones, setObservaciones] = useState('');
-  const [autoImputarNc, setAutoImputarNc] = useState(true);
-  const [ncAplicadas, setNcAplicadas] = useState<Array<{ nc_factura_id: number; monto_aplicado: number; nc?: NcLibre }>>([]);
-  const [retenciones, setRetenciones] = useState<Array<{
-    tipo: string; jurisdiccion_codigo?: string; numero_certificado?: string;
-    alicuota?: number; base_imponible?: number; monto: number; cuenta_contable_id: number;
-  }>>([]);
-  const [emitirAlConfirmar, setEmitirAlConfirmar] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  const [draft, setDraft] = useState<Draft>(DRAFT_INICIAL);
+  const [selectedReciboId, setSelectedReciboId] = useState<number | null>(null);
+  const [anularTarget, setAnularTarget] = useState<Recibo | null>(null);
+  const [agregarCompModalOpen, setAgregarCompModalOpen] = useState(false);
 
-  const { data: clientesData } = useApi<{ clientes: Cliente[] }>(['clientes-cat'],
-    '/api/erp/facturas-venta/catalogos');
-  const { data: bancos } = useApi<{ ok: boolean; data: CuentaBancaria[] }>(['cuentas-bancarias'],
-    '/api/erp/cuentas-bancarias');
-  // Para retenciones: cuentas contables
-  const { data: cuentas } = useApi<{ data: CuentaContable[] }>(['cuentas-contables-list'],
-    '/api/erp/cuentas-contables?limit=500');
-
-  // Cargar facturas del cliente cuando se selecciona.
-  const { data: facturasData } = useApi<{ data: FacturaVenta[] }>(
-    ['facturas-cliente', clienteId],
-    `/api/erp/facturas-venta?auxiliar_id=${clienteId}&estado=EMITIDA,COBRO_PARCIAL`,
-    { enabled: !!clienteId },
+  const { data: recibosResp, refetch: refetchRecibos } = useApi<Recibo[]>(
+    ['recibos'],
+    '/api/erp/tesoreria/recibos',
   );
-  const facturasDisponibles = facturasData?.data ?? [];
-  const facturaSel = facturasDisponibles.find((f) => String(f.id) === facturaId);
+  const recibos = recibosResp ?? [];
+  const recibosFiltrados = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    if (!q) return recibos;
+    return recibos.filter((r) =>
+      (r.numero ?? '').toLowerCase().includes(q)
+      || (r.numero_correlativo ?? '').toLowerCase().includes(q)
+      || (r.cliente?.nombre ?? '').toLowerCase().includes(q),
+    );
+  }, [recibos, busqueda]);
 
-  // NC libres del cliente.
-  const { data: ncLibresResp } = useApi<{ data: NcLibre[] }>(
-    ['nc-libres', clienteId],
-    `/api/erp/clientes/${clienteId}/notas-credito-libres`,
-    { enabled: !!clienteId },
+  const { data: clientesResp } = useApi<Cliente[]>(
+    ['clientes-para-recibos'],
+    '/api/erp/clientes/para-recibos',
   );
-  const ncLibres = ncLibresResp?.data ?? [];
+  const clientes = clientesResp ?? [];
+  const { data: bancosResp } = useApi<{ ok: boolean; data: CuentaBancaria[] }>(
+    ['cuentas-bancarias'], '/api/erp/cuentas-bancarias',
+  );
+  const bancos = bancosResp?.data ?? [];
 
-  // Auto-imputación al cambiar factura (sólo si autoImputarNc activo).
-  const autoImputarMut = useApiMutation<{ data: { nc_aplicadas: Array<{ nc_factura_id: number; monto_aplicado: number; nc: NcLibre }>; total_nc: number } }, { factura_venta_id: number }>(
-    (body) => api.post('/api/erp/tesoreria/recibos/auto-imputar-nc', body),
-    {
-      onSuccess: (r) => {
-        setNcAplicadas(r.data.nc_aplicadas);
-      },
-      onError: () => {/* silent */},
-    },
+  // Cargar facturas del cliente seleccionado.
+  const { data: facturasResp } = useApi<FacturaImputable[]>(
+    ['facturas-imputables', draft.clienteId],
+    `/api/erp/clientes/${draft.clienteId}/facturas-imputables-recibo`,
+    { enabled: !!draft.clienteId },
+  );
+  const facturasDelCliente = facturasResp ?? [];
+
+  // Próximo número auto al montar / al pedir nuevo borrador.
+  const { data: proximoNumeroResp, refetch: refetchProximoNumero } = useApi<ProximoNumero>(
+    ['proximo-numero', draft.puntoVenta],
+    `/api/erp/tesoreria/recibos/proximo-numero?pv=${draft.puntoVenta}`,
+    { enabled: !selectedReciboId },
   );
 
-  const onPickFactura = (id: string) => {
-    setFacturaId(id);
-    setNcAplicadas([]);
-    if (autoImputarNc && id) {
-      autoImputarMut.mutate({ factura_venta_id: +id });
+  useEffect(() => {
+    if (!selectedReciboId && proximoNumeroResp && !draft.numero) {
+      setDraft((d) => ({ ...d, numero: proximoNumeroResp.numero }));
     }
+  }, [proximoNumeroResp, selectedReciboId, draft.numero]);
+
+  // Al elegir cliente: auto-completar datos.
+  const onPickCliente = (clienteId: string) => {
+    const c = clientes.find((x) => String(x.id) === clienteId);
+    setDraft((d) => ({
+      ...d,
+      clienteId,
+      clienteNombre: c?.nombre ?? '',
+      clienteCuit: c?.cuit ?? '',
+      clienteDireccion1: c?.direccion_1 ?? '',
+      clienteDireccion2: c?.direccion_2 ?? '',
+      comprobantes: [],
+    }));
   };
 
-  const totalNc = ncAplicadas.reduce((a, n) => a + Number(n.monto_aplicado), 0);
-  const totalRet = retenciones.reduce((a, r) => a + Number(r.monto), 0);
-  const totalFactura = Number(facturaSel?.imp_total ?? 0);
-  const montoCobrable = Math.max(0, totalFactura - totalNc - totalRet);
+  // Cargar recibo emitido a la vista.
+  const { data: reciboDetalle } = useApi<ReciboDetalle>(
+    ['recibo-detalle', selectedReciboId],
+    `/api/erp/tesoreria/recibos/${selectedReciboId}`,
+    { enabled: !!selectedReciboId },
+  );
+  useEffect(() => {
+    if (reciboDetalle) {
+      setDraft({
+        puntoVenta: reciboDetalle.punto_venta ?? '0001',
+        numero: reciboDetalle.numero ?? '',
+        fecha: String(reciboDetalle.fecha_emision).slice(0, 10),
+        fechaCobro: String(reciboDetalle.fecha_emision).slice(0, 10),
+        detalleCobro: reciboDetalle.detalle_cobro ?? '',
+        empresaNombre: reciboDetalle.snapshot_empresa_razon_social ?? EMPRESA_DEFAULTS.razon_social,
+        empresaCuit: reciboDetalle.snapshot_empresa_cuit ?? EMPRESA_DEFAULTS.cuit,
+        empresaDireccion1: reciboDetalle.snapshot_empresa_direccion_1 ?? EMPRESA_DEFAULTS.direccion_1,
+        empresaDireccion2: reciboDetalle.snapshot_empresa_direccion_2 ?? EMPRESA_DEFAULTS.direccion_2,
+        empresaIva: reciboDetalle.snapshot_empresa_condicion_iva ?? EMPRESA_DEFAULTS.condicion_iva,
+        empresaInicioActividad: reciboDetalle.snapshot_empresa_inicio_actividad ?? EMPRESA_DEFAULTS.inicio_actividad,
+        clienteId: String(reciboDetalle.cliente_auxiliar_id),
+        clienteNombre: reciboDetalle.snapshot_cliente_razon_social ?? reciboDetalle.cliente?.nombre ?? '',
+        clienteCuit: reciboDetalle.snapshot_cliente_cuit ?? '',
+        clienteIva: reciboDetalle.snapshot_cliente_condicion_iva ?? 'RESP. INSCRIPTO',
+        clienteDireccion1: reciboDetalle.snapshot_cliente_direccion_1 ?? '',
+        clienteDireccion2: reciboDetalle.snapshot_cliente_direccion_2 ?? '',
+        comprobantes: (reciboDetalle.comprobantes_imputados ?? []).map((c) => ({
+          factura_venta_id: c.factura_venta_id,
+          numeroFactura: c.numero_factura_snapshot,
+          fecha: c.fecha_factura,
+          totalFactura: Number(c.total_factura),
+          imputado: Number(c.monto_imputado),
+        })),
+        retencionIva: String(reciboDetalle.retencion_iva_total || ''),
+        retencionIibb: String(reciboDetalle.retencion_iibb_total || ''),
+        retencionGanancias: String(reciboDetalle.retencion_ganancias_total || ''),
+        importeRecibido: String(reciboDetalle.monto_cobrado),
+        medioCobroId: '',
+        observaciones: '',
+        autoIncrementar: true,
+      });
+    }
+  }, [reciboDetalle]);
+
+  const totalImputado = draft.comprobantes.reduce((s, c) => s + c.imputado, 0);
+  const totalRet = parseMontoEs(draft.retencionIva) + parseMontoEs(draft.retencionIibb) + parseMontoEs(draft.retencionGanancias);
+  const totalCobro = parseMontoEs(draft.importeRecibido) + totalRet;
 
   const crearMut = useApiMutation<{ data: Recibo }, Record<string, unknown>>(
     (body) => api.post('/api/erp/tesoreria/recibos', body),
     {
-      onSuccess: async (r) => {
-        toast.success('Recibo creado', r.data.numero_correlativo);
-        if (emitirAlConfirmar) {
-          try {
-            await api.post(`/api/erp/tesoreria/recibos/${r.data.id}/emitir`, {});
-            toast.success('Recibo emitido', `Asiento generado`);
-          } catch (e) {
-            toast.error('Recibo creado pero no se pudo emitir', (e as ApiError).message);
-          }
-        }
-        invalidate();
-        onClose();
-      },
+      onSuccess: () => { /* handled by orquestador */ },
       onError: (e) => toast.error('Error', (e as ApiError).message),
     },
   );
 
-  const submit = () => {
-    if (!facturaId) return;
-    crearMut.mutate({
-      factura_venta_id: +facturaId,
-      monto_cobrado: montoCobrado === '' ? undefined : Number(montoCobrado),
-      medio_cobro_id: medioCobroId ? +medioCobroId : null,
-      observaciones: observaciones || null,
-      auto_imputar_nc: autoImputarNc,
-      nc_aplicadas: ncAplicadas.map((n) => ({ nc_factura_id: n.nc_factura_id, monto_aplicado: n.monto_aplicado })),
-      retenciones,
+  const handleNuevoBorrador = () => {
+    setSelectedReciboId(null);
+    setDraft({ ...DRAFT_INICIAL, numero: '' });
+    refetchProximoNumero();
+  };
+  const handleRestablecerEjemplo = () => {
+    setSelectedReciboId(null);
+    setDraft({
+      ...DRAFT_INICIAL,
+      clienteNombre: 'OCASA SA (ejemplo)',
+      clienteCuit: '30-71706098-5',
+      clienteDireccion1: 'AV. EJEMPLO 1234',
+      clienteDireccion2: 'CABA',
+      clienteIva: 'RESP. INSCRIPTO',
+      detalleCobro: 'ECHEQ BANCO SUPERVIELLE N° 00005916 vto 31/05',
+      comprobantes: [
+        { factura_venta_id: 0, numeroFactura: '0002-00000596', fecha: '2026-04-07', totalFactura: 2764494.26, imputado: 2764494.26 },
+        { factura_venta_id: 0, numeroFactura: '0002-00000625', fecha: '2026-04-15', totalFactura: 681641.40, imputado: 681641.40 },
+      ],
+      retencionGanancias: '25234.98',
+      importeRecibido: '3420900.68',
+      numero: proximoNumeroResp?.numero ?? '',
     });
+    toast.success('Ejemplo cargado', 'Datos ficticios para training/testing');
+  };
+  const handleEmitirEImprimir = async () => {
+    if (!draft.clienteId) { toast.error('Cliente requerido', 'Seleccioná un cliente.'); return; }
+    if (draft.comprobantes.length === 0) {
+      toast.error('Sin comprobantes', 'Agregá al menos una factura.');
+      return;
+    }
+    const fakeIds = draft.comprobantes.filter((c) => !c.factura_venta_id);
+    if (fakeIds.length > 0) {
+      toast.error('Restablecer ejemplo activo', 'Los comprobantes del ejemplo son ficticios. Restablecé y elegí facturas reales.');
+      return;
+    }
+    try {
+      const body = {
+        cliente_auxiliar_id: Number(draft.clienteId),
+        fecha_emision: draft.fecha,
+        detalle_cobro: draft.detalleCobro || null,
+        comprobantes_imputados: draft.comprobantes.map((c) => ({
+          factura_venta_id: c.factura_venta_id,
+          monto_imputado: c.imputado,
+        })),
+        monto_cobrado: parseMontoEs(draft.importeRecibido),
+        medio_cobro_id: draft.medioCobroId ? Number(draft.medioCobroId) : null,
+        retencion_iva_total: parseMontoEs(draft.retencionIva),
+        retencion_iibb_total: parseMontoEs(draft.retencionIibb),
+        retencion_ganancias_total: parseMontoEs(draft.retencionGanancias),
+        observaciones: draft.observaciones || null,
+      };
+      const created = await api.post<{ data: Recibo }>('/api/erp/tesoreria/recibos', body);
+      const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${created.data.id}/emitir`, {});
+      toast.success('Recibo emitido', `Recibo ${draft.puntoVenta}-${draft.numero}`);
+      invalidate();
+      // Imprimir via window.print del HTML del preview.
+      printRecibo(draft, { total_cobro: totalCobro, total_imputado: totalImputado, watermark: null });
+      if (draft.autoIncrementar) {
+        // Próximo número auto.
+        const next = await api.get<ProximoNumero>(`/api/erp/tesoreria/recibos/proximo-numero?pv=${draft.puntoVenta}`);
+        setSelectedReciboId(null);
+        setDraft({ ...DRAFT_INICIAL, numero: next.numero });
+      } else {
+        setSelectedReciboId(emitido.data.recibo_id);
+      }
+    } catch (e) {
+      toast.error('No se pudo emitir', (e as ApiError).message);
+    }
   };
 
-  const valid = !!facturaId && (Number(montoCobrado || montoCobrable) === 0 || !!medioCobroId);
+  return (
+    <div className="flex h-[calc(100vh-60px)]">
+      {/* Sidebar — lista de recibos */}
+      <div className="w-80 border-r border-line bg-surface-row flex flex-col">
+        <div className="p-2 border-b border-line">
+          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-navy-800 mb-2">
+            <Receipt className="w-4 h-4 text-azure" /> Recibos emitidos
+          </div>
+          <div className="relative">
+            <Search className="w-3 h-3 absolute left-2 top-2 text-ink-muted" />
+            <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar por nro o cliente…"
+              className="w-full pl-7 pr-2 py-1 text-[12px] border border-line rounded focus:outline-none focus:border-azure" />
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {recibosFiltrados.length === 0 && (
+            <div className="p-3 text-[11px] text-ink-muted italic">Sin recibos.</div>
+          )}
+          {recibosFiltrados.map((r) => (
+            <button key={r.id}
+              onClick={() => setSelectedReciboId(r.id)}
+              className={`w-full text-left p-2 border-b border-line text-[11.5px] hover:bg-azure-soft/20 ${
+                selectedReciboId === r.id ? 'bg-azure-soft/30 border-l-2 border-l-azure' : ''
+              }`}>
+              <div className="flex items-center justify-between">
+                <strong className="font-mono">{r.punto_venta && r.numero ? `${r.punto_venta}-${r.numero}` : r.numero_correlativo}</strong>
+                <Badge variant={ESTADO_BADGE[r.estado]}>{r.estado}</Badge>
+              </div>
+              <div className="text-ink-muted truncate">{r.cliente?.nombre ?? `#${r.cliente_auxiliar_id}`}</div>
+              <div className="text-[10px] text-ink-muted">
+                {fmtFecha(r.fecha_emision)} · ${fmtMoney(r.monto_cobrado)}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main — Form + Preview */}
+      <div className="flex-1 overflow-auto p-3 space-y-3">
+        {/* Header acciones */}
+        <div className="flex items-center justify-between gap-2 sticky top-0 bg-bg-base z-10 pb-2 border-b border-line">
+          <div className="text-[14px] font-semibold text-navy-800 flex items-center gap-2">
+            <Receipt className="w-4 h-4" /> Recibos (v1.32)
+            {selectedReciboId && reciboDetalle && (
+              <span className="ml-2 text-[12px] text-ink-muted font-normal">
+                Viendo {reciboDetalle.punto_venta}-{reciboDetalle.numero} <Badge variant={ESTADO_BADGE[reciboDetalle.estado]}>{reciboDetalle.estado}</Badge>
+                {reciboDetalle.numero_legacy && <span className="ml-2 font-mono text-[10px]">({reciboDetalle.numero_legacy})</span>}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-1.5">
+            <Button variant="ghost" size="sm" onClick={handleNuevoBorrador}>
+              <Plus className="w-3 h-3" /> Nuevo borrador
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleRestablecerEjemplo}>
+              <RotateCcw className="w-3 h-3" /> Restablecer ejemplo
+            </Button>
+            {!selectedReciboId && (
+              <Button variant="primary" size="sm" onClick={handleEmitirEImprimir} disabled={crearMut.isPending}>
+                <Printer className="w-3 h-3" /> Emitir e imprimir
+              </Button>
+            )}
+            {selectedReciboId && reciboDetalle?.estado === 'EMITIDO' && (
+              <Button variant="danger" size="sm" onClick={() => setAnularTarget(reciboDetalle)}>
+                <Ban className="w-3 h-3" /> Anular
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* Form */}
+          <div className="space-y-3">
+            <Card>
+              <CardBody className="space-y-2">
+                <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                  <Field label="PV" value={draft.puntoVenta}
+                    onChange={(e) => setDraft({ ...draft, puntoVenta: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <Field label="Número" value={draft.numero}
+                    onChange={(e) => setDraft({ ...draft, numero: e.target.value })}
+                    disabled={!!selectedReciboId}
+                    hint={proximoNumeroResp?.consultado_distriapp ? `Distri max=${proximoNumeroResp.max_distriapp}` : undefined} />
+                  <Field label="Fecha recibo *" type="date" value={draft.fecha}
+                    onChange={(e) => setDraft({ ...draft, fecha: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                </div>
+                <div className="text-[10.5px] text-ink-muted">
+                  <label className="flex items-center gap-1">
+                    <input type="checkbox" checked={draft.autoIncrementar}
+                      onChange={(e) => setDraft({ ...draft, autoIncrementar: e.target.checked })} />
+                    Auto incrementar recibo al imprimir
+                  </label>
+                </div>
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader title={<div className="text-[12px] font-semibold">Cliente</div>} />
+              <CardBody className="space-y-2">
+                <SelectField label="Cliente *" value={draft.clienteId}
+                  onChange={(e) => onPickCliente(e.target.value)}
+                  disabled={!!selectedReciboId}
+                  options={[{ value: '', label: clientes.length === 0 ? 'Cargando…' : 'Elegí cliente…' },
+                    ...clientes.map((c) => ({ value: String(c.id), label: `${c.codigo} · ${c.nombre}` }))]} />
+                <div className="grid grid-cols-2 gap-2 text-[11.5px]">
+                  <Field label="CUIT" value={draft.clienteCuit}
+                    onChange={(e) => setDraft({ ...draft, clienteCuit: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <Field label="Cond. IVA" value={draft.clienteIva}
+                    onChange={(e) => setDraft({ ...draft, clienteIva: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <Field label="Dirección" value={draft.clienteDireccion1}
+                    onChange={(e) => setDraft({ ...draft, clienteDireccion1: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <Field label="Localidad" value={draft.clienteDireccion2}
+                    onChange={(e) => setDraft({ ...draft, clienteDireccion2: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                </div>
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader title={
+                <div className="flex items-center justify-between">
+                  <div className="text-[12px] font-semibold">Comprobantes imputados ({draft.comprobantes.length})</div>
+                  {!selectedReciboId && draft.clienteId && (
+                    <Button variant="ghost" size="sm" onClick={() => setAgregarCompModalOpen(true)}>
+                      <Plus className="w-3 h-3" /> Agregar
+                    </Button>
+                  )}
+                </div>
+              } />
+              <CardBody>
+                {draft.comprobantes.length === 0 ? (
+                  <div className="text-[11px] text-ink-muted italic">Sin comprobantes.</div>
+                ) : (
+                  <table className="w-full text-[11px]">
+                    <thead><tr className="text-ink-muted">
+                      <th className="text-left px-1">Fecha</th>
+                      <th className="text-left">N° Fact</th>
+                      <th className="text-right">Total fact</th>
+                      <th className="text-right">Imputado</th>
+                      {!selectedReciboId && <th></th>}
+                    </tr></thead>
+                    <tbody>
+                      {draft.comprobantes.map((c, i) => (
+                        <tr key={i} className="border-t border-line">
+                          <td className="px-1">{fmtFecha(c.fecha)}</td>
+                          <td className="font-mono">{c.numeroFactura}</td>
+                          <td className="text-right tabular">${fmtMoney(c.totalFactura)}</td>
+                          <td className="text-right tabular font-semibold">${fmtMoney(c.imputado)}</td>
+                          {!selectedReciboId && (
+                            <td className="text-right">
+                              <button onClick={() => setDraft({ ...draft, comprobantes: draft.comprobantes.filter((_, idx) => idx !== i) })}>
+                                <Trash2 className="w-3 h-3 text-danger" />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                      <tr className="font-semibold border-t border-line bg-azure-soft/10">
+                        <td colSpan={3} className="text-right px-1">Total imputado</td>
+                        <td className="text-right tabular">${fmtMoney(totalImputado)}</td>
+                        {!selectedReciboId && <td></td>}
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader title={<div className="text-[12px] font-semibold">Cobro</div>} />
+              <CardBody className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 text-[11.5px]">
+                  <Field label="Fecha cobro" type="date" value={draft.fechaCobro}
+                    onChange={(e) => setDraft({ ...draft, fechaCobro: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <Field label="Detalle cobro" value={draft.detalleCobro}
+                    onChange={(e) => setDraft({ ...draft, detalleCobro: e.target.value })}
+                    placeholder="ECHEQ BANCO X N°..."
+                    disabled={!!selectedReciboId} />
+                  <Field label="Importe recibido" type="number" value={draft.importeRecibido}
+                    onChange={(e) => setDraft({ ...draft, importeRecibido: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <SelectField label="Medio de cobro" value={draft.medioCobroId}
+                    onChange={(e) => setDraft({ ...draft, medioCobroId: e.target.value })}
+                    disabled={!!selectedReciboId}
+                    options={[{ value: '', label: '—' },
+                      ...bancos.map((b) => ({ value: String(b.id), label: b.nombre }))]} />
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                  <Field label="Ret IVA" type="number" value={draft.retencionIva}
+                    onChange={(e) => setDraft({ ...draft, retencionIva: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <Field label="Ret IIBB" type="number" value={draft.retencionIibb}
+                    onChange={(e) => setDraft({ ...draft, retencionIibb: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                  <Field label="Ret Ganancias" type="number" value={draft.retencionGanancias}
+                    onChange={(e) => setDraft({ ...draft, retencionGanancias: e.target.value })}
+                    disabled={!!selectedReciboId} />
+                </div>
+                <div className="text-[12px] flex justify-between bg-azure-soft/20 border border-azure-soft rounded p-2">
+                  <span>Total cobro:</span>
+                  <strong>${fmtMoney(totalCobro)}</strong>
+                </div>
+              </CardBody>
+            </Card>
+          </div>
+
+          {/* Preview en vivo */}
+          <ReciboPreview draft={draft} totalCobro={totalCobro} totalImputado={totalImputado}
+            watermark={selectedReciboId && reciboDetalle?.estado === 'ANULADO' ? 'RECIBO ANULADO' : (!selectedReciboId ? 'BORRADOR' : null)} />
+        </div>
+      </div>
+
+      {agregarCompModalOpen && (
+        <AgregarComprobanteModal
+          facturas={facturasDelCliente}
+          yaAgregadas={new Set(draft.comprobantes.map((c) => c.factura_venta_id))}
+          onClose={() => setAgregarCompModalOpen(false)}
+          onAgregar={(seleccionadas) => {
+            setDraft({
+              ...draft,
+              comprobantes: [...draft.comprobantes, ...seleccionadas.map((f) => ({
+                factura_venta_id: f.id,
+                numeroFactura: f.numero_completo,
+                fecha: f.fecha_emision,
+                totalFactura: Number(f.imp_total),
+                imputado: Number(f.saldo),
+              }))],
+            });
+            setAgregarCompModalOpen(false);
+          }}
+        />
+      )}
+
+      {anularTarget && (
+        <AnularModal recibo={anularTarget} onClose={() => setAnularTarget(null)}
+          onSuccess={() => { invalidate(); refetchRecibos(); setAnularTarget(null); setSelectedReciboId(null); }} />
+      )}
+    </div>
+  );
+}
+
+function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
+  draft: Draft; totalCobro: number; totalImputado: number; watermark: string | null;
+}) {
+  return (
+    <div className="sticky top-12 bg-white border border-line rounded p-3 text-[11px]" style={{ fontFamily: 'Arial, sans-serif', color: '#111827' }}>
+      <div className="border border-black rounded relative overflow-hidden">
+        {watermark && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <span className="border-[6px] border-danger/70 text-danger/40 text-[26px] font-black rotate-[-20deg] px-4 py-2">
+              {watermark}
+            </span>
+          </div>
+        )}
+        {/* Header */}
+        <div className="grid border-b border-black" style={{ gridTemplateColumns: '1.4fr 0.42fr 0.88fr' }}>
+          <div className="p-2">
+            <div className="font-bold text-[12px]">{draft.empresaNombre}</div>
+            <div>{draft.empresaDireccion1}</div>
+            <div>{draft.empresaDireccion2}</div>
+            <div>{draft.empresaIva}</div>
+          </div>
+          <div className="border-l border-r border-black flex flex-col items-center justify-center p-1">
+            <div className="text-[28px] leading-none font-bold">X</div>
+            <div className="text-[8px] font-bold leading-tight text-center">DOCUMENTO<br />NO VALIDO<br />COMO FACTURA</div>
+          </div>
+          <div className="p-2 text-center">
+            <div className="text-[14px] font-extrabold">RECIBO</div>
+            <div className="text-[10px]">{draft.puntoVenta} - {draft.numero || '00000000'}</div>
+            <div className="mt-2 grid grid-cols-2 gap-x-1 text-[9.5px] text-left">
+              <span className="font-bold">FECHA:</span><span>{fmtFecha(draft.fecha)}</span>
+              <span className="font-bold">CUIT:</span><span>{draft.empresaCuit}</span>
+              <span className="font-bold">INICIO ACT.:</span><span>{fmtFecha(draft.empresaInicioActividad)}</span>
+            </div>
+          </div>
+        </div>
+        {/* Cliente */}
+        <div className="grid grid-cols-2 gap-2 p-2 border-b border-black text-[10px]">
+          <div>
+            <div><span className="font-bold">CLIENTE</span> {draft.clienteNombre || '—'}</div>
+            <div><span className="font-bold">DIRECCIÓN</span> {draft.clienteDireccion1 || '—'}</div>
+            <div>{draft.clienteDireccion2}</div>
+          </div>
+          <div>
+            <div><span className="font-bold">CUIT</span> {draft.clienteCuit || '—'}</div>
+            <div><span className="font-bold">IVA</span> {draft.clienteIva || '—'}</div>
+          </div>
+        </div>
+        {/* Cobro */}
+        <div className="p-2 text-[10px]">
+          <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 max-w-md">
+            <span className="font-bold">FECHA DEL COBRO</span><span className="text-right">{fmtFecha(draft.fechaCobro)}</span>
+            <span className="font-bold">DETALLE DEL COBRO</span><span className="text-right">{draft.detalleCobro || '—'}</span>
+            <span className="font-bold">IMPORTE RECIBIDO</span><span className="text-right">${fmtMoney(parseMontoEs(draft.importeRecibido))}</span>
+            <span className="font-bold">RETENCIONES IVA</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionIva))}</span>
+            <span className="font-bold">RETENCIONES IIBB</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionIibb))}</span>
+            <span className="font-bold">RETENCIONES GANANCIAS</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionGanancias))}</span>
+            <span className="font-extrabold">TOTAL COBRO</span><span className="text-right font-extrabold">${fmtMoney(totalCobro)}</span>
+          </div>
+        </div>
+        {/* Tabla comprobantes */}
+        <div className="border-t border-black p-2 text-[10px]">
+          <div className="font-extrabold mb-1">DETALLE DE COMPROBANTES IMPUTADOS</div>
+          <table className="w-full border-collapse">
+            <thead><tr>
+              <th className="border border-black px-1 py-0.5 text-left">FECHA</th>
+              <th className="border border-black px-1 py-0.5 text-left">N° FACT</th>
+              <th className="border border-black px-1 py-0.5 text-right">TOTAL FACT</th>
+              <th className="border border-black px-1 py-0.5 text-right">IMPUTADO</th>
+            </tr></thead>
+            <tbody>
+              {draft.comprobantes.length === 0 ? (
+                <tr><td colSpan={4} className="border border-black px-1 italic text-ink-muted">Sin comprobantes imputados.</td></tr>
+              ) : draft.comprobantes.map((c, i) => (
+                <tr key={i}>
+                  <td className="border border-black px-1">{fmtFecha(c.fecha)}</td>
+                  <td className="border border-black px-1 font-mono">{c.numeroFactura}</td>
+                  <td className="border border-black px-1 text-right">${fmtMoney(c.totalFactura)}</td>
+                  <td className="border border-black px-1 text-right">${fmtMoney(c.imputado)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* Footer */}
+        <div className="border-t border-black p-2 flex justify-end gap-3 font-extrabold text-[12px]">
+          <span>TOTAL IMPUTADO</span>
+          <span>${fmtMoney(totalImputado)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgregarComprobanteModal({ facturas, yaAgregadas, onClose, onAgregar }: {
+  facturas: FacturaImputable[];
+  yaAgregadas: Set<number>;
+  onClose: () => void;
+  onAgregar: (seleccionadas: FacturaImputable[]) => void;
+}) {
+  const disponibles = facturas.filter((f) => !yaAgregadas.has(f.id));
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
+  const [busq, setBusq] = useState('');
+  const filtradas = useMemo(() => {
+    const q = busq.trim().toLowerCase();
+    if (!q) return disponibles;
+    return disponibles.filter((f) =>
+      f.numero_completo.toLowerCase().includes(q) || String(f.fecha_emision).includes(q),
+    );
+  }, [disponibles, busq]);
+  const toggle = (id: number) => {
+    const n = new Set(seleccion);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    setSeleccion(n);
+  };
+  const toggleAll = () => {
+    setSeleccion(seleccion.size === filtradas.length ? new Set() : new Set(filtradas.map((f) => f.id)));
+  };
+  const total = filtradas.filter((f) => seleccion.has(f.id)).reduce((s, f) => s + f.saldo, 0);
 
   return (
-    <Modal open onClose={onClose} title="Nuevo recibo" size="lg" footer={
+    <Modal open onClose={onClose} title="Agregar comprobantes imputados" size="lg" footer={
       <>
         <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-        <Button variant="primary" onClick={() => { setEmitirAlConfirmar(false); submit(); }}
-          disabled={!valid || crearMut.isPending}>
-          Guardar borrador
-        </Button>
-        <Button variant="primary" onClick={() => { setEmitirAlConfirmar(true); submit(); }}
-          disabled={!valid || crearMut.isPending}>
-          Emitir recibo
+        <Button variant="primary" disabled={seleccion.size === 0}
+          onClick={() => onAgregar(filtradas.filter((f) => seleccion.has(f.id)))}>
+          Agregar {seleccion.size > 0 ? `(${seleccion.size})` : ''}
         </Button>
       </>
     }>
-      <div className="space-y-3 text-[12px]">
-        <div className="grid grid-cols-2 gap-2">
-          <SelectField label="Cliente *" value={clienteId}
-            onChange={(e) => { setClienteId(e.target.value); setFacturaId(''); setNcAplicadas([]); }}
-            options={[{ value: '', label: 'Elegí cliente…' },
-              ...(clientesData?.clientes ?? []).map((c) => ({
-                value: String(c.id), label: `${c.codigo} ${c.nombre}`,
-              }))]} />
-          <SelectField label="Factura *" value={facturaId}
-            onChange={(e) => onPickFactura(e.target.value)}
-            options={[{ value: '', label: clienteId ? 'Elegí factura…' : '(elegí cliente primero)' },
-              ...facturasDisponibles.map((f) => ({
-                value: String(f.id),
-                label: `${f.tipo_codigo} ${f.letra ?? ''} ${String(f.punto_venta_numero).padStart(4, '0')}-${String(f.numero).padStart(8, '0')} · $${fmtMoney(f.imp_total)}`,
-              }))]} />
-        </div>
-
-        {facturaSel && (
-          <div className="bg-azure-soft/20 border border-azure-soft rounded p-2 text-[11.5px]">
-            Factura {facturaSel.tipo_codigo} {facturaSel.letra ?? ''}{' '}
-            <code>{String(facturaSel.punto_venta_numero).padStart(4, '0')}-{String(facturaSel.numero).padStart(8, '0')}</code>{' '}
-            · Total <strong>${fmtMoney(facturaSel.imp_total)}</strong> · Estado {facturaSel.estado}
-          </div>
-        )}
-
-        {/* NC aplicadas */}
-        {facturaId && (
-          <div className="border border-line rounded p-2 space-y-1.5 bg-surface-row">
+      <div className="space-y-2 text-[12px]">
+        <input value={busq} onChange={(e) => setBusq(e.target.value)}
+          placeholder="Buscar por nro o fecha…"
+          className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+        {disponibles.length === 0 ? (
+          <div className="text-[11px] text-ink-muted italic">El cliente no tiene facturas pendientes de imputar.</div>
+        ) : (
+          <>
             <div className="flex items-center justify-between">
-              <div className="text-[11.5px] font-semibold text-navy-800">NC aplicadas (auto-FIFO para WSFE)</div>
-              <label className="flex items-center gap-1 text-[11px]">
-                <input type="checkbox" checked={autoImputarNc}
-                  onChange={(e) => setAutoImputarNc(e.target.checked)} />
-                Auto-imputar
+              <label className="text-[11px] cursor-pointer">
+                <input type="checkbox" className="mr-1"
+                  checked={seleccion.size === filtradas.length && filtradas.length > 0}
+                  onChange={toggleAll} />
+                Seleccionar todas ({filtradas.length})
               </label>
+              <span className="text-[11.5px] text-ink-muted">
+                Total seleccionadas: <strong>${fmtMoney(total)}</strong>
+              </span>
             </div>
-            {ncAplicadas.length === 0 && (
-              <div className="text-[11px] text-ink-muted italic">
-                {ncLibres.length === 0 ? 'El cliente no tiene NC libres con saldo.'
-                  : `${ncLibres.length} NC libre${ncLibres.length === 1 ? '' : 's'} disponible${ncLibres.length === 1 ? '' : 's'}. ${autoImputarNc ? 'Auto-imputación activa.' : 'Activá auto-imputar o agregalas manualmente.'}`}
-              </div>
-            )}
-            {ncAplicadas.length > 0 && (
+            <div className="max-h-80 overflow-auto border border-line rounded">
               <table className="w-full text-[11px]">
-                <thead><tr className="text-ink-muted"><th className="text-left px-1">NC</th><th className="text-right">Saldo NC</th><th className="text-right">A aplicar</th><th></th></tr></thead>
-                <tbody>
-                  {ncAplicadas.map((n, i) => {
-                    const nc = ncLibres.find((x) => x.id === n.nc_factura_id) ?? n.nc;
-                    return (
-                      <tr key={i} className="border-t border-line">
-                        <td className="px-1">{nc ? `${nc.tipo} ${nc.numero} (${fmtDate(nc.fecha_emision)})` : `NC #${n.nc_factura_id}`}</td>
-                        <td className="text-right tabular">${nc ? fmtMoney(nc.saldo_imputable ?? nc.imp_total) : '—'}</td>
-                        <td className="text-right tabular font-semibold">${fmtMoney(n.monto_aplicado)}</td>
-                        <td className="text-right">
-                          <button onClick={() => setNcAplicadas(ncAplicadas.filter((_, idx) => idx !== i))}>
-                            <Trash2 className="w-3 h-3 text-danger" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="font-semibold border-t border-line">
-                    <td colSpan={2} className="text-right px-1">Total NC</td>
-                    <td className="text-right tabular">${fmtMoney(totalNc)}</td>
-                    <td></td>
+                <thead className="bg-surface-row sticky top-0">
+                  <tr>
+                    <th className="px-2 py-1 w-8"></th>
+                    <th className="text-left">Nº</th>
+                    <th className="text-left">Fecha</th>
+                    <th className="text-right">Total</th>
+                    <th className="text-right">Saldo</th>
+                    <th className="text-left">Estado</th>
                   </tr>
+                </thead>
+                <tbody>
+                  {filtradas.map((f) => (
+                    <tr key={f.id} className={`border-t border-line cursor-pointer ${seleccion.has(f.id) ? 'bg-azure-soft/30' : 'hover:bg-azure-soft/10'}`}
+                      onClick={() => toggle(f.id)}>
+                      <td className="px-2 py-0.5"><input type="checkbox" checked={seleccion.has(f.id)} readOnly /></td>
+                      <td className="font-mono">{f.tipo} {f.numero_completo}</td>
+                      <td>{fmtFecha(f.fecha_emision)}</td>
+                      <td className="text-right tabular">${fmtMoney(f.imp_total)}</td>
+                      <td className="text-right tabular font-semibold">${fmtMoney(f.saldo)}</td>
+                      <td className="text-[10px]">{f.estado}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            )}
-          </div>
-        )}
-
-        {/* Retenciones */}
-        {facturaId && (
-          <div className="border border-line rounded p-2 space-y-1.5 bg-surface-row">
-            <div className="flex items-center justify-between">
-              <div className="text-[11.5px] font-semibold text-navy-800">Retenciones recibidas</div>
-              <Button variant="ghost" size="sm" onClick={() => setRetenciones([...retenciones,
-                { tipo: 'GANANCIAS', monto: 0, cuenta_contable_id: 0 }])}>
-                <Plus className="w-3 h-3" /> Sumar
-              </Button>
             </div>
-            {retenciones.length === 0 ? (
-              <div className="text-[11px] text-ink-muted italic">Sin retenciones.</div>
-            ) : (
-              <div className="space-y-1">
-                {retenciones.map((r, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-1 items-end border-b border-line pb-1">
-                    <SelectField label="Tipo" value={r.tipo}
-                      onChange={(e) => {
-                        const next = [...retenciones]; next[i].tipo = e.target.value; setRetenciones(next);
-                      }}
-                      options={['GANANCIAS', 'IVA', 'IIBB', 'SUSS', 'OTRO'].map((v) => ({ value: v, label: v }))}
-                      containerClassName="col-span-2" />
-                    <Field label="Cert" value={r.numero_certificado ?? ''}
-                      onChange={(e) => { const n = [...retenciones]; n[i].numero_certificado = e.target.value; setRetenciones(n); }}
-                      containerClassName="col-span-2" />
-                    <Field label="Alíc %" type="number" value={String(r.alicuota ?? '')}
-                      onChange={(e) => { const n = [...retenciones]; n[i].alicuota = +e.target.value || undefined; setRetenciones(n); }}
-                      containerClassName="col-span-1" />
-                    <Field label="Base" type="number" value={String(r.base_imponible ?? '')}
-                      onChange={(e) => { const n = [...retenciones]; n[i].base_imponible = +e.target.value || undefined; setRetenciones(n); }}
-                      containerClassName="col-span-2" />
-                    <Field label="Monto *" type="number" value={String(r.monto)}
-                      onChange={(e) => { const n = [...retenciones]; n[i].monto = +e.target.value; setRetenciones(n); }}
-                      containerClassName="col-span-2" />
-                    <SelectField label="Cuenta dest *" value={String(r.cuenta_contable_id)}
-                      onChange={(e) => { const n = [...retenciones]; n[i].cuenta_contable_id = +e.target.value; setRetenciones(n); }}
-                      options={[{ value: '0', label: '—' },
-                        ...(cuentas?.data ?? []).map((c) => ({ value: String(c.id), label: `${c.codigo} ${c.nombre}` }))]}
-                      containerClassName="col-span-2" />
-                    <div className="col-span-1 text-right">
-                      <button onClick={() => setRetenciones(retenciones.filter((_, idx) => idx !== i))}>
-                        <Trash2 className="w-3 h-3 text-danger" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                <div className="text-right text-[11.5px] font-semibold">Total ret ${fmtMoney(totalRet)}</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Cobro */}
-        {facturaId && (
-          <div className="border border-azure-soft rounded p-2 space-y-1.5 bg-azure-soft/10">
-            <div className="grid grid-cols-3 gap-2 text-[11.5px]">
-              <div><strong>Total factura:</strong> ${fmtMoney(totalFactura)}</div>
-              <div>NC: ${fmtMoney(totalNc)}</div>
-              <div>Retenciones: ${fmtMoney(totalRet)}</div>
-            </div>
-            <div className="border-t border-azure-soft pt-1.5 grid grid-cols-2 gap-2">
-              <div>
-                <strong>Monto cobrable:</strong> ${fmtMoney(montoCobrable)}
-                <div className="text-[10px] text-ink-muted">total − NC − retenciones</div>
-              </div>
-              <Field label="Monto a cobrar (default = cobrable)" type="number"
-                value={montoCobrado} onChange={(e) => setMontoCobrado(e.target.value)}
-                placeholder={String(montoCobrable.toFixed(2))} />
-            </div>
-            {(Number(montoCobrado || montoCobrable) > 0) && (
-              <SelectField label="Medio de cobro *" value={medioCobroId}
-                onChange={(e) => setMedioCobroId(e.target.value)}
-                options={[{ value: '', label: 'Elegí medio…' },
-                  ...(bancos?.data ?? []).map((b) => ({ value: String(b.id), label: b.nombre }))]} />
-            )}
-          </div>
-        )}
-
-        <div>
-          <label className="block text-[11px] text-ink-muted mb-1">Observaciones</label>
-          <textarea rows={2} value={observaciones} onChange={(e) => setObservaciones(e.target.value)}
-            maxLength={1000}
-            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
-        </div>
-
-        {crearMut.error && (
-          <FormError error={errorMessage(crearMut.error)} />
+          </>
         )}
       </div>
     </Modal>
   );
 }
 
-function DetalleReciboModal({ id, onClose }: { id: number; onClose: () => void }) {
-  const { data, isLoading } = useApi<Recibo & {
-    nc_aplicadas?: Array<{ id: number; nc_factura_id: number; monto_aplicado: number; automatica: boolean; nc?: { numero: number; imp_total: number } }>;
-    retenciones?: Array<{ id: number; tipo: string; monto: number; numero_certificado: string | null }>;
-    medio_cobro?: CuentaBancaria;
-    asiento?: { id: number; numero: number };
-  }>(['recibo', id], `/api/erp/tesoreria/recibos/${id}`);
-
-  return (
-    <Modal open onClose={onClose} title={data ? `Recibo ${data.numero_correlativo}` : 'Cargando…'} size="lg" footer={
-      <Button variant="primary" onClick={onClose}>Cerrar</Button>
-    }>
-      {isLoading || !data ? <div className="text-[12px] text-ink-muted">Cargando…</div> : (
-        <div className="space-y-3 text-[12px]">
-          <div className="grid grid-cols-2 gap-2 bg-surface-row border border-line rounded p-2">
-            <div><strong>Fecha:</strong> {fmtDate(data.fecha_emision)}</div>
-            <div><strong>Estado:</strong> <Badge variant={ESTADO_BADGE[data.estado]}>{data.estado}</Badge></div>
-            <div><strong>Cliente:</strong> {data.cliente?.nombre}</div>
-            <div><strong>Factura:</strong> FV #{data.factura?.numero}</div>
-            <div><strong>Total factura:</strong> ${fmtMoney(data.total_factura)}</div>
-            <div><strong>Saldo post:</strong> ${fmtMoney(data.saldo_factura_post)}</div>
-            <div><strong>NC aplicadas:</strong> ${fmtMoney(data.total_nc_aplicadas)}</div>
-            <div><strong>Retenciones:</strong> ${fmtMoney(data.total_retenciones)}</div>
-            <div><strong>Monto cobrado:</strong> ${fmtMoney(data.monto_cobrado)}</div>
-            {data.medio_cobro && <div><strong>Medio:</strong> {data.medio_cobro.nombre}</div>}
-            {data.asiento && <div><strong>Asiento:</strong> #{data.asiento.numero}</div>}
-          </div>
-          {data.nc_aplicadas && data.nc_aplicadas.length > 0 && (
-            <div>
-              <div className="font-semibold mb-1">NC aplicadas</div>
-              <ul className="space-y-0.5 text-[11.5px]">
-                {data.nc_aplicadas.map((n) => (
-                  <li key={n.id}>NC #{n.nc_factura_id} · ${fmtMoney(n.monto_aplicado)} {n.automatica && <span className="text-info">(auto)</span>}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {data.retenciones && data.retenciones.length > 0 && (
-            <div>
-              <div className="font-semibold mb-1">Retenciones</div>
-              <ul className="space-y-0.5 text-[11.5px]">
-                {data.retenciones.map((r) => (
-                  <li key={r.id}>{r.tipo}{r.numero_certificado && ` (Cert#${r.numero_certificado})`}: ${fmtMoney(r.monto)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {data.observaciones && (
-            <div className="bg-azure-soft/10 border border-azure-soft rounded p-2 text-[11.5px]">
-              <strong>Observaciones:</strong> {data.observaciones}
-            </div>
-          )}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function AnularReciboModal({ recibo, onClose }: { recibo: Recibo; onClose: () => void }) {
+function AnularModal({ recibo, onClose, onSuccess }: { recibo: Recibo; onClose: () => void; onSuccess: () => void }) {
   const toast = useToast();
-  const invalidate = useInvalidate(['recibos']);
   const [motivo, setMotivo] = useState('');
-
   const mut = useApiMutation<unknown, { motivo: string }>(
     (body) => api.post(`/api/erp/tesoreria/recibos/${recibo.id}/anular`, body),
     {
-      onSuccess: () => {
-        toast.success('Recibo anulado', `Reversa generada para ${recibo.numero_correlativo}`);
-        invalidate();
-        onClose();
-      },
+      onSuccess: () => { toast.success('Recibo anulado', `Reversa de ${recibo.punto_venta}-${recibo.numero}`); onSuccess(); },
       onError: (e) => toast.error('No se pudo anular', (e as ApiError).message),
     },
   );
-
   return (
-    <Modal open onClose={onClose} title={`Anular recibo ${recibo.numero_correlativo}`} size="md" footer={
+    <Modal open onClose={onClose} title={`Anular recibo ${recibo.punto_venta}-${recibo.numero}`} size="md" footer={
       <>
         <Button variant="secondary" onClick={onClose}>Cancelar</Button>
         <Button variant="danger" disabled={motivo.trim().length < 5 || mut.isPending}
@@ -528,16 +788,108 @@ function AnularReciboModal({ recibo, onClose }: { recibo: Recibo; onClose: () =>
       <div className="space-y-2 text-[12px]">
         <div className="border border-warning/40 bg-warning-bg/20 rounded p-2 flex items-start gap-1.5">
           <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
-          <div>Esta acción genera un asiento reversa, libera el saldo de la factura y des-imputa las NC asociadas.
-            Queda registrada en audit log.</div>
+          <div>Genera asiento reversa, libera saldos de las facturas imputadas y des-imputa las NC.
+            Queda en audit log.</div>
         </div>
-        <label className="block text-[11px] text-ink-muted">Motivo *</label>
         <textarea rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)}
           maxLength={500}
-          placeholder="Ej: registrado por error; cliente solicitó anulación; doble registro…"
+          placeholder="Motivo (mín 5 chars)…"
           className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
-        <div className="text-[10px] text-ink-muted">{motivo.length} / 500 (mín 5)</div>
       </div>
     </Modal>
   );
+}
+
+function printRecibo(d: Draft, opts: { total_cobro: number; total_imputado: number; watermark: string | null }) {
+  const w = window.open('', '_blank', 'width=1024,height=768');
+  if (!w) return;
+  const escape = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const rows = d.comprobantes.map((c) => `
+    <tr>
+      <td>${escape(fmtFecha(c.fecha))}</td>
+      <td>${escape(c.numeroFactura)}</td>
+      <td style="text-align:right">$${escape(fmt(c.totalFactura))}</td>
+      <td style="text-align:right">$${escape(fmt(c.imputado))}</td>
+    </tr>`).join('');
+  const watermark = opts.watermark ? `<div class="wm"><span>${escape(opts.watermark)}</span></div>` : '';
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Recibo ${d.puntoVenta}-${d.numero}</title>
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    body { font-family: Arial, sans-serif; color:#111827; margin:0; }
+    .r { border:1px solid #111827; position:relative; }
+    .wm { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+    .wm span { border:6px solid rgba(220,38,38,.72); color:rgba(220,38,38,.34); font-size:42px; font-weight:900; padding:18px 26px; transform:rotate(-28deg); }
+    .top { display:grid; grid-template-columns:1.4fr .42fr .88fr; border-bottom:1px solid #111827; }
+    .top > div { padding:10px 12px; }
+    .x { border-left:1px solid #111827; border-right:1px solid #111827; text-align:center; }
+    .x .l { font-size:70px; line-height:1; }
+    .x .t { font-size:14px; font-weight:700; }
+    .meta-t { font-size:24px; font-weight:800; text-align:center; }
+    .meta-s { margin-top:4px; font-size:18px; text-align:center; }
+    .grid { display:grid; grid-template-columns:1fr auto; gap:6px 16px; margin-top:18px; }
+    .c { display:grid; grid-template-columns:1.8fr .9fr; gap:24px; padding:10px 12px; border-bottom:1px solid #111827; }
+    .lbl { font-weight:700; }
+    .amts { padding:14px 12px 16px; }
+    .ag { display:grid; grid-template-columns:1fr auto; gap:6px 16px; max-width:560px; }
+    .agt { font-weight:800; }
+    .tbl { padding:10px 12px; border-top:1px solid #111827; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:4px 6px; border:1px solid #111827; }
+    th { text-align:left; }
+    .foot { padding:10px 12px; border-top:1px solid #111827; display:flex; justify-content:flex-end; gap:14px; font-size:15px; font-weight:800; }
+  </style></head><body>
+  <article class="r">
+    ${watermark}
+    <section class="top">
+      <div>
+        <div style="font-weight:bold;font-size:14px">${escape(d.empresaNombre)}</div>
+        <div>${escape(d.empresaDireccion1)}</div>
+        <div>${escape(d.empresaDireccion2)}</div>
+        <div>${escape(d.empresaIva)}</div>
+      </div>
+      <div class="x"><div class="l">X</div><div class="t">DOCUMENTO<br/>NO VALIDO<br/>COMO FACTURA</div></div>
+      <div>
+        <div class="meta-t">RECIBO</div>
+        <div class="meta-s">${escape(d.puntoVenta)} - ${escape(d.numero)}</div>
+        <div class="grid">
+          <span class="lbl">FECHA:</span><span>${escape(fmtFecha(d.fecha))}</span>
+          <span class="lbl">CUIT:</span><span>${escape(d.empresaCuit)}</span>
+          <span class="lbl">INICIO ACT.:</span><span>${escape(fmtFecha(d.empresaInicioActividad))}</span>
+        </div>
+      </div>
+    </section>
+    <section class="c">
+      <div>
+        <div><span class="lbl">CLIENTE</span> ${escape(d.clienteNombre || '—')}</div>
+        <div><span class="lbl">DIRECCION</span> ${escape(d.clienteDireccion1 || '—')}</div>
+        <div>${escape(d.clienteDireccion2 || '')}</div>
+      </div>
+      <div>
+        <div><span class="lbl">CUIT</span> ${escape(d.clienteCuit || '—')}</div>
+        <div><span class="lbl">IVA</span> ${escape(d.clienteIva || '—')}</div>
+      </div>
+    </section>
+    <section class="amts">
+      <div class="ag">
+        <span class="lbl">FECHA DEL COBRO</span><span style="text-align:right">${escape(fmtFecha(d.fechaCobro))}</span>
+        <span class="lbl">DETALLE DEL COBRO</span><span style="text-align:right">${escape(d.detalleCobro || '—')}</span>
+        <span class="lbl">IMPORTE RECIBIDO</span><span style="text-align:right">$${escape(fmt(parseMontoEs(d.importeRecibido)))}</span>
+        <span class="lbl">RETENCIONES IVA</span><span style="text-align:right">$${escape(fmt(parseMontoEs(d.retencionIva)))}</span>
+        <span class="lbl">RETENCIONES IIBB</span><span style="text-align:right">$${escape(fmt(parseMontoEs(d.retencionIibb)))}</span>
+        <span class="lbl">RETENCIONES GANANCIAS</span><span style="text-align:right">$${escape(fmt(parseMontoEs(d.retencionGanancias)))}</span>
+        <span class="lbl agt">TOTAL COBRO</span><span class="agt" style="text-align:right">$${escape(fmt(opts.total_cobro))}</span>
+      </div>
+    </section>
+    <section class="tbl">
+      <div style="font-weight:800;margin-bottom:2px">DETALLE DE COMPROBANTES IMPUTADOS</div>
+      <table><thead><tr><th>FECHA</th><th>N° FACT</th><th style="text-align:right">TOTAL FACT</th><th style="text-align:right">IMPUTADO</th></tr></thead><tbody>
+      ${rows || '<tr><td colspan="4">Sin comprobantes imputados.</td></tr>'}
+      </tbody></table>
+    </section>
+    <section class="foot"><span>TOTAL IMPUTADO</span><span>$${escape(fmt(opts.total_imputado))}</span></section>
+  </article>
+  <script>window.onload = () => window.print();</script>
+  </body></html>`);
+  w.document.close();
 }

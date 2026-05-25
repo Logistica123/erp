@@ -4,6 +4,7 @@ namespace App\Erp\Http\Controllers;
 
 use App\Erp\Models\Tesoreria\Recibo;
 use App\Erp\Models\VentasCompras\FacturaVenta;
+use App\Erp\Services\Integracion\DistriAppBridge;
 use App\Erp\Services\ReciboService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -23,12 +24,15 @@ use Illuminate\Support\Facades\DB;
  */
 class RecibosController
 {
-    public function __construct(private readonly ReciboService $svc) {}
+    public function __construct(
+        private readonly ReciboService $svc,
+        private readonly DistriAppBridge $distri, // v1.32
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
-        $q = Recibo::with(['cliente:id,nombre,cuit', 'factura:id,tipo_comprobante_id,numero,imp_total'])
+        $q = Recibo::with(['cliente:id,nombre,cuit'])
             ->where('empresa_id', $empresaId);
 
         if ($cliente = (int) $request->query('cliente_id', 0)) {
@@ -36,6 +40,13 @@ class RecibosController
         }
         if ($estado = (string) $request->query('estado', '')) {
             $q->where('estado', $estado);
+        }
+        if ($busqueda = trim((string) $request->query('q', ''))) {
+            $q->where(function ($w) use ($busqueda) {
+                $w->where('numero', 'like', "%{$busqueda}%")
+                  ->orWhere('numero_correlativo', 'like', "%{$busqueda}%")
+                  ->orWhereHas('cliente', fn ($qc) => $qc->where('nombre', 'like', "%{$busqueda}%"));
+            });
         }
         if ($desde = (string) $request->query('desde', '')) {
             $q->where('fecha_emision', '>=', $desde);
@@ -48,12 +59,122 @@ class RecibosController
         return response()->json(['ok' => true, 'data' => $rows]);
     }
 
+    /**
+     * v1.32 — Lista de clientes para el dropdown de recibos.
+     * Sincroniza desde DistriApp on-demand (idempotente).
+     */
+    public function clientesParaRecibos(Request $request): JsonResponse
+    {
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+
+        // Sync on-demand (rápido, ~12 filas hoy).
+        try {
+            $this->distri->syncClientes($empresaId);
+        } catch (\Throwable $e) {
+            // Si DistriApp no responde, igual devolvemos lo que ya está en erp_auxiliares.
+        }
+
+        $clientes = DB::table('erp_auxiliares as a')
+            ->leftJoin('basepersonal.clientes as bc', function ($j) {
+                $j->on('bc.id', '=', 'a.id_ref')->where('a.tabla_ref', '=', 'basepersonal.clientes');
+            })
+            ->where('a.empresa_id', $empresaId)
+            ->where('a.tipo', 'Cliente')
+            ->where('a.activo', 1)
+            ->orderBy('a.nombre')
+            ->get([
+                'a.id', 'a.codigo', 'a.nombre', 'a.cuit',
+                'bc.direccion as direccion_distriapp',
+            ]);
+
+        $resultado = $clientes->map(function ($c) {
+            $direccion = trim((string) ($c->direccion_distriapp ?? ''));
+            $partes = preg_split('/\r\n|\r|\n/', $direccion, 2);
+            return [
+                'id' => $c->id,
+                'codigo' => $c->codigo,
+                'nombre' => $c->nombre,
+                'cuit' => $c->cuit,
+                'direccion_1' => $partes[0] ?? '',
+                'direccion_2' => $partes[1] ?? '',
+            ];
+        });
+
+        return response()->json(['ok' => true, 'data' => $resultado]);
+    }
+
+    /**
+     * v1.32 — Facturas imputables (saldo > 0) de un cliente para sumar al recibo.
+     */
+    public function facturasImputablesCliente(Request $request, int $clienteId): JsonResponse
+    {
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $facturas = DB::table('erp_facturas_venta as fv')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
+            ->join('erp_puntos_venta as pv', 'pv.id', '=', 'fv.punto_venta_id')
+            ->where('fv.empresa_id', $empresaId)
+            ->where('fv.auxiliar_id', $clienteId)
+            ->whereIn('fv.estado', ['EMITIDA', 'COBRO_PARCIAL', 'CONTROLADA'])
+            ->where('tc.clase', 'FACTURA')
+            ->whereNull('fv.deleted_at')
+            ->orderByDesc('fv.fecha_emision')
+            ->limit(500)
+            ->get([
+                'fv.id', 'fv.tipo_comprobante_id', 'tc.codigo_interno', 'tc.letra',
+                'pv.numero as pv_numero', 'fv.numero', 'fv.fecha_emision',
+                'fv.imp_total', 'fv.estado', 'fv.origen',
+            ]);
+
+        $resultado = $facturas->map(function ($f) use ($empresaId) {
+            $saldo = $this->svc->saldoFactura((int) $f->id, $empresaId);
+            return [
+                'id' => $f->id,
+                'tipo' => $f->codigo_interno . ($f->letra ? ' ' . $f->letra : ''),
+                'numero_completo' => sprintf('%04d-%08d', (int) $f->pv_numero, (int) $f->numero),
+                'fecha_emision' => $f->fecha_emision,
+                'imp_total' => $f->imp_total,
+                'saldo' => $saldo,
+                'estado' => $f->estado,
+                'origen' => $f->origen,
+            ];
+        })->filter(fn ($f) => $f['saldo'] > 0.01)->values();
+
+        return response()->json(['ok' => true, 'data' => $resultado]);
+    }
+
+    /**
+     * v1.32 — Próximo número PV-NRO sincronizado con DistriApp (sin reservar).
+     * Útil para previsualización del form.
+     */
+    public function proximoNumero(Request $request): JsonResponse
+    {
+        $pv = (string) $request->query('pv', ReciboService::PV_DEFAULT);
+        if (! preg_match('/^\d{4}$/', $pv)) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'PV_INVALIDO', 'message' => 'PV debe tener 4 dígitos',
+            ]], 422);
+        }
+
+        $maxLocal = (int) DB::table('erp_secuencias_recibo')
+            ->where('punto_venta', $pv)->value('ultimo_numero');
+        $maxDistriapp = $this->distri->ultimoNumeroRecibo($pv);
+        $proximo = max($maxLocal, $maxDistriapp) + 1;
+
+        return response()->json(['ok' => true, 'data' => [
+            'punto_venta' => $pv,
+            'numero' => str_pad((string) $proximo, 8, '0', STR_PAD_LEFT),
+            'max_local' => $maxLocal,
+            'max_distriapp' => $maxDistriapp,
+            'consultado_distriapp' => $maxDistriapp > 0 || $maxLocal === 0,
+        ]]);
+    }
+
     public function show(Request $request, int $id): JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $recibo = Recibo::with([
             'cliente:id,nombre,cuit',
-            'factura:id,tipo_comprobante_id,numero,imp_total,fecha_emision',
+            'comprobantesImputados', // v1.32
             'ncAplicadas.nc:id,tipo_comprobante_id,numero,imp_total',
             'retenciones.cuentaContable:id,codigo,nombre',
             'medioCobro:id,nombre,banco_id',
@@ -66,8 +187,12 @@ class RecibosController
     {
         $this->mustHave($request, 'tesoreria.recibos.crear');
         $data = $request->validate([
-            'factura_venta_id' => ['required', 'integer', 'exists:erp_facturas_venta,id'],
+            'cliente_auxiliar_id' => ['required', 'integer', 'exists:erp_auxiliares,id'],
             'fecha_emision' => ['nullable', 'date'],
+            'detalle_cobro' => ['nullable', 'string', 'max:200'],
+            'comprobantes_imputados' => ['required', 'array', 'min:1'],
+            'comprobantes_imputados.*.factura_venta_id' => ['required', 'integer', 'exists:erp_facturas_venta,id'],
+            'comprobantes_imputados.*.monto_imputado' => ['required', 'numeric', 'min:0.01'],
             'monto_cobrado' => ['nullable', 'numeric', 'min:0'],
             'medio_cobro_id' => ['nullable', 'integer', 'exists:erp_cuentas_bancarias,id'],
             'observaciones' => ['nullable', 'string', 'max:1000'],
@@ -75,6 +200,11 @@ class RecibosController
             'nc_aplicadas' => ['nullable', 'array'],
             'nc_aplicadas.*.nc_factura_id' => ['required', 'integer'],
             'nc_aplicadas.*.monto_aplicado' => ['required', 'numeric', 'min:0.01'],
+            // v1.32 — Retenciones simples (sumarias por tipo).
+            'retencion_iva_total' => ['nullable', 'numeric', 'min:0'],
+            'retencion_iibb_total' => ['nullable', 'numeric', 'min:0'],
+            'retencion_ganancias_total' => ['nullable', 'numeric', 'min:0'],
+            // v1.31 — Retenciones detalladas (opcional, coexisten).
             'retenciones' => ['nullable', 'array'],
             'retenciones.*.tipo' => ['required', 'in:GANANCIAS,IVA,IIBB,SUSS,OTRO'],
             'retenciones.*.jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],

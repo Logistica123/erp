@@ -30,8 +30,19 @@ class Recibo extends Model
 
     protected $fillable = [
         'empresa_id', 'numero_correlativo', 'fecha_emision',
+        'punto_venta', 'numero', 'numero_legacy', 'detalle_cobro', // v1.32
         'cliente_auxiliar_id', 'factura_venta_id',
         'total_factura', 'total_nc_aplicadas', 'total_retenciones',
+        // v1.32 — Retenciones simples
+        'retencion_iva_total', 'retencion_iibb_total', 'retencion_ganancias_total',
+        // v1.32 — Snapshot empresa
+        'snapshot_empresa_razon_social', 'snapshot_empresa_cuit',
+        'snapshot_empresa_direccion_1', 'snapshot_empresa_direccion_2',
+        'snapshot_empresa_condicion_iva', 'snapshot_empresa_inicio_actividad',
+        // v1.32 — Snapshot cliente
+        'snapshot_cliente_razon_social', 'snapshot_cliente_cuit',
+        'snapshot_cliente_direccion_1', 'snapshot_cliente_direccion_2',
+        'snapshot_cliente_condicion_iva',
         'monto_cobrable', 'monto_cobrado', 'saldo_factura_post',
         'medio_cobro_id', 'cae', 'estado',
         'asiento_id', 'mov_bancario_id',
@@ -43,9 +54,13 @@ class Recibo extends Model
 
     protected $casts = [
         'fecha_emision' => 'date',
+        'snapshot_empresa_inicio_actividad' => 'date',
         'total_factura' => 'decimal:2',
         'total_nc_aplicadas' => 'decimal:2',
         'total_retenciones' => 'decimal:2',
+        'retencion_iva_total' => 'decimal:2',
+        'retencion_iibb_total' => 'decimal:2',
+        'retencion_ganancias_total' => 'decimal:2',
         'monto_cobrable' => 'decimal:2',
         'monto_cobrado' => 'decimal:2',
         'saldo_factura_post' => 'decimal:2',
@@ -83,6 +98,12 @@ class Recibo extends Model
     public function retenciones(): HasMany
     {
         return $this->hasMany(ReciboRetencion::class);
+    }
+
+    // v1.32 — Multi-comprobante imputado.
+    public function comprobantesImputados(): HasMany
+    {
+        return $this->hasMany(ReciboComprobanteImputado::class);
     }
 
     public function createdBy(): BelongsTo

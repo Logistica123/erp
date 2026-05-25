@@ -301,6 +301,14 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/clientes/{id}/notas-credito-libres', [\App\Erp\Http\Controllers\RecibosController::class, 'ncLibresCliente'])
             ->whereNumber('id')->name('erp.clientes.nc-libres');
 
+        // v1.32 — Endpoints rediseño Recibos modelo DistriApp.
+        Route::get('/clientes/para-recibos', [\App\Erp\Http\Controllers\RecibosController::class, 'clientesParaRecibos'])
+            ->name('erp.clientes.para-recibos');
+        Route::get('/clientes/{id}/facturas-imputables-recibo', [\App\Erp\Http\Controllers\RecibosController::class, 'facturasImputablesCliente'])
+            ->whereNumber('id')->name('erp.clientes.facturas-imputables');
+        Route::get('/tesoreria/recibos/proximo-numero', [\App\Erp\Http\Controllers\RecibosController::class, 'proximoNumero'])
+            ->name('erp.recibos.proximo-numero');
+
         // ADDENDUM v1.15 Sprint O — Imputación de Notas de Crédito.
         Route::get('/imputaciones-nc', [ImputacionesNcController::class, 'index'])
             ->name('erp.imputaciones-nc.index');

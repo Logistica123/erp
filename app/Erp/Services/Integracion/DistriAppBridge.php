@@ -30,6 +30,64 @@ class DistriAppBridge
     }
 
     /**
+     * v1.32 — Último número de recibo emitido en DistriApp para un PV dado.
+     * Lee `basepersonal.liquidacion_recibos` directamente. Si la tabla no
+     * está accesible (DB desconectada / drift de schema), devuelve 0 — el
+     * caller debe combinar con su secuencia local.
+     */
+    public function ultimoNumeroRecibo(string $puntoVenta): int
+    {
+        try {
+            $row = DB::selectOne(
+                "SELECT MAX(CAST(numero_recibo AS UNSIGNED)) AS m
+                   FROM basepersonal.liquidacion_recibos
+                  WHERE punto_venta = ?",
+                [$puntoVenta],
+            );
+            return (int) ($row->m ?? 0);
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    /**
+     * v1.32 — Datos extendidos de un cliente DistriApp (para snapshot de recibo).
+     * Lee `basepersonal.clientes` directo para obtener direccion completa
+     * (la vista `erp_v_clientes_distriapp` solo trae 1 dirección).
+     *
+     * @return ?object {nombre, cuit, direccion_1, direccion_2, condicion_iva}
+     */
+    public function datosCliente(int $distriappId): ?object
+    {
+        try {
+            $row = DB::selectOne(
+                "SELECT nombre, documento_fiscal AS cuit, direccion
+                   FROM basepersonal.clientes
+                  WHERE id = ? AND deleted_at IS NULL",
+                [$distriappId],
+            );
+            if (! $row) return null;
+
+            // basepersonal.clientes.direccion viene como texto único.
+            // Particionamos en línea 1 / 2 si tiene salto de línea, sino todo
+            // va en direccion_1.
+            $direccion = trim((string) ($row->direccion ?? ''));
+            $partes = preg_split('/\r\n|\r|\n/', $direccion, 2);
+            return (object) [
+                'nombre' => $row->nombre,
+                'cuit' => $row->cuit,
+                'direccion_1' => $partes[0] ?? '',
+                'direccion_2' => $partes[1] ?? '',
+                // condicion_iva no está en basepersonal.clientes — el form
+                // del recibo la pide al operador al cargar el cliente.
+                'condicion_iva' => null,
+            ];
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * Distribuidores (personas con CUIL).
      *
      * @return Collection<int, object>

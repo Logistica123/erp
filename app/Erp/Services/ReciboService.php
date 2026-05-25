@@ -4,9 +4,11 @@ namespace App\Erp\Services;
 
 use App\Erp\Models\Asiento;
 use App\Erp\Models\Tesoreria\Recibo;
+use App\Erp\Models\Tesoreria\ReciboComprobanteImputado;
 use App\Erp\Models\Tesoreria\ReciboNcAplicada;
 use App\Erp\Models\Tesoreria\ReciboRetencion;
 use App\Erp\Models\VentasCompras\FacturaVenta;
+use App\Erp\Services\Integracion\DistriAppBridge;
 use App\Erp\Support\AuditLogger;
 use App\Models\User;
 use DomainException;
@@ -24,17 +26,31 @@ class ReciboService
     public function __construct(
         private readonly AsientoService $asientoService,
         private readonly AuditLogger $audit,
+        private readonly DistriAppBridge $distri, // v1.32 — sync numeración cross-platform.
     ) {}
 
+    public const PV_DEFAULT = '0001';
+
     /**
-     * RN-31-1 — Crea un recibo en estado BORRADOR.
+     * v1.32 — Crea un recibo en estado BORRADOR con múltiples comprobantes
+     * imputados, retenciones simples (IVA/IIBB/Gan) y detalle del cobro.
+     *
+     * Back-compat: si se pasa `factura_venta_id` en vez de `comprobantes_imputados`,
+     * se convierte a un único comprobante imputado con monto=total_factura.
      *
      * @param  array{
-     *   factura_venta_id:int,
+     *   cliente_auxiliar_id:int,
      *   fecha_emision?:string,
+     *   fecha_cobro?:string,
+     *   detalle_cobro?:?string,
+     *   comprobantes_imputados?:list<array{factura_venta_id:int, monto_imputado:float}>,
+     *   factura_venta_id?:int,
      *   nc_aplicadas?:list<array{nc_factura_id:int, monto_aplicado:float, automatica?:bool}>,
      *   retenciones?:list<array{tipo:string, jurisdiccion_codigo?:?string, numero_certificado?:?string,
      *                            alicuota?:?float, base_imponible?:?float, monto:float, cuenta_contable_id:int}>,
+     *   retencion_iva_total?:float,
+     *   retencion_iibb_total?:float,
+     *   retencion_ganancias_total?:float,
      *   monto_cobrado?:float,
      *   medio_cobro_id?:?int,
      *   observaciones?:?string,
@@ -44,20 +60,63 @@ class ReciboService
     public function crear(array $data, User $usuario, int $empresaId = 1): Recibo
     {
         return DB::transaction(function () use ($data, $usuario, $empresaId) {
-            $factura = FacturaVenta::where('empresa_id', $empresaId)
-                ->where('id', $data['factura_venta_id'])
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            // Si la factura es WSFE (origen=EMITIDA) y el operador no pasó NC, auto-imputar FIFO.
-            $ncAplicadas = $data['nc_aplicadas'] ?? [];
-            if (empty($ncAplicadas) && ($data['auto_imputar_nc'] ?? true)
-                && in_array($factura->origen, ['EMITIDA', 'WSFE_ERP'], true)) {
-                $ncAplicadas = $this->autoImputarNcFifo($factura, $empresaId);
+            // Normalizar comprobantes: si vino factura_venta_id (v1.31), wrap.
+            $comprobantes = $data['comprobantes_imputados'] ?? [];
+            if (empty($comprobantes) && ! empty($data['factura_venta_id'])) {
+                $fv = FacturaVenta::where('empresa_id', $empresaId)
+                    ->findOrFail($data['factura_venta_id']);
+                $comprobantes = [[
+                    'factura_venta_id' => (int) $fv->id,
+                    'monto_imputado' => (float) $fv->imp_total,
+                ]];
+            }
+            if (empty($comprobantes)) {
+                throw new DomainException('SIN_COMPROBANTES: el recibo debe tener al menos un comprobante imputado.');
             }
 
-            // Validar saldos de cada NC.
-            foreach ($ncAplicadas as $i => $nc) {
+            $clienteId = (int) $data['cliente_auxiliar_id'];
+
+            // Cargar y validar facturas (con lock).
+            $facturasCache = [];
+            $totalImputado = 0.0;
+            foreach ($comprobantes as $i => $c) {
+                $fvId = (int) $c['factura_venta_id'];
+                $monto = (float) $c['monto_imputado'];
+                if ($monto <= 0) {
+                    throw new DomainException("MONTO_IMPUTADO_INVALIDO: linea {$i} con monto <= 0");
+                }
+                $fv = FacturaVenta::where('empresa_id', $empresaId)
+                    ->where('id', $fvId)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+                if ($fv->auxiliar_id !== $clienteId) {
+                    throw new DomainException(sprintf(
+                        'CLIENTE_INCONSISTENTE: factura #%d pertenece a auxiliar #%d, no a #%d',
+                        $fv->id, $fv->auxiliar_id, $clienteId,
+                    ));
+                }
+                $saldo = $this->saldoFactura($fv->id, $empresaId);
+                if ($monto > $saldo + 0.01) {
+                    throw new DomainException(sprintf(
+                        'FACTURA_SOBRE_IMPUTADA: factura #%d tiene saldo $%.2f, se intenta imputar $%.2f',
+                        $fv->id, $saldo, $monto,
+                    ));
+                }
+                $facturasCache[$fvId] = $fv;
+                $totalImputado += $monto;
+            }
+
+            // NC + retenciones.
+            $ncAplicadas = $data['nc_aplicadas'] ?? [];
+            // Auto-imputación FIFO si vino una sola factura WSFE.
+            if (empty($ncAplicadas) && ($data['auto_imputar_nc'] ?? false)
+                && count($comprobantes) === 1) {
+                $unicaFactura = array_values($facturasCache)[0];
+                if (in_array($unicaFactura->origen, ['EMITIDA', 'WSFE_ERP'], true)) {
+                    $ncAplicadas = $this->autoImputarNcFifo($unicaFactura, $empresaId);
+                }
+            }
+            foreach ($ncAplicadas as $nc) {
                 $saldo = $this->saldoImputableNc((int) $nc['nc_factura_id'], $empresaId);
                 if ((float) $nc['monto_aplicado'] > $saldo + 0.01) {
                     throw new DomainException(sprintf(
@@ -67,12 +126,20 @@ class ReciboService
                 }
             }
 
-            $retenciones = $data['retenciones'] ?? [];
-
+            $retencionesDetalle = $data['retenciones'] ?? [];
+            // v1.32 — Retenciones simples (sumatoria por tipo, sin detalle).
+            $retIvaSimple = (float) ($data['retencion_iva_total'] ?? 0);
+            $retIibbSimple = (float) ($data['retencion_iibb_total'] ?? 0);
+            $retGanSimple = (float) ($data['retencion_ganancias_total'] ?? 0);
+            $totalRetSimple = $retIvaSimple + $retIibbSimple + $retGanSimple;
+            $totalRetDetalle = array_sum(array_map(fn ($r) => (float) $r['monto'], $retencionesDetalle));
+            // Las dos formas son aditivas (puede haber un certificado de Ganancias
+            // detallado + un total IIBB sin certificado). El operador elige cómo.
+            $totalRet = $totalRetSimple + $totalRetDetalle;
             $totalNc = array_sum(array_map(fn ($n) => (float) $n['monto_aplicado'], $ncAplicadas));
-            $totalRet = array_sum(array_map(fn ($r) => (float) $r['monto'], $retenciones));
-            $totalFactura = (float) $factura->imp_total;
-            $montoCobrable = max(0.0, $totalFactura - $totalNc - $totalRet);
+
+            // Cálculos.
+            $montoCobrable = max(0.0, $totalImputado - $totalNc - $totalRet);
             $montoCobrado = isset($data['monto_cobrado'])
                 ? (float) $data['monto_cobrado']
                 : $montoCobrable;
@@ -87,32 +154,59 @@ class ReciboService
                 throw new DomainException('MEDIO_COBRO_REQUERIDO: el monto cobrado > 0 requiere medio_cobro_id.');
             }
 
-            $saldoAnterior = $this->saldoFactura($factura->id, $empresaId);
-            $saldoPost = round($saldoAnterior - ($montoCobrado + $totalNc + $totalRet), 2);
-            if ($saldoPost < -0.01) {
-                throw new DomainException(sprintf(
-                    'SALDO_NEGATIVO: aplicar este recibo dejaría la factura con saldo $%.2f', $saldoPost,
-                ));
-            }
+            // Para back-compat con saldo_factura_post (v1.31), usamos el primer
+            // comprobante. Es informativo — el saldo real de cada factura se
+            // recalcula on-the-fly via saldoFactura().
+            $primerComprobante = $comprobantes[0];
+            $primerFactura = $facturasCache[(int) $primerComprobante['factura_venta_id']];
+            $saldoPostPrimera = round(
+                $this->saldoFactura($primerFactura->id, $empresaId) - (float) $primerComprobante['monto_imputado'],
+                2,
+            );
 
+            // Crear el recibo en BORRADOR. punto_venta/numero quedan NULL hasta
+            // emitir (la numeración se reserva ahí para evitar gaps por borradores
+            // abandonados).
             $recibo = Recibo::create([
                 'empresa_id' => $empresaId,
-                'numero_correlativo' => $this->siguienteNumero($empresaId, $data['fecha_emision'] ?? null),
+                'numero_correlativo' => 'BORRADOR-' . uniqid('', true),
+                'punto_venta' => null,
+                'numero' => null,
                 'fecha_emision' => $data['fecha_emision'] ?? today()->toDateString(),
-                'cliente_auxiliar_id' => $factura->auxiliar_id,
-                'factura_venta_id' => $factura->id,
-                'total_factura' => $totalFactura,
+                'detalle_cobro' => $data['detalle_cobro'] ?? null,
+                'cliente_auxiliar_id' => $clienteId,
+                'factura_venta_id' => $primerFactura->id, // back-compat v1.31
+                'total_factura' => round($totalImputado, 2),
                 'total_nc_aplicadas' => round($totalNc, 2),
                 'total_retenciones' => round($totalRet, 2),
+                'retencion_iva_total' => round($retIvaSimple, 2),
+                'retencion_iibb_total' => round($retIibbSimple, 2),
+                'retencion_ganancias_total' => round($retGanSimple, 2),
                 'monto_cobrable' => round($montoCobrable, 2),
                 'monto_cobrado' => round($montoCobrado, 2),
-                'saldo_factura_post' => max(0.0, $saldoPost),
+                'saldo_factura_post' => max(0.0, $saldoPostPrimera),
                 'medio_cobro_id' => $data['medio_cobro_id'] ?? null,
                 'estado' => Recibo::ESTADO_BORRADOR,
                 'observaciones' => $data['observaciones'] ?? null,
                 'created_by_user_id' => $usuario->id,
                 'created_at' => now(),
             ]);
+
+            // Persistir comprobantes imputados con snapshot.
+            foreach ($comprobantes as $c) {
+                $fv = $facturasCache[(int) $c['factura_venta_id']];
+                $pvNumero = (int) DB::table('erp_puntos_venta')->where('id', $fv->punto_venta_id)->value('numero');
+                $numFactura = sprintf('%04d-%08d', $pvNumero, (int) $fv->numero);
+                DB::table('erp_recibos_comprobantes_imputados')->insert([
+                    'recibo_id' => $recibo->id,
+                    'factura_venta_id' => $fv->id,
+                    'monto_imputado' => round((float) $c['monto_imputado'], 2),
+                    'total_factura' => (float) $fv->imp_total,
+                    'fecha_factura' => $fv->fecha_emision,
+                    'numero_factura_snapshot' => $numFactura,
+                    'created_at' => now(),
+                ]);
+            }
 
             foreach ($ncAplicadas as $nc) {
                 ReciboNcAplicada::create([
@@ -123,7 +217,7 @@ class ReciboService
                     'created_at' => now(),
                 ]);
             }
-            foreach ($retenciones as $r) {
+            foreach ($retencionesDetalle as $r) {
                 ReciboRetencion::create([
                     'recibo_id' => $recibo->id,
                     'tipo' => $r['tipo'],
@@ -140,12 +234,12 @@ class ReciboService
             $this->audit->logEvento(
                 accion: 'RECIBO_CREADO',
                 modulo: 'tesoreria',
-                descripcion: sprintf('Recibo %s creado (factura #%d, total $%.2f, NC $%.2f, ret $%.2f, cobrado $%.2f)',
-                    $recibo->numero_correlativo, $factura->id, $totalFactura, $totalNc, $totalRet, $montoCobrado),
+                descripcion: sprintf('Recibo borrador creado (cliente #%d, %d comprobantes, imputado $%.2f, NC $%.2f, ret $%.2f, cobrado $%.2f)',
+                    $clienteId, count($comprobantes), $totalImputado, $totalNc, $totalRet, $montoCobrado),
                 empresaId: $empresaId,
             );
 
-            return $recibo->fresh(['ncAplicadas', 'retenciones']);
+            return $recibo->fresh();
         });
     }
 
@@ -162,6 +256,44 @@ class ReciboService
 
         return DB::transaction(function () use ($recibo, $usuario) {
             $empresaId = $recibo->empresa_id;
+
+            // v1.32 — Reservar número PV-NRO sincronizado con DistriApp.
+            // El BORRADOR no tiene número asignado todavía (evita gaps).
+            if (! $recibo->punto_venta || ! $recibo->numero) {
+                $pv = self::PV_DEFAULT;
+                $numero = $this->siguienteNumeroSincronizado($pv);
+                $recibo->update([
+                    'punto_venta' => $pv,
+                    'numero' => $numero,
+                    'numero_correlativo' => "{$pv}-{$numero}", // legacy field
+                ]);
+                $recibo->refresh();
+            }
+
+            // v1.32 — Snapshot inmutable de empresa al EMITIR.
+            $empresa = DB::table('erp_empresas')->where('id', $empresaId)->first();
+            $cliente = DB::table('erp_auxiliares')->where('id', $recibo->cliente_auxiliar_id)->first();
+            // Datos extendidos del cliente desde DistriApp si tiene id_ref.
+            $clienteDistri = null;
+            if ($cliente && $cliente->tabla_ref === 'basepersonal.clientes' && $cliente->id_ref) {
+                $clienteDistri = $this->distri->datosCliente((int) $cliente->id_ref);
+            }
+
+            $direccionParts = $empresa->domicilio_fiscal ? array_map('trim', explode(',', $empresa->domicilio_fiscal, 2)) : ['', ''];
+            $recibo->update([
+                'snapshot_empresa_razon_social' => $empresa->razon_social,
+                'snapshot_empresa_cuit' => $empresa->cuit,
+                'snapshot_empresa_direccion_1' => $direccionParts[0] ?? '',
+                'snapshot_empresa_direccion_2' => $direccionParts[1] ?? '',
+                'snapshot_empresa_condicion_iva' => $this->expandirCondicionIva($empresa->condicion_iva),
+                'snapshot_empresa_inicio_actividad' => $empresa->fecha_inicio_actividades,
+                'snapshot_cliente_razon_social' => $clienteDistri->nombre ?? $cliente->nombre,
+                'snapshot_cliente_cuit' => $cliente->cuit ?? ($clienteDistri->cuit ?? null),
+                'snapshot_cliente_direccion_1' => $clienteDistri->direccion_1 ?? '',
+                'snapshot_cliente_direccion_2' => $clienteDistri->direccion_2 ?? '',
+                'snapshot_cliente_condicion_iva' => $clienteDistri->condicion_iva ?? '',
+            ]);
+
             $diarioId = DB::table('erp_diarios')
                 ->where('empresa_id', $empresaId)->where('codigo', 'TES')->value('id')
                 ?? DB::table('erp_diarios')->where('empresa_id', $empresaId)->where('codigo', 'GEN')->value('id');
@@ -265,13 +397,16 @@ class ReciboService
                 ]);
             }
 
-            // Actualizar saldo + estado_cobro de la factura.
-            $nuevoEstado = $recibo->saldo_factura_post <= 0.01
-                ? 'COBRADA'
-                : 'COBRO_PARCIAL';
-            DB::table('erp_facturas_venta')
-                ->where('id', $recibo->factura_venta_id)
-                ->update(['estado' => $nuevoEstado, 'updated_at' => now()]);
+            // v1.32 — Actualizar estado de TODAS las facturas imputadas (multi-comprobante).
+            $imputados = DB::table('erp_recibos_comprobantes_imputados')
+                ->where('recibo_id', $recibo->id)->get();
+            foreach ($imputados as $imp) {
+                $saldoActual = $this->saldoFactura((int) $imp->factura_venta_id, $empresaId);
+                $nuevoEstado = $saldoActual <= 0.01 ? 'COBRADA' : 'COBRO_PARCIAL';
+                DB::table('erp_facturas_venta')
+                    ->where('id', $imp->factura_venta_id)
+                    ->update(['estado' => $nuevoEstado, 'updated_at' => now()]);
+            }
 
             $recibo->update([
                 'estado' => Recibo::ESTADO_EMITIDO,
@@ -436,42 +571,103 @@ class ReciboService
             ->sum('importe');
         $ncImputada = (float) DB::table('erp_imputaciones_nc')
             ->where('empresa_id', $empresaId)->where('factura_id', $facturaId)->sum('importe');
-        $retEmitidos = (float) DB::table('erp_recibos as r')
-            ->join('erp_recibos_retenciones as rr', 'rr.recibo_id', '=', 'r.id')
-            ->where('r.factura_venta_id', $facturaId)
+
+        // v1.32 — Imputado via recibos (multi-comprobante). Cada fila de
+        // comprobantes_imputados tiene su monto_imputado, que es lo que el
+        // recibo consumió de esta factura específicamente.
+        $imputadoRecibos = (float) DB::table('erp_recibos_comprobantes_imputados as rci')
+            ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
+            ->where('rci.factura_venta_id', $facturaId)
             ->where('r.estado', '!=', Recibo::ESTADO_ANULADO)
-            ->sum('rr.monto');
-        $cobradoRecibos = (float) DB::table('erp_recibos')
-            ->where('factura_venta_id', $facturaId)
-            ->where('estado', '!=', Recibo::ESTADO_ANULADO)
-            ->sum('monto_cobrado');
+            ->sum('rci.monto_imputado');
 
-        // El monto_cobrado de los recibos también pasa por erp_cobros? En MVP,
-        // los recibos NO generan cobros sueltos — son la unica fuente. Para
-        // evitar doble conteo, descartamos cobros si hay recibo.
+        // Fallback v1.31: si NO hay imputaciones via tabla nueva pero sí hay
+        // recibos legacy (1:1) referenciados via factura_venta_id, sumar su monto_cobrado.
+        if ($imputadoRecibos < 0.01) {
+            $imputadoRecibos = (float) DB::table('erp_recibos')
+                ->where('factura_venta_id', $facturaId)
+                ->where('estado', '!=', Recibo::ESTADO_ANULADO)
+                ->whereNotExists(function ($q) {
+                    $q->select(DB::raw(1))
+                      ->from('erp_recibos_comprobantes_imputados as rci2')
+                      ->whereColumn('rci2.recibo_id', 'erp_recibos.id');
+                })
+                ->sum('monto_cobrado');
+        }
+
+        // Si la factura está imputada en recibos, los cobros legacy del v1.15
+        // ya están reflejados via la tabla puente (no doble contamos).
         $tieneRecibo = DB::table('erp_recibos')
-            ->where('factura_venta_id', $facturaId)
-            ->where('estado', '!=', Recibo::ESTADO_ANULADO)
-            ->exists();
-        $cobroEfectivo = $tieneRecibo ? $cobradoRecibos : $cobrado;
+            ->whereNotIn('estado', [Recibo::ESTADO_ANULADO])
+            ->where(function ($q) use ($facturaId) {
+                $q->where('factura_venta_id', $facturaId)
+                  ->orWhereExists(function ($q2) use ($facturaId) {
+                      $q2->select(DB::raw(1))
+                         ->from('erp_recibos_comprobantes_imputados as rci3')
+                         ->whereColumn('rci3.recibo_id', 'erp_recibos.id')
+                         ->where('rci3.factura_venta_id', $facturaId);
+                  });
+            })->exists();
+        $cobroEfectivo = $tieneRecibo ? $imputadoRecibos : $cobrado;
 
-        return round((float) $factura->imp_total - $cobroEfectivo - $ncImputada - $retEmitidos, 2);
+        return round((float) $factura->imp_total - $cobroEfectivo - $ncImputada, 2);
     }
 
-    private function siguienteNumero(int $empresaId, ?string $fecha = null): string
+    /**
+     * v1.32 D-32-2 — Próximo número de recibo sincronizado con DistriApp.
+     *
+     * Política: tomar max(local secuencia, último DistriApp) + 1. Lock pesimista
+     * sobre erp_secuencias_recibo evita race local. Si DistriApp emite entre
+     * nuestra consulta y nuestro update, el FK UNIQUE de (punto_venta, numero)
+     * detecta el conflicto y el caller debe reintentar.
+     */
+    public function siguienteNumeroSincronizado(string $puntoVenta = self::PV_DEFAULT): string
     {
-        $anio = $fecha ? substr($fecha, 0, 4) : date('Y');
-        $maxNum = DB::table('erp_recibos')
-            ->where('empresa_id', $empresaId)
-            ->where('numero_correlativo', 'like', "R-{$anio}-%")
-            ->orderByDesc('id')
-            ->limit(1)
-            ->value('numero_correlativo');
-        $next = 1;
-        if ($maxNum && preg_match('/-(\d+)$/', $maxNum, $m)) {
-            $next = (int) $m[1] + 1;
-        }
-        return sprintf('R-%s-%08d', $anio, $next);
+        return DB::transaction(function () use ($puntoVenta) {
+            $secuencia = DB::table('erp_secuencias_recibo')
+                ->where('punto_venta', $puntoVenta)
+                ->lockForUpdate()
+                ->first();
+            if (! $secuencia) {
+                // Seed inicial si el PV no existe.
+                DB::table('erp_secuencias_recibo')->insert([
+                    'punto_venta' => $puntoVenta,
+                    'ultimo_numero' => 0,
+                    'ultimo_emitido_por' => 'ERP',
+                    'ultimo_emitido_at' => now(),
+                ]);
+                $secuencia = (object) ['ultimo_numero' => 0];
+            }
+
+            $maxDistriapp = $this->distri->ultimoNumeroRecibo($puntoVenta);
+            $maxLocal = (int) $secuencia->ultimo_numero;
+            $proximo = max($maxLocal, $maxDistriapp) + 1;
+
+            DB::table('erp_secuencias_recibo')
+                ->where('punto_venta', $puntoVenta)
+                ->update([
+                    'ultimo_numero' => $proximo,
+                    'ultimo_emitido_por' => 'ERP',
+                    'ultimo_emitido_at' => now(),
+                ]);
+
+            return str_pad((string) $proximo, 8, '0', STR_PAD_LEFT);
+        });
+    }
+
+    /**
+     * Expande el enum compacto de erp_empresas a texto humano (para snapshot
+     * del recibo, mismo formato que DistriApp).
+     */
+    private function expandirCondicionIva(?string $codigo): string
+    {
+        return match ($codigo) {
+            'RI' => 'I.V.A. RESPONSABLE INSCRIPTO',
+            'MONOTRIBUTO' => 'MONOTRIBUTO',
+            'EXENTO' => 'IVA EXENTO',
+            'CF' => 'CONSUMIDOR FINAL',
+            default => $codigo ?? '',
+        };
     }
 
     private function admiteCc(int $cuentaId): bool

@@ -20,6 +20,7 @@ import { useToast } from '@/hooks/useToast';
 type Cliente = {
   id: number; codigo: string; nombre: string; cuit: string | null;
   direccion_1: string; direccion_2: string;
+  facturas_pendientes?: number; // v1.34 hint
 };
 type FacturaImputable = {
   id: number; tipo: string; numero_completo: string;
@@ -441,7 +442,10 @@ export function RecibosPage() {
                   onChange={(e) => onPickCliente(e.target.value)}
                   disabled={!!selectedReciboId}
                   options={[{ value: '', label: clientes.length === 0 ? 'Cargando…' : 'Elegí cliente…' },
-                    ...clientes.map((c) => ({ value: String(c.id), label: `${c.codigo} · ${c.nombre}` }))]} />
+                    ...clientes.map((c) => ({
+                      value: String(c.id),
+                      label: `${c.nombre}${c.facturas_pendientes ? ` · ${c.facturas_pendientes} fact. pend.` : ''}`,
+                    }))]} />
                 <div className="grid grid-cols-2 gap-2 text-[11.5px]">
                   <Field label="CUIT" value={draft.clienteCuit}
                     onChange={(e) => setDraft({ ...draft, clienteCuit: e.target.value })}
@@ -717,7 +721,15 @@ function AgregarComprobanteModal({ facturas, yaAgregadas, onClose, onAgregar }: 
           placeholder="Buscar por nro o fecha…"
           className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
         {disponibles.length === 0 ? (
-          <div className="text-[11px] text-ink-muted italic">El cliente no tiene facturas pendientes de imputar.</div>
+          <div className="text-[11.5px] text-ink-muted border border-line rounded p-3 bg-surface-row">
+            {facturas.length === 0 ? (
+              <>Este cliente no tiene comprobantes con saldo pendiente. Verificá que las facturas
+              estén registradas con estado <code>EMITIDA</code> o <code>COBRO_PARCIAL</code> en{' '}
+              <a href="/erp/facturacion" className="text-azure underline">Facturación</a>.</>
+            ) : (
+              <>Todas las facturas pendientes del cliente ya fueron agregadas a este recibo.</>
+            )}
+          </div>
         ) : (
           <>
             <div className="flex items-center justify-between">
@@ -740,7 +752,7 @@ function AgregarComprobanteModal({ facturas, yaAgregadas, onClose, onAgregar }: 
                     <th className="text-left">Fecha</th>
                     <th className="text-right">Total</th>
                     <th className="text-right">Saldo</th>
-                    <th className="text-left">Estado</th>
+                    <th className="text-left">Origen</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -752,7 +764,7 @@ function AgregarComprobanteModal({ facturas, yaAgregadas, onClose, onAgregar }: 
                       <td>{fmtFecha(f.fecha_emision)}</td>
                       <td className="text-right tabular">${fmtMoney(f.imp_total)}</td>
                       <td className="text-right tabular font-semibold">${fmtMoney(f.saldo)}</td>
-                      <td className="text-[10px]">{f.estado}</td>
+                      <td><span className="text-[9.5px] px-1 py-0.5 rounded bg-azure-soft/40 text-azure">{f.origen}</span></td>
                     </tr>
                   ))}
                 </tbody>

@@ -75,6 +75,10 @@ class ReciboService
             }
 
             $clienteId = (int) $data['cliente_auxiliar_id'];
+            // v1.34 — auxiliares hermanos (mismo CUIT) son el mismo cliente real.
+            // El import del Libro IVA crea CLI-* y el sync DistriApp DA-CLI-* para
+            // el mismo CUIT; aceptamos facturas de cualquiera de ellos.
+            $hermanos = $this->auxiliaresHermanos($clienteId, $empresaId);
 
             // Cargar y validar facturas (con lock).
             $facturasCache = [];
@@ -89,9 +93,9 @@ class ReciboService
                     ->where('id', $fvId)
                     ->lockForUpdate()
                     ->firstOrFail();
-                if ($fv->auxiliar_id !== $clienteId) {
+                if (! in_array((int) $fv->auxiliar_id, $hermanos, true)) {
                     throw new DomainException(sprintf(
-                        'CLIENTE_INCONSISTENTE: factura #%d pertenece a auxiliar #%d, no a #%d',
+                        'CLIENTE_INCONSISTENTE: factura #%d pertenece a auxiliar #%d, no al cliente #%d (ni a sus hermanos por CUIT)',
                         $fv->id, $fv->auxiliar_id, $clienteId,
                     ));
                 }
@@ -674,5 +678,25 @@ class ReciboService
     {
         return (bool) DB::table('erp_cuentas_contables')
             ->where('id', $cuentaId)->value('admite_centro_costo');
+    }
+
+    /**
+     * v1.34 — IDs de auxiliares que representan el mismo cliente real (mismo CUIT).
+     *
+     * @return list<int>
+     */
+    private function auxiliaresHermanos(int $clienteId, int $empresaId): array
+    {
+        $cuit = DB::table('erp_auxiliares')
+            ->where('id', $clienteId)->where('empresa_id', $empresaId)
+            ->value('cuit');
+        if (! $cuit) {
+            return [$clienteId];
+        }
+        return DB::table('erp_auxiliares')
+            ->where('empresa_id', $empresaId)
+            ->where('tipo', 'Cliente')
+            ->where('cuit', $cuit)
+            ->pluck('id')->map(fn ($v) => (int) $v)->all();
     }
 }

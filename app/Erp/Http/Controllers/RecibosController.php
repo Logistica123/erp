@@ -60,19 +60,35 @@ class RecibosController
     }
 
     /**
-     * v1.32 — Lista de clientes para el dropdown de recibos.
-     * Sincroniza desde DistriApp on-demand (idempotente).
+     * v1.32 + v1.34 — Lista de clientes para el dropdown de recibos.
+     * Sincroniza desde DistriApp on-demand (idempotente) + DEDUPLICA por CUIT.
+     *
+     * v1.34 fix: el import del Libro IVA Ventas crea auxiliares `CLI-{cuit}` y
+     * el sync DistriApp crea `DA-CLI-{id}` — para el MISMO cliente real quedan
+     * 2 filas con el mismo CUIT. Las facturas suelen estar en la `CLI-*`. Si el
+     * operador elegía la `DA-CLI-*` no veía facturas. Ahora colapsamos por CUIT
+     * y devolvemos como id canónico el auxiliar que TIENE facturas.
      */
     public function clientesParaRecibos(Request $request): JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
 
-        // Sync on-demand (rápido, ~12 filas hoy).
         try {
             $this->distri->syncClientes($empresaId);
         } catch (\Throwable $e) {
-            // Si DistriApp no responde, igual devolvemos lo que ya está en erp_auxiliares.
+            // Si DistriApp no responde, devolvemos lo que ya está en erp_auxiliares.
         }
+
+        // Conteo de facturas imputables por auxiliar para elegir el canónico.
+        $facturasPorAux = DB::table('erp_facturas_venta as fv')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
+            ->where('fv.empresa_id', $empresaId)
+            ->whereIn('fv.estado', ['EMITIDA', 'COBRO_PARCIAL', 'CONTROLADA'])
+            ->where('tc.clase', 'FACTURA')
+            ->whereNull('fv.deleted_at')
+            ->groupBy('fv.auxiliar_id')
+            ->pluck(DB::raw('COUNT(*)'), 'fv.auxiliar_id')
+            ->toArray();
 
         $clientes = DB::table('erp_auxiliares as a')
             ->leftJoin('basepersonal.clientes as bc', function ($j) {
@@ -87,37 +103,64 @@ class RecibosController
                 'bc.direccion as direccion_distriapp',
             ]);
 
-        $resultado = $clientes->map(function ($c) {
-            $direccion = trim((string) ($c->direccion_distriapp ?? ''));
-            $partes = preg_split('/\r\n|\r|\n/', $direccion, 2);
+        // Agrupar por CUIT (los sin CUIT quedan individuales por id).
+        $grupos = [];
+        foreach ($clientes as $c) {
+            $clave = $c->cuit ? 'cuit:' . $c->cuit : 'id:' . $c->id;
+            $grupos[$clave][] = $c;
+        }
+
+        $resultado = collect($grupos)->map(function ($filas) use ($facturasPorAux) {
+            // Canónico = el que más facturas imputables tiene (sino el primero).
+            usort($filas, function ($a, $b) use ($facturasPorAux) {
+                return ($facturasPorAux[$b->id] ?? 0) <=> ($facturasPorAux[$a->id] ?? 0);
+            });
+            $canon = $filas[0];
+            $totalFacturas = array_sum(array_map(fn ($f) => $facturasPorAux[$f->id] ?? 0, $filas));
+            // Dirección: preferir la que tenga datos de DistriApp.
+            $direccion = '';
+            foreach ($filas as $f) {
+                if (! empty($f->direccion_distriapp)) { $direccion = $f->direccion_distriapp; break; }
+            }
+            $partes = preg_split('/\r\n|\r|\n/', trim((string) $direccion), 2);
             return [
-                'id' => $c->id,
-                'codigo' => $c->codigo,
-                'nombre' => $c->nombre,
-                'cuit' => $c->cuit,
+                'id' => $canon->id,
+                'codigo' => $canon->codigo,
+                'nombre' => $canon->nombre,
+                'cuit' => $canon->cuit,
                 'direccion_1' => $partes[0] ?? '',
                 'direccion_2' => $partes[1] ?? '',
+                'facturas_pendientes' => $totalFacturas, // hint para el frontend
+                // ids hermanos (mismo CUIT) — el front no los usa, sirve para debug.
+                'auxiliar_ids' => array_map(fn ($f) => $f->id, $filas),
             ];
-        });
+        })->sortBy('nombre')->values();
 
         return response()->json(['ok' => true, 'data' => $resultado]);
     }
 
     /**
-     * v1.32 — Facturas imputables (saldo > 0) de un cliente para sumar al recibo.
+     * v1.32 + v1.34 — Facturas imputables (saldo > 0) de un cliente.
+     *
+     * v1.34 fix: matchea por CUIT. Resuelve el CUIT del auxiliar elegido y trae
+     * facturas de TODOS los auxiliares que comparten ese CUIT (cubre el caso de
+     * auxiliares duplicados CLI-* / DA-CLI-* del mismo cliente real).
      */
     public function facturasImputablesCliente(Request $request, int $clienteId): JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+
+        $auxIds = $this->auxiliaresHermanos($clienteId, $empresaId);
+
         $facturas = DB::table('erp_facturas_venta as fv')
             ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
             ->join('erp_puntos_venta as pv', 'pv.id', '=', 'fv.punto_venta_id')
             ->where('fv.empresa_id', $empresaId)
-            ->where('fv.auxiliar_id', $clienteId)
+            ->whereIn('fv.auxiliar_id', $auxIds)
             ->whereIn('fv.estado', ['EMITIDA', 'COBRO_PARCIAL', 'CONTROLADA'])
             ->where('tc.clase', 'FACTURA')
             ->whereNull('fv.deleted_at')
-            ->orderByDesc('fv.fecha_emision')
+            ->orderBy('fv.fecha_emision') // FIFO
             ->limit(500)
             ->get([
                 'fv.id', 'fv.tipo_comprobante_id', 'tc.codigo_interno', 'tc.letra',
@@ -139,7 +182,33 @@ class RecibosController
             ];
         })->filter(fn ($f) => $f['saldo'] > 0.01)->values();
 
-        return response()->json(['ok' => true, 'data' => $resultado]);
+        return response()->json(['ok' => true, 'data' => $resultado, 'meta' => [
+            'total' => $resultado->count(),
+            'total_saldo' => round($resultado->sum('saldo'), 2),
+            'auxiliares_consultados' => $auxIds,
+        ]]);
+    }
+
+    /**
+     * v1.34 — IDs de auxiliares que representan al mismo cliente real.
+     * Si el auxiliar tiene CUIT, devuelve todos los que comparten ese CUIT
+     * (tipo=Cliente). Si no, solo el id pasado.
+     *
+     * @return list<int>
+     */
+    private function auxiliaresHermanos(int $clienteId, int $empresaId): array
+    {
+        $cuit = DB::table('erp_auxiliares')
+            ->where('id', $clienteId)->where('empresa_id', $empresaId)
+            ->value('cuit');
+        if (! $cuit) {
+            return [$clienteId];
+        }
+        return DB::table('erp_auxiliares')
+            ->where('empresa_id', $empresaId)
+            ->where('tipo', 'Cliente')
+            ->where('cuit', $cuit)
+            ->pluck('id')->map(fn ($v) => (int) $v)->all();
     }
 
     /**

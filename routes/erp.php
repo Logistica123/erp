@@ -333,9 +333,20 @@ Route::prefix('api/erp')->group(function () {
 
         // Tesorería — órdenes de pago (SPEC 02 §6.5)
         Route::get('/ordenes-pago', [OrdenesPagoController::class, 'index'])->name('erp.op.index');
+        // v1.35 — endpoints nuevos (antes de {id} para evitar colisión).
+        Route::get('/ordenes-pago/tipos', [OrdenesPagoController::class, 'tipos'])->name('erp.op.tipos');
+        Route::get('/ordenes-pago/sync/estado', [OrdenesPagoController::class, 'syncEstado'])->name('erp.op.sync-estado');
+        Route::post('/ordenes-pago/sync', [OrdenesPagoController::class, 'sync'])->name('erp.op.sync');
+        Route::post('/ordenes-pago/local', [OrdenesPagoController::class, 'storeLocal'])->name('erp.op.store-local');
         Route::post('/ordenes-pago', [OrdenesPagoController::class, 'store'])->name('erp.op.store');
         Route::get('/ordenes-pago/{id}', [OrdenesPagoController::class, 'show'])
             ->whereNumber('id')->name('erp.op.show');
+        Route::get('/ordenes-pago/{id}/audit', [OrdenesPagoController::class, 'auditList'])
+            ->whereNumber('id')->name('erp.op.audit');
+        Route::post('/ordenes-pago/{id}/registrar-pago', [OrdenesPagoController::class, 'registrarPago'])
+            ->whereNumber('id')->name('erp.op.registrar-pago');
+        Route::post('/ordenes-pago/{id}/contabilizar', [OrdenesPagoController::class, 'contabilizar'])
+            ->whereNumber('id')->name('erp.op.contabilizar');
         Route::patch('/ordenes-pago/{id}', [OrdenesPagoController::class, 'update'])
             ->whereNumber('id')->name('erp.op.update');
         Route::post('/ordenes-pago/{id}/cargar-banco', [OrdenesPagoController::class, 'cargarBanco'])

@@ -51,6 +51,49 @@ class DistriAppBridge
     }
 
     /**
+     * v1.35 — Órdenes de pago de DistriApp (basepersonal.liq_ordenes_pago).
+     * Lectura directa (read-only). Soporta paginación + filtro incremental por
+     * updated_at. Devuelve filas crudas; el SyncService las normaliza.
+     *
+     * @param  array{offset?:int, limit?:int, updated_desde?:?string}  $opts
+     * @return array{data: list<object>, total: int}
+     */
+    public function fetchOrdenesPago(array $opts = []): array
+    {
+        $limit = (int) ($opts['limit'] ?? 200);
+        $offset = (int) ($opts['offset'] ?? 0);
+        $updatedDesde = $opts['updated_desde'] ?? null;
+
+        try {
+            $base = DB::table('basepersonal.liq_ordenes_pago as op')
+                ->leftJoin('basepersonal.liq_ordenes_pago_conceptos as c', 'c.id', '=', 'op.concepto_id');
+
+            if ($updatedDesde) {
+                $base->where('op.updated_at', '>', $updatedDesde);
+            }
+
+            $total = (clone $base)->count();
+
+            $rows = $base->orderBy('op.id')
+                ->offset($offset)->limit($limit)
+                ->get([
+                    'op.id', 'op.concepto_id', 'c.nombre as concepto_nombre', 'c.codigo as concepto_codigo',
+                    'op.numero', 'op.numero_display', 'op.anio', 'op.mes', 'op.fecha_emision',
+                    'op.beneficiario_tipo', 'op.beneficiario_id', 'op.beneficiario_nombre',
+                    'op.beneficiario_cuil', 'op.beneficiario_cbu',
+                    'op.subtotal', 'op.total_descuentos', 'op.total_a_pagar',
+                    'op.estado', 'op.agrupacion', 'op.medio_pago',
+                    'op.icbc_tx_id', 'op.icbc_acreditado_at', 'op.observaciones',
+                    'op.created_at', 'op.updated_at',
+                ]);
+
+            return ['data' => $rows->all(), 'total' => $total];
+        } catch (\Throwable $e) {
+            return ['data' => [], 'total' => 0];
+        }
+    }
+
+    /**
      * v1.32 — Datos extendidos de un cliente DistriApp (para snapshot de recibo).
      * Lee `basepersonal.clientes` directo para obtener direccion completa
      * (la vista `erp_v_clientes_distriapp` solo trae 1 dirección).

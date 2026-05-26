@@ -3,6 +3,7 @@
 use App\Erp\Jobs\EmitirFacturaJob;
 use App\Erp\Jobs\FceAceptacionTacitaJob;
 use App\Erp\Jobs\ImportarMisComprobantesDiario;
+use App\Erp\Jobs\SyncOrdenesPagoJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -32,3 +33,9 @@ Schedule::job(new EmitirFacturaJob())
     ->everyTwoMinutes()
     ->name('emision-outbox-drain')
     ->withoutOverlapping();
+
+// v1.35 D-35-5: sync incremental de Órdenes de Pago desde DistriApp cada 15 min.
+Schedule::job(new SyncOrdenesPagoJob())
+    ->everyFifteenMinutes()
+    ->name('sync-ordenes-pago')
+    ->withoutOverlapping(10);

@@ -909,6 +909,22 @@ class LibroIvaVentasImportService
             && (int) $m[2] >= 1 && (int) $m[2] <= 12) {
             return $m[1].'-'.str_pad($m[2], 2, '0', STR_PAD_LEFT);
         }
+        //  - Serial date de Excel: si el contador formatea la columna como
+        //    fecha, PhpSpreadsheet (readDataOnly) devuelve el número de serie
+        //    (días desde 1899-12-30), ej 46113 = 2026-04-01. Lo convertimos a
+        //    YYYY-MM. Rango 20000..60000 ≈ 1954..2064 (los 6 dígitos tipo
+        //    202604 ya los tomó la rama YYYYMM y caen fuera de este rango).
+        if (preg_match('/^\d+(\.\d+)?$/', $s)) {
+            $num = (float) $s;
+            if ($num >= 20000 && $num <= 60000) {
+                try {
+                    return \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($num)
+                        ->format('Y-m');
+                } catch (\Throwable $e) {
+                    // si falla, cae al texto libre de abajo
+                }
+            }
+        }
 
         // Cualquier otro texto que cargue el contador (ej "ABRIL 2026",
         // "1RA QUINC ABRIL") se conserva tal cual, acotado al largo de la

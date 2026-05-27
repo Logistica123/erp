@@ -117,6 +117,7 @@ class ContabilizadorFacturas
 
         // Movimientos: signo +1 = factura, signo -1 = nota de crédito
         $esNC = ($f->cbte_signo < 0);
+        $idxAjuste = null; // línea que absorbe el redondeo (ingresos / NCE)
 
         if (!$esNC) {
             // Factura común: Deudores (Debe) vs Ventas + IVA (Haber)
@@ -140,6 +141,7 @@ class ContabilizadorFacturas
                     'haber' => $netoSinIva,
                     'glosa' => 'Ingresos por servicios',
                 ];
+                $idxAjuste = count($movs) - 1; // ingresos absorbe el redondeo
             }
             if ($imp_iva > 0) {
                 $movs[] = [
@@ -151,6 +153,7 @@ class ContabilizadorFacturas
                     'haber' => $imp_iva,
                     'glosa' => 'IVA Débito Fiscal 21%',
                 ];
+                if ($idxAjuste === null) $idxAjuste = count($movs) - 1;
             }
         } else {
             // NC: usa cuenta 4.1.2.01 "NC emitidas" en Debe, Deudores en Haber
@@ -165,6 +168,7 @@ class ContabilizadorFacturas
                     'glosa' => 'NC emitida',
                 ],
             ];
+            $idxAjuste = 0; // NCE (debe) absorbe el redondeo
             if ($imp_iva > 0) {
                 $movs[] = [
                     'cuenta_id' => $cuentaIvaId,
@@ -184,6 +188,12 @@ class ContabilizadorFacturas
                 'glosa' => 'Reverso deudor',
             ];
         }
+
+        // Ajuste de redondeo (espejo del de compras): los netos/IVA por alícuota
+        // de AFIP pueden diferir del total por centavos. Si |debe-haber| ≤ $1 lo
+        // absorbe la línea de ingresos (o NCE) para que el asiento cuadre y la
+        // factura no quede sin asiento. Si supera $1, se deja el desbalance.
+        $movs = $this->ajustarRedondeoEnLinea($movs, $idxAjuste);
 
         return [
             'empresa_id' => $empresaId,
@@ -695,6 +705,39 @@ class ContabilizadorFacturas
             // Edge raro: el ajuste haría negativa la línea. Revertir y dejar
             // que la validación posterior reporte el error.
             $movs[$idx]['debe'] = round((float) $movs[$idx]['debe'] + $diff, 2);
+        }
+        return $movs;
+    }
+
+    /**
+     * Ajuste de redondeo $1 que absorbe la diferencia en una línea dada, sea
+     * de debe o de haber (para ventas/NC: ingresos en haber, NCE en debe).
+     * Si |debe - haber| ≤ $1 ajusta esa línea; si supera, deja el desbalance
+     * para que la validación posterior reporte ASIENTO_DESBALANCEADO.
+     */
+    private function ajustarRedondeoEnLinea(array $movs, ?int $idx): array
+    {
+        $debe = 0.0; $haber = 0.0;
+        foreach ($movs as $m) {
+            $debe  += (float) $m['debe'];
+            $haber += (float) $m['haber'];
+        }
+        $diff = round($debe - $haber, 2);
+        if (abs($diff) < 0.005) return $movs; // ya cuadra
+        if (abs($diff) > 1.0) return $movs;   // > $1 → no se ajusta
+        if ($idx === null || ! isset($movs[$idx])) {
+            return $this->ajustarRedondeo($movs, null); // fallback genérico (línea debe mayor)
+        }
+
+        // La línea objetivo absorbe el diff manteniendo su naturaleza:
+        //  - línea de haber → si faltó haber (diff>0) hay que sumarle.
+        //  - línea de debe  → si faltó debe (diff<0) hay que sumarle (resta de diff).
+        if ((float) $movs[$idx]['haber'] > 0) {
+            $nuevo = round((float) $movs[$idx]['haber'] + $diff, 2);
+            if ($nuevo >= 0) $movs[$idx]['haber'] = $nuevo;
+        } else {
+            $nuevo = round((float) $movs[$idx]['debe'] - $diff, 2);
+            if ($nuevo >= 0) $movs[$idx]['debe'] = $nuevo;
         }
         return $movs;
     }

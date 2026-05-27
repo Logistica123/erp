@@ -145,26 +145,56 @@ class DistriAppBridge
     /**
      * Sincroniza clientes DistriApp → erp_auxiliares (tipo=Cliente).
      *
-     * Idempotente: usa (empresa_id, tipo, codigo) como natural key.
-     * Devuelve {creados, actualizados, total}.
+     * v1.36 — Prevención de duplicados: si ya existe un auxiliar Cliente con
+     * ese CUIT (típicamente creado por el importador del Libro IVA como
+     * CLI-{cuit}), se REUSA — solo se vincula id_ref/tabla_ref a DistriApp en
+     * vez de crear un DA-CLI-{id} paralelo. El código DA-CLI- queda como
+     * fallback solo para clientes sin CUIT válido.
+     *
+     * Idempotente. Devuelve {creados, actualizados, vinculados, total}.
      */
     public function syncClientes(int $empresaId = 1): array
     {
         $creados = 0;
         $actualizados = 0;
+        $vinculados = 0;
         $clientes = $this->clientes();
 
         foreach ($clientes as $c) {
-            $codigo = 'DA-CLI-' . str_pad((string) $c->distriapp_id, 5, '0', STR_PAD_LEFT);
             $cuitLimpio = $c->cuit ? preg_replace('/[^0-9]/', '', $c->cuit) : null;
             if ($cuitLimpio && strlen($cuitLimpio) !== 11) {
                 $cuitLimpio = null;  // rechaza CUITs inválidos, no rompe el sync
             }
 
-            $existing = DB::table('erp_auxiliares')
-                ->where('empresa_id', $empresaId)
-                ->where('tipo', 'Cliente')
-                ->where('codigo', $codigo)
+            // v1.36 — buscar primero por CUIT (cualquier código).
+            $porCuit = $cuitLimpio
+                ? DB::table('erp_auxiliares')
+                    ->where('empresa_id', $empresaId)->where('tipo', 'Cliente')
+                    ->where('cuit', $cuitLimpio)->first()
+                : null;
+
+            if ($porCuit) {
+                // Ya existe (probablemente del importador). Solo vinculamos a
+                // DistriApp si no estaba vinculado; NO pisamos el código CLI-.
+                $update = ['activo' => 1, 'updated_at' => now()];
+                if (! $porCuit->id_ref) {
+                    $update['tabla_ref'] = 'basepersonal.clientes';
+                    $update['id_ref'] = $c->distriapp_id;
+                }
+                DB::table('erp_auxiliares')->where('id', $porCuit->id)->update($update);
+                $vinculados++;
+                continue;
+            }
+
+            // No existe por CUIT — buscar por código legacy DA-CLI- (idempotencia
+            // con syncs previos) o crear nuevo.
+            $codigo = $cuitLimpio
+                ? 'CLI-' . $cuitLimpio
+                : 'DA-CLI-' . str_pad((string) $c->distriapp_id, 5, '0', STR_PAD_LEFT);
+
+            $legacy = DB::table('erp_auxiliares')
+                ->where('empresa_id', $empresaId)->where('tipo', 'Cliente')
+                ->where('tabla_ref', 'basepersonal.clientes')->where('id_ref', $c->distriapp_id)
                 ->first();
 
             $attrs = [
@@ -176,8 +206,8 @@ class DistriAppBridge
                 'updated_at' => now(),
             ];
 
-            if ($existing) {
-                DB::table('erp_auxiliares')->where('id', $existing->id)->update($attrs);
+            if ($legacy) {
+                DB::table('erp_auxiliares')->where('id', $legacy->id)->update($attrs);
                 $actualizados++;
             } else {
                 DB::table('erp_auxiliares')->insert([
@@ -194,6 +224,7 @@ class DistriAppBridge
         return [
             'creados' => $creados,
             'actualizados' => $actualizados,
+            'vinculados' => $vinculados,
             'total' => $clientes->count(),
         ];
     }

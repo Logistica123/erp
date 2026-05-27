@@ -261,8 +261,15 @@ class AsientosController
             // asiento_reversa_id de otros asientos (SET NULL auto, pero explicitamos).
             DB::table('erp_asientos')->where('asiento_reversa_id', $asiento->id)->update(['asiento_reversa_id' => null]);
 
-            // 2) Borrar movimientos + asiento (movimientos cascadea igual, explícito).
-            $asiento->movimientos()->delete();
+            // 2) Borrar el asiento. NO borramos los movimientos a mano: al
+            //    hacerlo uno por uno, el trigger AFTER DELETE trg_movimiento_ad
+            //    llama a sp_recalc_asiento que hace UPDATE erp_asientos, y ahí
+            //    trg_asiento_balance_update rebota con "Asiento desbalanceado:
+            //    debe <> haber" porque el set quedó incompleto. En MySQL el
+            //    ON DELETE CASCADE (fk_mov_asiento) NO dispara los triggers de
+            //    la tabla hija, así que borrar el asiento directo limpia los
+            //    movimientos sin tocar el balance. (Mismo patrón que el borrado
+            //    en cascada de imports — v1.22 §13 / v1.50.5.)
             $asientoId = $asiento->id;
             $asiento->delete();
 

@@ -144,39 +144,74 @@ class IibbAtribucionService
 
     private function fetchVentas(int $empresaId, string $desde, string $hasta, string $defaultJur): array
     {
-        $rows = DB::table('erp_factura_venta_items as fi')
-            ->join('erp_facturas_venta as f', 'f.id', '=', 'fi.factura_id')
+        // v1.51 — Atribución a nivel factura. Antes era por ítem con INNER JOIN
+        // a erp_factura_venta_items, lo que dejaba afuera TODAS las facturas
+        // importadas del Libro IVA Ventas (no tienen ítems). Prioridad por
+        // factura:
+        //   1) reparto manual en erp_factura_venta_jurisdicciones (1..N filas)
+        //   2) ítems con jurisdiccion_iibb seteada (comportamiento previo)
+        //   3) factura completa con f.jurisdiccion_codigo (o default)
+        $facturas = DB::table('erp_facturas_venta as f')
             ->join('erp_tipos_comprobante as t', 't.id', '=', 'f.tipo_comprobante_id')
-            ->leftJoin('erp_factura_venta_cae as c', 'c.factura_venta_id', '=', 'f.id')
             ->where('f.empresa_id', $empresaId)
             ->whereBetween('f.fecha_emision', [$desde, $hasta])
             ->whereIn('f.estado', self::ESTADOS_VENTA)
-            ->whereNotNull('c.cae')
-            ->where('c.resultado', 'A')
-            ->select([
-                'f.id as factura_id', 'f.fecha_emision', 'fi.imp_neto',
-                'fi.jurisdiccion_iibb', 't.signo', 'fi.concepto',
-            ])
+            ->whereNull('f.deleted_at')
+            ->whereNotNull('f.cae')
+            ->select(['f.id', 'f.fecha_emision', 'f.imp_neto_gravado', 'f.jurisdiccion_codigo', 't.signo'])
             ->get();
 
+        if ($facturas->isEmpty()) {
+            return [];
+        }
+        $ids = $facturas->pluck('id')->all();
+
+        $distrib = DB::table('erp_factura_venta_jurisdicciones')
+            ->whereIn('factura_venta_id', $ids)
+            ->get(['factura_venta_id', 'jurisdiccion_codigo', 'base_imponible'])
+            ->groupBy('factura_venta_id');
+
+        $items = DB::table('erp_factura_venta_items')
+            ->whereIn('factura_id', $ids)
+            ->whereNotNull('jurisdiccion_iibb')
+            ->select(['factura_id', 'jurisdiccion_iibb', DB::raw('SUM(imp_neto) as neto')])
+            ->groupBy('factura_id', 'jurisdiccion_iibb')
+            ->get()
+            ->groupBy('factura_id');
+
         $out = [];
-        foreach ($rows as $r) {
-            $importe = (float) $r->imp_neto * (int) $r->signo;
-            $jur = $r->jurisdiccion_iibb ?: $defaultJur;
-            $out[] = [
-                'empresa_id'       => $empresaId,
-                'fecha'            => $r->fecha_emision,
-                'jurisdiccion'     => $jur,
-                'tipo'             => 'INGRESO',
-                'importe'          => $importe,
-                'origen'           => 'FACTURA_VENTA',
-                'factura_venta_id' => $r->factura_id,
-                'factura_compra_id'=> null,
-                'descripcion'      => mb_substr((string) $r->concepto, 0, 240),
-                'created_at'       => now(),
-            ];
+        foreach ($facturas as $f) {
+            $signo = (int) $f->signo;
+            if (isset($distrib[$f->id])) {
+                foreach ($distrib[$f->id] as $d) {
+                    $out[] = $this->movVenta($empresaId, $f, $d->jurisdiccion_codigo, (float) $d->base_imponible * $signo);
+                }
+            } elseif (isset($items[$f->id])) {
+                foreach ($items[$f->id] as $it) {
+                    $out[] = $this->movVenta($empresaId, $f, $it->jurisdiccion_iibb ?: $defaultJur, (float) $it->neto * $signo);
+                }
+            } else {
+                $out[] = $this->movVenta($empresaId, $f, $f->jurisdiccion_codigo ?: $defaultJur, (float) $f->imp_neto_gravado * $signo);
+            }
         }
         return $out;
+    }
+
+    /** Arma una fila de erp_iibb_jurisdiccion_mov para una venta. */
+    private function movVenta(int $empresaId, object $f, string $jur, float $importe): array
+    {
+        return [
+            'empresa_id'        => $empresaId,
+            'fecha'             => $f->fecha_emision,
+            'jurisdiccion'      => $jur,
+            'tipo'              => 'INGRESO',
+            'importe'           => $importe,
+            'origen'            => 'FACTURA_VENTA',
+            'factura_venta_id'  => $f->id,
+            'factura_compra_id' => null,
+            'descripcion'       => null,
+            'created_at'        => now(),
+        ];
     }
 
     private function fetchCompras(int $empresaId, string $desde, string $hasta, string $defaultJur): array

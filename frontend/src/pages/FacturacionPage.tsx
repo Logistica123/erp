@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Loader2, FileText, ExternalLink, Plus, DollarSign, CalendarRange, Trash2, AlertTriangle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Loader2, FileText, ExternalLink, Plus, DollarSign, CalendarRange, Trash2, AlertTriangle, MapPin, X } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -114,6 +114,8 @@ export function FacturacionPage() {
   const [cobroFactura, setCobroFactura] = useState<Factura | null>(null);
   // v1.29 — modal de eliminación con doble confirmación para WS con CAE.
   const [eliminarFactura, setEliminarFactura] = useState<Factura | null>(null);
+  // v1.51 — modal de reparto de base imponible IIBB por jurisdicción.
+  const [jurisFactura, setJurisFactura] = useState<Factura | null>(null);
   // v1.27 — bulk select + edición.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [editarPeriodoOpen, setEditarPeriodoOpen] = useState(false);
@@ -350,6 +352,7 @@ export function FacturacionPage() {
                     <th className="px-4 py-3 text-right">IVA</th>
                     <th className="px-4 py-3 text-right">Total</th>
                     <th className="px-4 py-3">P. trabaj.</th>
+                    <th className="px-4 py-3">Juris.</th>
                     <th className="px-4 py-3">Origen</th>
                     <th className="px-4 py-3">Estado</th>
                     <th className="px-4 py-3">Asiento</th>
@@ -399,6 +402,19 @@ export function FacturacionPage() {
                           endpointUrl={`/api/erp/facturas-venta/${f.id}/periodo-trabajado`}
                           invalidateKeys={[['facturas-venta'], ['facturas-venta-periodos-trabajados']]}
                         />
+                      </td>
+                      <td className="px-4 py-3 text-[11px]">
+                        {puedeEditarPeriodo ? (
+                          <button
+                            onClick={() => setJurisFactura(f)}
+                            title="Editar / distribuir jurisdicción IIBB"
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-azure hover:bg-azure-soft/40 cursor-pointer">
+                            <MapPin className="w-3 h-3" />
+                            {f.jurisdiccion_codigo ?? '—'}
+                          </button>
+                        ) : (
+                          <span className="font-mono text-gray-600">{f.jurisdiccion_codigo ?? '—'}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="inline-flex items-center gap-1">
@@ -457,6 +473,14 @@ export function FacturacionPage() {
           setCobroFactura(null);
           qc.invalidateQueries({ queryKey: ['facturas-venta'] });
           qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
+        }}
+      />
+      <JurisdiccionesModal
+        factura={jurisFactura}
+        onClose={() => setJurisFactura(null)}
+        onSuccess={() => {
+          setJurisFactura(null);
+          qc.invalidateQueries({ queryKey: ['facturas-venta'] });
         }}
       />
       {editarPeriodoOpen && (
@@ -845,6 +869,179 @@ function EliminarFacturaModal({ factura, onClose, onSuccess }: {
           </Button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+// v1.51 — Reparto de base imponible IIBB por jurisdicción. Soporta 1 sola
+// jurisdicción (toda la base) o N (distribución). La suma debe igualar el
+// neto gravado de la factura; se muestra el restante en vivo.
+type DistRow = { codigo: string; base: string };
+
+function JurisdiccionesModal({ factura, onClose, onSuccess }: {
+  factura: Factura | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const toast = useToast();
+  const [rows, setRows] = useState<DistRow[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery<{
+    data: {
+      neto_gravado: number;
+      jurisdiccion_codigo: string | null;
+      distribucion: Array<{ jurisdiccion_codigo: string; base_imponible: string }>;
+      catalogo: Array<{ codigo: string; nombre: string }>;
+    };
+  }>({
+    queryKey: ['fv-jurisdicciones', factura?.id],
+    queryFn: () => api.get(`/api/erp/facturas-venta/${factura!.id}/jurisdicciones`),
+    enabled: !!factura,
+  });
+
+  const neto = data?.data.neto_gravado ?? (factura ? Number(factura.imp_neto_gravado) : 0);
+  const catalogo = data?.data.catalogo ?? [];
+
+  // Inicializa las filas cuando llega la data (distribución existente, o una
+  // sola fila con toda la base en la jurisdicción actual de la factura).
+  useEffect(() => {
+    if (!data) return;
+    const dist = data.data.distribucion;
+    if (dist.length > 0) {
+      setRows(dist.map((d) => ({ codigo: d.jurisdiccion_codigo, base: Number(d.base_imponible).toFixed(2) })));
+    } else {
+      setRows([{ codigo: data.data.jurisdiccion_codigo ?? '', base: data.data.neto_gravado.toFixed(2) }]);
+    }
+    setErr(null);
+  }, [data]);
+
+  const mut = useMutation({
+    mutationFn: () => api.put(`/api/erp/facturas-venta/${factura!.id}/jurisdicciones`, {
+      jurisdicciones: rows.map((r) => ({
+        jurisdiccion_codigo: r.codigo,
+        base_imponible: Number(r.base || 0),
+      })),
+    }),
+    onSuccess: () => { toast.success('Jurisdicciones guardadas', 'Reparto IIBB actualizado.'); onSuccess(); },
+    onError: (e: ApiError) => setErr(e.message),
+  });
+
+  // React #310: early return DESPUÉS de todos los hooks.
+  if (!factura) return null;
+
+  const asignado = Math.round(rows.reduce((s, r) => s + (Number(r.base) || 0), 0) * 100) / 100;
+  const restante = Math.round((neto - asignado) * 100) / 100;
+  const codigosLlenos = rows.map((r) => r.codigo).filter(Boolean);
+  const hayDup = new Set(codigosLlenos).size !== codigosLlenos.length;
+  const todosConJur = rows.length > 0 && rows.every((r) => r.codigo);
+  const valid = todosConJur && !hayDup && Math.abs(restante) <= 0.5;
+
+  const setRow = (i: number, patch: Partial<DistRow>) =>
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const addRow = () => setRows((rs) => [...rs, { codigo: '', base: restante > 0 ? restante.toFixed(2) : '0.00' }]);
+  const delRow = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
+  const ponerResto = (i: number) =>
+    setRows((rs) => rs.map((r, j) => (j === i
+      ? { ...r, base: (Math.round(((Number(r.base) || 0) + restante) * 100) / 100).toFixed(2) }
+      : r)));
+
+  // Códigos ya usados, para no ofrecerlos dos veces en los dropdowns.
+  const usados = new Set(codigosLlenos);
+
+  return (
+    <Modal open onClose={onClose}
+      title={`Jurisdicción IIBB · factura ${factura.tipo_codigo} ${factura.numero}`}
+      size="lg">
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-[12px] text-ink-muted py-6">
+          <Loader2 className="w-4 h-4 animate-spin" /> Cargando…
+        </div>
+      ) : (
+        <div className="space-y-3 text-[12px]">
+          <div className="text-[11.5px] text-ink-muted">
+            Repartí el <strong>neto gravado</strong> de la factura entre una o varias jurisdicciones.
+            La suma debe igualar el neto. Para una sola jurisdicción, dejá una fila con toda la base.
+          </div>
+
+          <div className="flex items-center justify-between bg-azure-soft/30 rounded p-2 text-[12px]">
+            <span className="text-ink-muted">Neto gravado a repartir</span>
+            <span className="font-mono font-semibold">${fmtMoney(neto)}</span>
+          </div>
+
+          <div className="space-y-2">
+            {rows.map((r, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <select
+                  value={r.codigo}
+                  onChange={(e) => setRow(i, { codigo: e.target.value })}
+                  className="flex-1 px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure">
+                  <option value="">— Elegí jurisdicción —</option>
+                  {catalogo
+                    .filter((c) => c.codigo === r.codigo || !usados.has(c.codigo))
+                    .map((c) => (
+                      <option key={c.codigo} value={c.codigo}>{c.codigo} · {c.nombre}</option>
+                    ))}
+                </select>
+                <div className="relative w-[150px]">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-muted">$</span>
+                  <input
+                    type="number" step="0.01" min="0" value={r.base}
+                    onChange={(e) => setRow(i, { base: e.target.value })}
+                    className="w-full pl-5 pr-2 py-1 text-[12px] text-right font-mono border border-azure-soft rounded focus:outline-none focus:border-azure" />
+                </div>
+                <button
+                  type="button" onClick={() => ponerResto(i)}
+                  title="Asignar el restante a esta fila"
+                  className="px-1.5 py-1 text-[10px] rounded border border-azure-soft text-azure hover:bg-azure-soft/40 cursor-pointer whitespace-nowrap">
+                  + resto
+                </button>
+                <button
+                  type="button" onClick={() => delRow(i)}
+                  disabled={rows.length <= 1}
+                  title="Quitar fila"
+                  className="p-1 text-danger/70 hover:text-danger disabled:opacity-30 cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button" onClick={addRow}
+            className="inline-flex items-center gap-1 text-[11.5px] text-azure hover:underline cursor-pointer">
+            <Plus className="w-3 h-3" /> Agregar jurisdicción
+          </button>
+
+          <div className="flex items-center justify-between border-t border-line pt-2 text-[12px]">
+            <span className="text-ink-muted">Asignado</span>
+            <span className="font-mono">${fmtMoney(asignado)}</span>
+          </div>
+          <div className={`flex items-center justify-between text-[12px] font-semibold ${
+            Math.abs(restante) <= 0.5 ? 'text-success' : 'text-danger'}`}>
+            <span>Restante</span>
+            <span className="font-mono">${fmtMoney(restante)}</span>
+          </div>
+
+          {hayDup && (
+            <div className="text-[11px] text-danger">Hay jurisdicciones repetidas.</div>
+          )}
+          {err && (
+            <div className="border border-danger/30 bg-danger-bg/20 rounded p-2 text-[11.5px] text-danger">
+              {err}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-line">
+            <Button variant="secondary" onClick={onClose} disabled={mut.isPending}>Cancelar</Button>
+            <Button variant="primary" disabled={!valid || mut.isPending}
+              onClick={() => { setErr(null); mut.mutate(); }}>
+              {mut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <MapPin className="w-3 h-3" />}
+              Guardar reparto
+            </Button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

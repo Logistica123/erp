@@ -509,6 +509,11 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.admin.permisos-temp.destroy');
         Route::patch('/facturas-venta/{id}/periodo-trabajado', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodoTrabajado'])
             ->whereNumber('id')->name('erp.facturas-venta.periodo-trabajado');
+        // v1.51 — Reparto de base imponible IIBB por jurisdicción.
+        Route::get('/facturas-venta/{id}/jurisdicciones', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'jurisdicciones'])
+            ->whereNumber('id')->name('erp.facturas-venta.jurisdicciones');
+        Route::put('/facturas-venta/{id}/jurisdicciones', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'putJurisdicciones'])
+            ->whereNumber('id')->name('erp.facturas-venta.jurisdicciones.put');
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])
             ->name('erp.fv.catalogos');
         Route::get('/facturas-venta', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'index'])

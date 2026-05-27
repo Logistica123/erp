@@ -3,6 +3,7 @@
 namespace App\Erp\Http\Controllers;
 
 use App\Erp\Models\VentasCompras\FacturaVenta;
+use App\Erp\Models\VentasCompras\FacturaVentaJurisdiccion;
 use App\Erp\Services\CobroFacturaService;
 use App\Erp\Services\EmisorFacturaService;
 use App\Erp\Services\FacturaVentaService;
@@ -767,6 +768,140 @@ class FacturasVentaController extends Controller
         Cache::forget("facturas_venta.periodos_trabajados.{$empresaId}");
 
         return response()->json(['ok' => true, 'data' => ['updated' => $facturas->count()]]);
+    }
+
+    /**
+     * v1.51 — GET reparto de base imponible IIBB por jurisdicción de una
+     * factura. Devuelve el neto gravado (base a repartir), las filas actuales
+     * (si las hay) y el catálogo de jurisdicciones activas.
+     */
+    public function jurisdicciones(Request $request, int $id): JsonResponse
+    {
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $factura = FacturaVenta::where('empresa_id', $empresaId)->findOrFail($id);
+
+        $filas = FacturaVentaJurisdiccion::where('factura_venta_id', $factura->id)
+            ->orderByDesc('base_imponible')
+            ->get(['id', 'jurisdiccion_codigo', 'base_imponible']);
+
+        return response()->json(['ok' => true, 'data' => [
+            'factura_id' => $factura->id,
+            'neto_gravado' => (float) $factura->imp_neto_gravado,
+            'jurisdiccion_codigo' => $factura->jurisdiccion_codigo,
+            'distribucion' => $filas,
+            'catalogo' => DB::table('erp_iibb_jurisdicciones')
+                ->where('activa', 1)->orderBy('codigo')
+                ->get(['codigo', 'nombre']),
+        ]]);
+    }
+
+    /**
+     * v1.51 — PUT reparto de base imponible IIBB. Reemplaza la distribución
+     * completa de la factura. Acepta 1 jurisdicción (toda la base) o N. La
+     * suma de `base_imponible` debe igualar el neto gravado (tolerancia $0.50;
+     * el remanente se absorbe en la fila mayor para que cierre exacto).
+     *
+     * No toca el importe fiscal de la factura: la jurisdicción IIBB no está
+     * protegida por el trigger de inmutabilidad (RN-32), así que se puede
+     * editar aunque la factura tenga CAE.
+     */
+    public function putJurisdicciones(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'ventas.facturas.editar');
+
+        $data = $request->validate([
+            'jurisdicciones' => ['required', 'array', 'min:1', 'max:30'],
+            'jurisdicciones.*.jurisdiccion_codigo' => ['required', 'string', 'size:3'],
+            'jurisdicciones.*.base_imponible' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $factura = FacturaVenta::where('empresa_id', $empresaId)->findOrFail($id);
+
+        $filas = $data['jurisdicciones'];
+
+        // Duplicados de jurisdicción en el payload.
+        $codigos = array_map(fn ($r) => $r['jurisdiccion_codigo'], $filas);
+        if (count($codigos) !== count(array_unique($codigos))) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'JURISDICCION_DUPLICADA',
+                'message' => 'No se puede repetir la misma jurisdicción en el reparto.',
+            ]], 422);
+        }
+
+        // Todas deben existir en el catálogo y estar activas.
+        $validas = DB::table('erp_iibb_jurisdicciones')->where('activa', 1)
+            ->pluck('codigo')->all();
+        foreach ($codigos as $c) {
+            if (! in_array($c, $validas, true)) {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'JURISDICCION_INVALIDA',
+                    'message' => "La jurisdicción {$c} no existe o no está activa.",
+                ]], 422);
+            }
+        }
+
+        $neto = round((float) $factura->imp_neto_gravado, 2);
+        $suma = round(array_sum(array_map(fn ($r) => (float) $r['base_imponible'], $filas)), 2);
+        if (abs($suma - $neto) > 0.50) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'SUMA_NO_COINCIDE',
+                'message' => sprintf(
+                    'La suma del reparto ($%s) debe igualar el neto gravado de la factura ($%s). Diferencia: $%s.',
+                    number_format($suma, 2, ',', '.'),
+                    number_format($neto, 2, ',', '.'),
+                    number_format($suma - $neto, 2, ',', '.'),
+                ),
+            ]], 422);
+        }
+
+        // Snap exacto: absorbe el remanente (≤ $0.50) en la fila de mayor base.
+        $bases = array_map(fn ($r) => round((float) $r['base_imponible'], 2), $filas);
+        $diff = round($neto - array_sum($bases), 2);
+        if ($diff !== 0.0) {
+            $idxMax = array_keys($bases, max($bases))[0];
+            $bases[$idxMax] = round($bases[$idxMax] + $diff, 2);
+        }
+
+        // Jurisdicción dominante (mayor base) → se refleja en jurisdiccion_codigo
+        // para el listado y la compatibilidad con el resto del sistema.
+        $idxDom = array_keys($bases, max($bases))[0];
+        $dominante = $codigos[$idxDom];
+
+        $snapshot = FacturaVentaJurisdiccion::where('factura_venta_id', $factura->id)
+            ->get(['jurisdiccion_codigo', 'base_imponible'])->toArray();
+
+        DB::transaction(function () use ($factura, $codigos, $bases, $dominante) {
+            FacturaVentaJurisdiccion::where('factura_venta_id', $factura->id)->delete();
+            $now = now();
+            $insert = [];
+            foreach ($codigos as $i => $c) {
+                $insert[] = [
+                    'factura_venta_id' => $factura->id,
+                    'jurisdiccion_codigo' => $c,
+                    'base_imponible' => $bases[$i],
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+            FacturaVentaJurisdiccion::insert($insert);
+            // jurisdiccion_codigo NO está en el trigger de inmutabilidad: OK con CAE.
+            $factura->update(['jurisdiccion_codigo' => $dominante]);
+        });
+
+        $this->audit->log('jurisdicciones_editadas', $factura,
+            ['distribucion' => $snapshot],
+            ['distribucion' => array_map(fn ($c, $b) => ['jurisdiccion_codigo' => $c, 'base_imponible' => $b], $codigos, $bases)],
+            sprintf('Factura venta #%d: reparto IIBB en %d jurisdicción(es), dominante %s.',
+                $id, count($codigos), $dominante),
+        );
+
+        return response()->json(['ok' => true, 'data' => [
+            'factura_id' => $factura->id,
+            'jurisdiccion_codigo' => $dominante,
+            'distribucion' => FacturaVentaJurisdiccion::where('factura_venta_id', $factura->id)
+                ->orderByDesc('base_imponible')->get(['id', 'jurisdiccion_codigo', 'base_imponible']),
+        ]]);
     }
 
     private function mustHave(Request $request, string $codigo): void

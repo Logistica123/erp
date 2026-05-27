@@ -105,6 +105,12 @@ class FacturaVenta extends Model
         return $this->hasMany(FacturaVentaItem::class, 'factura_id');
     }
 
+    /** v1.51 — Reparto de base imponible IIBB por jurisdicción. */
+    public function jurisdicciones(): HasMany
+    {
+        return $this->hasMany(FacturaVentaJurisdiccion::class, 'factura_venta_id');
+    }
+
     public function iva(): HasMany
     {
         return $this->hasMany(FacturaVentaIva::class, 'factura_id');

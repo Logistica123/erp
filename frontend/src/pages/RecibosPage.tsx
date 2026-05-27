@@ -41,6 +41,10 @@ type ReciboDetalle = Recibo & {
     id: number; factura_venta_id: number; monto_imputado: number;
     total_factura: number; fecha_factura: string; numero_factura_snapshot: string;
   }>;
+  nc_aplicadas?: Array<{
+    id: number; nc_factura_id: number; monto_aplicado: number; automatica: boolean;
+    nc?: { id: number; numero: number; imp_total: number } | null;
+  }>;
   snapshot_empresa_razon_social?: string | null;
   snapshot_empresa_cuit?: string | null;
   snapshot_empresa_direccion_1?: string | null;
@@ -54,6 +58,10 @@ type ReciboDetalle = Recibo & {
   snapshot_cliente_condicion_iva?: string | null;
 };
 type CuentaBancaria = { id: number; nombre: string };
+type NcLibre = {
+  id: number; tipo: string; numero: number; numero_completo: string;
+  fecha_emision: string; imp_total: number; saldo_imputable: number;
+};
 
 type ProximoNumero = {
   punto_venta: string; numero: string;
@@ -93,6 +101,7 @@ type Draft = {
   clienteDireccion1: string;
   clienteDireccion2: string;
   comprobantes: Array<{ factura_venta_id: number; numeroFactura: string; fecha: string; totalFactura: number; imputado: number }>;
+  ncAplicadas: Array<{ nc_factura_id: number; numeroNc: string; fecha: string; saldo: number; monto: number }>;
   retencionIva: string;
   retencionIibb: string;
   retencionGanancias: string;
@@ -121,6 +130,7 @@ const DRAFT_INICIAL: Draft = {
   clienteDireccion1: '',
   clienteDireccion2: '',
   comprobantes: [],
+  ncAplicadas: [],
   retencionIva: '',
   retencionIibb: '',
   retencionGanancias: '',
@@ -183,6 +193,14 @@ export function RecibosPage() {
   );
   const facturasDelCliente = facturasResp ?? [];
 
+  // NC libres del cliente (con saldo imputable > 0).
+  const { data: ncResp } = useApi<NcLibre[]>(
+    ['nc-libres', draft.clienteId],
+    `/api/erp/clientes/${draft.clienteId}/notas-credito-libres`,
+    { enabled: !!draft.clienteId },
+  );
+  const ncDelCliente = ncResp ?? [];
+
   // Próximo número auto al montar / al pedir nuevo borrador.
   const { data: proximoNumeroResp, refetch: refetchProximoNumero } = useApi<ProximoNumero>(
     ['proximo-numero', draft.puntoVenta],
@@ -207,6 +225,7 @@ export function RecibosPage() {
       clienteDireccion1: c?.direccion_1 ?? '',
       clienteDireccion2: c?.direccion_2 ?? '',
       comprobantes: [],
+      ncAplicadas: [],
     }));
   };
 
@@ -243,6 +262,13 @@ export function RecibosPage() {
           totalFactura: Number(c.total_factura),
           imputado: Number(c.monto_imputado),
         })),
+        ncAplicadas: (reciboDetalle.nc_aplicadas ?? []).map((n) => ({
+          nc_factura_id: n.nc_factura_id,
+          numeroNc: `NC #${n.nc?.numero ?? n.nc_factura_id}`,
+          fecha: '',
+          saldo: Number(n.monto_aplicado),
+          monto: Number(n.monto_aplicado),
+        })),
         retencionIva: String(reciboDetalle.retencion_iva_total || ''),
         retencionIibb: String(reciboDetalle.retencion_iibb_total || ''),
         retencionGanancias: String(reciboDetalle.retencion_ganancias_total || ''),
@@ -255,8 +281,10 @@ export function RecibosPage() {
   }, [reciboDetalle]);
 
   const totalImputado = draft.comprobantes.reduce((s, c) => s + c.imputado, 0);
+  const totalNc = draft.ncAplicadas.reduce((s, n) => s + n.monto, 0);
   const totalRet = parseMontoEs(draft.retencionIva) + parseMontoEs(draft.retencionIibb) + parseMontoEs(draft.retencionGanancias);
   const totalCobro = parseMontoEs(draft.importeRecibido) + totalRet;
+  const montoCobrable = Math.max(0, totalImputado - totalNc - totalRet);
 
   const crearMut = useApiMutation<{ data: Recibo }, Record<string, unknown>>(
     (body) => api.post('/api/erp/tesoreria/recibos', body),
@@ -311,6 +339,11 @@ export function RecibosPage() {
           factura_venta_id: c.factura_venta_id,
           monto_imputado: c.imputado,
         })),
+        nc_aplicadas: draft.ncAplicadas.map((n) => ({
+          nc_factura_id: n.nc_factura_id,
+          monto_aplicado: n.monto,
+        })),
+        auto_imputar_nc: false, // el operador elige las NC manualmente desde el modal.
         monto_cobrado: parseMontoEs(draft.importeRecibido),
         medio_cobro_id: draft.medioCobroId ? Number(draft.medioCobroId) : null,
         retencion_iva_total: parseMontoEs(draft.retencionIva),
@@ -513,6 +546,54 @@ export function RecibosPage() {
               </CardBody>
             </Card>
 
+            {/* NC aplicadas */}
+            <Card>
+              <CardHeader title={
+                <div className="flex items-center justify-between">
+                  <div className="text-[12px] font-semibold text-success">Notas de crédito aplicadas ({draft.ncAplicadas.length})</div>
+                </div>
+              } />
+              <CardBody>
+                {draft.ncAplicadas.length === 0 ? (
+                  <div className="text-[11px] text-ink-muted italic">
+                    {ncDelCliente.length > 0
+                      ? `El cliente tiene ${ncDelCliente.length} NC disponible${ncDelCliente.length === 1 ? '' : 's'} — agregalas desde el botón "Agregar" de Comprobantes.`
+                      : 'Sin NC disponibles para este cliente.'}
+                  </div>
+                ) : (
+                  <table className="w-full text-[11px]">
+                    <thead><tr className="text-ink-muted">
+                      <th className="text-left px-1">NC</th>
+                      <th className="text-right">Saldo NC</th>
+                      <th className="text-right">Aplicado</th>
+                      {!selectedReciboId && <th></th>}
+                    </tr></thead>
+                    <tbody>
+                      {draft.ncAplicadas.map((n, i) => (
+                        <tr key={i} className="border-t border-line bg-success-bg/10">
+                          <td className="px-1 font-mono">{n.numeroNc}</td>
+                          <td className="text-right tabular">${fmtMoney(n.saldo)}</td>
+                          <td className="text-right tabular font-semibold text-success">−${fmtMoney(n.monto)}</td>
+                          {!selectedReciboId && (
+                            <td className="text-right">
+                              <button onClick={() => setDraft({ ...draft, ncAplicadas: draft.ncAplicadas.filter((_, idx) => idx !== i) })}>
+                                <Trash2 className="w-3 h-3 text-danger" />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                      <tr className="font-semibold border-t border-line bg-success-bg/20">
+                        <td colSpan={2} className="text-right px-1">Total NC</td>
+                        <td className="text-right tabular text-success">−${fmtMoney(totalNc)}</td>
+                        {!selectedReciboId && <td></td>}
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+              </CardBody>
+            </Card>
+
             <Card>
               <CardHeader title={<div className="text-[12px] font-semibold">Cobro</div>} />
               <CardBody className="space-y-2">
@@ -544,9 +625,16 @@ export function RecibosPage() {
                     onChange={(e) => setDraft({ ...draft, retencionGanancias: e.target.value })}
                     disabled={!!selectedReciboId} />
                 </div>
-                <div className="text-[12px] flex justify-between bg-azure-soft/20 border border-azure-soft rounded p-2">
-                  <span>Total cobro:</span>
-                  <strong>${fmtMoney(totalCobro)}</strong>
+                <div className="text-[11.5px] space-y-0.5 bg-azure-soft/10 border border-azure-soft rounded p-2">
+                  <div className="flex justify-between"><span>Total imputado (facturas):</span><span className="tabular">${fmtMoney(totalImputado)}</span></div>
+                  {totalNc > 0 && <div className="flex justify-between text-success"><span>− NC aplicadas:</span><span className="tabular">−${fmtMoney(totalNc)}</span></div>}
+                  {totalRet > 0 && <div className="flex justify-between"><span>− Retenciones:</span><span className="tabular">−${fmtMoney(totalRet)}</span></div>}
+                  <div className="flex justify-between font-semibold border-t border-azure-soft pt-0.5">
+                    <span>Monto cobrable:</span><span className="tabular">${fmtMoney(montoCobrable)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold">
+                    <span>Total cobro (recibido + ret):</span><span className="tabular">${fmtMoney(totalCobro)}</span>
+                  </div>
                 </div>
               </CardBody>
             </Card>
@@ -561,17 +649,26 @@ export function RecibosPage() {
       {agregarCompModalOpen && (
         <AgregarComprobanteModal
           facturas={facturasDelCliente}
+          ncs={ncDelCliente}
           yaAgregadas={new Set(draft.comprobantes.map((c) => c.factura_venta_id))}
+          ncYaAgregadas={new Set(draft.ncAplicadas.map((n) => n.nc_factura_id))}
           onClose={() => setAgregarCompModalOpen(false)}
-          onAgregar={(seleccionadas) => {
+          onAgregar={(facturasSel, ncsSel) => {
             setDraft({
               ...draft,
-              comprobantes: [...draft.comprobantes, ...seleccionadas.map((f) => ({
+              comprobantes: [...draft.comprobantes, ...facturasSel.map((f) => ({
                 factura_venta_id: f.id,
                 numeroFactura: f.numero_completo,
                 fecha: f.fecha_emision,
                 totalFactura: Number(f.imp_total),
                 imputado: Number(f.saldo),
+              }))],
+              ncAplicadas: [...draft.ncAplicadas, ...ncsSel.map((n) => ({
+                nc_factura_id: n.id,
+                numeroNc: `${n.tipo} ${n.numero_completo}`,
+                fecha: n.fecha_emision,
+                saldo: Number(n.saldo_imputable),
+                monto: Number(n.saldo_imputable),
               }))],
             });
             setAgregarCompModalOpen(false);
@@ -640,6 +737,12 @@ function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
             <span className="font-bold">FECHA DEL COBRO</span><span className="text-right">{fmtFecha(draft.fechaCobro)}</span>
             <span className="font-bold">DETALLE DEL COBRO</span><span className="text-right">{draft.detalleCobro || '—'}</span>
             <span className="font-bold">IMPORTE RECIBIDO</span><span className="text-right">${fmtMoney(parseMontoEs(draft.importeRecibido))}</span>
+            {draft.ncAplicadas.length > 0 && (
+              <>
+                <span className="font-bold">NOTAS DE CRÉDITO</span>
+                <span className="text-right">−${fmtMoney(draft.ncAplicadas.reduce((s, n) => s + n.monto, 0))}</span>
+              </>
+            )}
             <span className="font-bold">RETENCIONES IVA</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionIva))}</span>
             <span className="font-bold">RETENCIONES IIBB</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionIibb))}</span>
             <span className="font-bold">RETENCIONES GANANCIAS</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionGanancias))}</span>
@@ -680,86 +783,90 @@ function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
   );
 }
 
-function AgregarComprobanteModal({ facturas, yaAgregadas, onClose, onAgregar }: {
+function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, onClose, onAgregar }: {
   facturas: FacturaImputable[];
+  ncs: NcLibre[];
   yaAgregadas: Set<number>;
+  ncYaAgregadas: Set<number>;
   onClose: () => void;
-  onAgregar: (seleccionadas: FacturaImputable[]) => void;
+  onAgregar: (facturasSel: FacturaImputable[], ncsSel: NcLibre[]) => void;
 }) {
-  const disponibles = facturas.filter((f) => !yaAgregadas.has(f.id));
-  const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
+  const facturasDisp = facturas.filter((f) => !yaAgregadas.has(f.id));
+  const ncsDisp = ncs.filter((n) => !ncYaAgregadas.has(n.id));
+  const [selFact, setSelFact] = useState<Set<number>>(new Set());
+  const [selNc, setSelNc] = useState<Set<number>>(new Set());
   const [busq, setBusq] = useState('');
-  const filtradas = useMemo(() => {
-    const q = busq.trim().toLowerCase();
-    if (!q) return disponibles;
-    return disponibles.filter((f) =>
-      f.numero_completo.toLowerCase().includes(q) || String(f.fecha_emision).includes(q),
-    );
-  }, [disponibles, busq]);
-  const toggle = (id: number) => {
-    const n = new Set(seleccion);
-    if (n.has(id)) n.delete(id); else n.add(id);
-    setSeleccion(n);
+
+  const q = busq.trim().toLowerCase();
+  const facturasFilt = useMemo(() => !q ? facturasDisp
+    : facturasDisp.filter((f) => f.numero_completo.toLowerCase().includes(q) || String(f.fecha_emision).includes(q)),
+    [facturasDisp, q]);
+  const ncsFilt = useMemo(() => !q ? ncsDisp
+    : ncsDisp.filter((n) => n.numero_completo.toLowerCase().includes(q) || String(n.fecha_emision).includes(q)),
+    [ncsDisp, q]);
+
+  const toggleFact = (id: number) => {
+    const s = new Set(selFact); s.has(id) ? s.delete(id) : s.add(id); setSelFact(s);
   };
-  const toggleAll = () => {
-    setSeleccion(seleccion.size === filtradas.length ? new Set() : new Set(filtradas.map((f) => f.id)));
+  const toggleNc = (id: number) => {
+    const s = new Set(selNc); s.has(id) ? s.delete(id) : s.add(id); setSelNc(s);
   };
-  const total = filtradas.filter((f) => seleccion.has(f.id)).reduce((s, f) => s + f.saldo, 0);
+  const toggleAllFact = () => setSelFact(selFact.size === facturasFilt.length ? new Set() : new Set(facturasFilt.map((f) => f.id)));
+
+  const totalFact = facturasFilt.filter((f) => selFact.has(f.id)).reduce((s, f) => s + f.saldo, 0);
+  const totalNc = ncsFilt.filter((n) => selNc.has(n.id)).reduce((s, n) => s + n.saldo_imputable, 0);
+  const totalSel = selFact.size + selNc.size;
+  const nada = facturasDisp.length === 0 && ncsDisp.length === 0;
 
   return (
     <Modal open onClose={onClose} title="Agregar comprobantes imputados" size="lg" footer={
       <>
         <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-        <Button variant="primary" disabled={seleccion.size === 0}
-          onClick={() => onAgregar(filtradas.filter((f) => seleccion.has(f.id)))}>
-          Agregar {seleccion.size > 0 ? `(${seleccion.size})` : ''}
+        <Button variant="primary" disabled={totalSel === 0}
+          onClick={() => onAgregar(
+            facturasFilt.filter((f) => selFact.has(f.id)),
+            ncsFilt.filter((n) => selNc.has(n.id)),
+          )}>
+          Agregar {totalSel > 0 ? `(${totalSel})` : ''}
         </Button>
       </>
     }>
-      <div className="space-y-2 text-[12px]">
+      <div className="space-y-3 text-[12px]">
         <input value={busq} onChange={(e) => setBusq(e.target.value)}
           placeholder="Buscar por nro o fecha…"
           className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
-        {disponibles.length === 0 ? (
+
+        {nada && (
           <div className="text-[11.5px] text-ink-muted border border-line rounded p-3 bg-surface-row">
-            {facturas.length === 0 ? (
-              <>Este cliente no tiene comprobantes con saldo pendiente. Verificá que las facturas
-              estén registradas con estado <code>EMITIDA</code> o <code>COBRO_PARCIAL</code> en{' '}
-              <a href="/erp/facturacion" className="text-azure underline">Facturación</a>.</>
-            ) : (
-              <>Todas las facturas pendientes del cliente ya fueron agregadas a este recibo.</>
-            )}
+            Este cliente no tiene comprobantes con saldo pendiente. Verificá que las facturas
+            estén registradas con estado <code>EMITIDA</code> o <code>COBRO_PARCIAL</code> en{' '}
+            <a href="/erp/facturacion" className="text-azure underline">Facturación</a>.
           </div>
-        ) : (
-          <>
+        )}
+
+        {/* Facturas */}
+        {facturasDisp.length > 0 && (
+          <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] cursor-pointer">
+              <label className="text-[11px] cursor-pointer font-semibold">
                 <input type="checkbox" className="mr-1"
-                  checked={seleccion.size === filtradas.length && filtradas.length > 0}
-                  onChange={toggleAll} />
-                Seleccionar todas ({filtradas.length})
+                  checked={selFact.size === facturasFilt.length && facturasFilt.length > 0}
+                  onChange={toggleAllFact} />
+                Facturas ({facturasFilt.length})
               </label>
-              <span className="text-[11.5px] text-ink-muted">
-                Total seleccionadas: <strong>${fmtMoney(total)}</strong>
-              </span>
+              <span className="text-[11.5px] text-ink-muted">Seleccionadas: <strong>${fmtMoney(totalFact)}</strong></span>
             </div>
-            <div className="max-h-80 overflow-auto border border-line rounded">
+            <div className="max-h-56 overflow-auto border border-line rounded">
               <table className="w-full text-[11px]">
-                <thead className="bg-surface-row sticky top-0">
-                  <tr>
-                    <th className="px-2 py-1 w-8"></th>
-                    <th className="text-left">Nº</th>
-                    <th className="text-left">Fecha</th>
-                    <th className="text-right">Total</th>
-                    <th className="text-right">Saldo</th>
-                    <th className="text-left">Origen</th>
-                  </tr>
-                </thead>
+                <thead className="bg-surface-row sticky top-0"><tr>
+                  <th className="px-2 py-1 w-8"></th><th className="text-left">Nº</th><th className="text-left">Fecha</th>
+                  <th className="text-right">Total</th><th className="text-right">Saldo</th><th className="text-left">Origen</th>
+                </tr></thead>
                 <tbody>
-                  {filtradas.map((f) => (
-                    <tr key={f.id} className={`border-t border-line cursor-pointer ${seleccion.has(f.id) ? 'bg-azure-soft/30' : 'hover:bg-azure-soft/10'}`}
-                      onClick={() => toggle(f.id)}>
-                      <td className="px-2 py-0.5"><input type="checkbox" checked={seleccion.has(f.id)} readOnly /></td>
+                  {facturasFilt.map((f) => (
+                    <tr key={f.id} className={`border-t border-line cursor-pointer ${selFact.has(f.id) ? 'bg-azure-soft/30' : 'hover:bg-azure-soft/10'}`}
+                      onClick={() => toggleFact(f.id)}>
+                      <td className="px-2 py-0.5"><input type="checkbox" checked={selFact.has(f.id)} readOnly /></td>
                       <td className="font-mono">{f.tipo} {f.numero_completo}</td>
                       <td>{fmtFecha(f.fecha_emision)}</td>
                       <td className="text-right tabular">${fmtMoney(f.imp_total)}</td>
@@ -770,7 +877,38 @@ function AgregarComprobanteModal({ facturas, yaAgregadas, onClose, onAgregar }: 
                 </tbody>
               </table>
             </div>
-          </>
+          </div>
+        )}
+
+        {/* Notas de crédito */}
+        {ncsDisp.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-success">Notas de crédito disponibles ({ncsFilt.length})</span>
+              <span className="text-[11.5px] text-ink-muted">Seleccionadas: <strong className="text-success">−${fmtMoney(totalNc)}</strong></span>
+            </div>
+            <div className="text-[10px] text-ink-muted">Se imputan al recibo reduciendo el monto cobrable.</div>
+            <div className="max-h-44 overflow-auto border border-success/30 rounded">
+              <table className="w-full text-[11px]">
+                <thead className="bg-success-bg/20 sticky top-0"><tr>
+                  <th className="px-2 py-1 w-8"></th><th className="text-left">Nº NC</th><th className="text-left">Fecha</th>
+                  <th className="text-right">Total NC</th><th className="text-right">Saldo imputable</th>
+                </tr></thead>
+                <tbody>
+                  {ncsFilt.map((n) => (
+                    <tr key={n.id} className={`border-t border-success/10 cursor-pointer ${selNc.has(n.id) ? 'bg-success-bg/30' : 'hover:bg-success-bg/10'}`}
+                      onClick={() => toggleNc(n.id)}>
+                      <td className="px-2 py-0.5"><input type="checkbox" checked={selNc.has(n.id)} readOnly /></td>
+                      <td className="font-mono">{n.tipo} {n.numero_completo}</td>
+                      <td>{fmtFecha(n.fecha_emision)}</td>
+                      <td className="text-right tabular">${fmtMoney(n.imp_total)}</td>
+                      <td className="text-right tabular font-semibold text-success">${fmtMoney(n.saldo_imputable)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
     </Modal>

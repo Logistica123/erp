@@ -373,20 +373,24 @@ class RecibosController
     }
 
     /**
-     * Lista las NC del cliente con saldo imputable > 0 (para el form manual).
+     * Lista las NC del cliente con saldo imputable > 0 (para el form de recibo).
+     * v1.34+: matchea por CUIT (auxiliares hermanos), igual que las facturas.
      */
     public function ncLibresCliente(Request $request, int $clienteId): JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $auxIds = $this->auxiliaresHermanos($clienteId, $empresaId);
+
         $ncs = DB::table('erp_facturas_venta as f')
             ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
+            ->join('erp_puntos_venta as pv', 'pv.id', '=', 'f.punto_venta_id')
             ->where('f.empresa_id', $empresaId)
-            ->where('f.auxiliar_id', $clienteId)
+            ->whereIn('f.auxiliar_id', $auxIds)
             ->where('tc.clase', 'NOTA_CREDITO')
             ->whereNull('f.deleted_at')
             ->orderByDesc('f.fecha_emision')
-            ->get(['f.id', 'tc.codigo_interno', 'tc.letra', 'f.numero',
-                'f.fecha_emision', 'f.imp_total']);
+            ->get(['f.id', 'tc.codigo_interno', 'tc.letra', 'pv.numero as pv_numero',
+                'f.numero', 'f.fecha_emision', 'f.imp_total']);
 
         $resultado = $ncs->map(function ($nc) use ($empresaId) {
             $saldo = $this->svc->saldoImputableNc((int) $nc->id, $empresaId);
@@ -394,6 +398,7 @@ class RecibosController
                 'id' => $nc->id,
                 'tipo' => $nc->codigo_interno . ($nc->letra ? ' ' . $nc->letra : ''),
                 'numero' => $nc->numero,
+                'numero_completo' => sprintf('%04d-%08d', (int) $nc->pv_numero, (int) $nc->numero),
                 'fecha_emision' => $nc->fecha_emision,
                 'imp_total' => $nc->imp_total,
                 'saldo_imputable' => $saldo,

@@ -356,7 +356,7 @@ export function RecibosPage() {
       toast.success('Recibo emitido', `Recibo ${draft.puntoVenta}-${draft.numero}`);
       invalidate();
       // Imprimir via window.print del HTML del preview.
-      printRecibo(draft, { total_cobro: totalCobro, total_imputado: totalImputado, watermark: null });
+      printRecibo(draft, { total_cobro: totalCobro, total_imputado: totalImputado - totalNc, watermark: null });
       if (draft.autoIncrementar) {
         // Próximo número auto.
         const next = await api.get<ProximoNumero>(`/api/erp/tesoreria/recibos/proximo-numero?pv=${draft.puntoVenta}`);
@@ -760,23 +760,35 @@ function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
               <th className="border border-black px-1 py-0.5 text-right">IMPUTADO</th>
             </tr></thead>
             <tbody>
-              {draft.comprobantes.length === 0 ? (
+              {draft.comprobantes.length === 0 && draft.ncAplicadas.length === 0 ? (
                 <tr><td colSpan={4} className="border border-black px-1 italic text-ink-muted">Sin comprobantes imputados.</td></tr>
-              ) : draft.comprobantes.map((c, i) => (
-                <tr key={i}>
-                  <td className="border border-black px-1">{fmtFecha(c.fecha)}</td>
-                  <td className="border border-black px-1 font-mono">{c.numeroFactura}</td>
-                  <td className="border border-black px-1 text-right">${fmtMoney(c.totalFactura)}</td>
-                  <td className="border border-black px-1 text-right">${fmtMoney(c.imputado)}</td>
-                </tr>
-              ))}
+              ) : (
+                <>
+                  {draft.comprobantes.map((c, i) => (
+                    <tr key={`f${i}`}>
+                      <td className="border border-black px-1">{fmtFecha(c.fecha)}</td>
+                      <td className="border border-black px-1 font-mono">{c.numeroFactura}</td>
+                      <td className="border border-black px-1 text-right">${fmtMoney(c.totalFactura)}</td>
+                      <td className="border border-black px-1 text-right">${fmtMoney(c.imputado)}</td>
+                    </tr>
+                  ))}
+                  {draft.ncAplicadas.map((n, i) => (
+                    <tr key={`n${i}`}>
+                      <td className="border border-black px-1">{fmtFecha(n.fecha)}</td>
+                      <td className="border border-black px-1 font-mono">{n.numeroNc}</td>
+                      <td className="border border-black px-1 text-right">−${fmtMoney(n.saldo)}</td>
+                      <td className="border border-black px-1 text-right">−${fmtMoney(n.monto)}</td>
+                    </tr>
+                  ))}
+                </>
+              )}
             </tbody>
           </table>
         </div>
         {/* Footer */}
         <div className="border-t border-black p-2 flex justify-end gap-3 font-extrabold text-[12px]">
           <span>TOTAL IMPUTADO</span>
-          <span>${fmtMoney(totalImputado)}</span>
+          <span>${fmtMoney(totalImputado - draft.ncAplicadas.reduce((s, n) => s + n.monto, 0))}</span>
         </div>
       </div>
     </div>
@@ -955,13 +967,21 @@ function printRecibo(d: Draft, opts: { total_cobro: number; total_imputado: numb
   if (!w) return;
   const escape = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const rows = d.comprobantes.map((c) => `
+  const rowsFact = d.comprobantes.map((c) => `
     <tr>
       <td>${escape(fmtFecha(c.fecha))}</td>
       <td>${escape(c.numeroFactura)}</td>
       <td style="text-align:right">$${escape(fmt(c.totalFactura))}</td>
       <td style="text-align:right">$${escape(fmt(c.imputado))}</td>
     </tr>`).join('');
+  const rowsNc = d.ncAplicadas.map((n) => `
+    <tr>
+      <td>${escape(fmtFecha(n.fecha))}</td>
+      <td>${escape(n.numeroNc)}</td>
+      <td style="text-align:right">-$${escape(fmt(n.saldo))}</td>
+      <td style="text-align:right">-$${escape(fmt(n.monto))}</td>
+    </tr>`).join('');
+  const rows = rowsFact + rowsNc;
   const watermark = opts.watermark ? `<div class="wm"><span>${escape(opts.watermark)}</span></div>` : '';
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Recibo ${d.puntoVenta}-${d.numero}</title>
   <style>

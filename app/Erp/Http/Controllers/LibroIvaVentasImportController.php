@@ -125,7 +125,10 @@ class LibroIvaVentasImportController
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $rows = LibroIvaVentasImport::where('empresa_id', $empresaId)
-            ->withCount('facturas')
+            ->withCount(['facturas', 'facturas as facturas_borrables_count' => function ($q) {
+                // Las WSFE_ERP no se borran nunca, no cuentan para exigir cascada.
+                $q->where('origen', '<>', 'WSFE_ERP');
+            }])
             ->orderByDesc('importado_at')
             ->limit(100)
             ->get(['id', 'archivo_nombre', 'archivo_hash', 'periodo_afip',
@@ -134,7 +137,7 @@ class LibroIvaVentasImportController
 
         $puedeBorrar = $request->user()?->erpPerfil?->tienePermiso('ventas.libro_iva.borrar_import') ?? false;
         $rows->each(function ($r) use ($puedeBorrar) {
-            $r->puede_borrar = $puedeBorrar && (int) $r->facturas_count === 0;
+            $r->puede_borrar = $puedeBorrar && (int) $r->facturas_borrables_count === 0;
         });
 
         return response()->json(['ok' => true, 'data' => $rows]);
@@ -186,62 +189,71 @@ class LibroIvaVentasImportController
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $imp = LibroIvaVentasImport::where('empresa_id', $empresaId)->findOrFail($id);
 
-        $facturasCount = FacturaVenta::where('import_id', $imp->id)->count();
+        // Las facturas emitidas por web service (origen=WSFE_ERP) son fiscales e
+        // inmutables: NUNCA se borran al eliminar el import, ni en cascada. Se
+        // desvinculan del import (import_id=null) y sobreviven con su asiento.
+        // El resto (MANUAL, MIS_COMPROBANTES, etc.) sí se borran en cascada.
+        $protegidas = FacturaVenta::where('import_id', $imp->id)
+            ->where('origen', 'WSFE_ERP')->get();
+        $borrables = FacturaVenta::where('import_id', $imp->id)
+            ->where('origen', '<>', 'WSFE_ERP')->get();
 
-        if ($facturasCount > 0 && ! $cascada) {
+        $countBorrables = $borrables->count();
+
+        if ($countBorrables > 0 && ! $cascada) {
             return response()->json(['ok' => false, 'error' => [
                 'code' => 'IMPORT_TIENE_FACTURAS',
-                'message' => "Este import generó {$facturasCount} facturas con asientos. "
+                'message' => "Este import generó {$countBorrables} facturas con asientos. "
                     . "Para borrar todo marcá 'cascada' (requiere permiso ventas.facturas.anular).",
             ]], 409);
         }
 
         $motivo = trim((string) $request->input('motivo', ''));
+        $protegidasIds = $protegidas->pluck('id')->all();
+        $protegidasAsientoIds = $protegidas->pluck('asiento_id')->filter()->unique()->all();
 
-        if ($cascada && $facturasCount > 0) {
-            // v1.50.5 — Borrado en cascada respetando el trigger trg_movimiento_ad
-            // (AFTER DELETE en erp_movimientos_asiento llama a sp_recalc_asiento
-            // que valida balance debe=haber). Patrón replicado del v1.22 §13
-            // compras: borrar el ASIENTO directamente y dejar que el CASCADE
-            // de la FK fk_mov_asiento limpie los movimientos. Antes intentábamos
-            // borrar movs uno por uno y el trigger rebotaba con "Asiento
-            // desbalanceado" después del primer DELETE.
-            $facturas = FacturaVenta::where('import_id', $imp->id)->get();
-            $facturaIds = $facturas->pluck('id')->all();
-            $asientoIds = $facturas->pluck('asiento_id')->filter()->unique()->values()->all();
+        DB::transaction(function () use ($imp, $motivo, $cascada, $borrables, $protegidasIds, $protegidasAsientoIds, $countBorrables) {
+            // 1) Desvincular SIEMPRE las facturas WSFE_ERP del import (sobreviven
+            //    como facturas sueltas, conservando su asiento).
+            if (! empty($protegidasIds)) {
+                DB::table('erp_facturas_venta')
+                    ->whereIn('id', $protegidasIds)
+                    ->update(['import_id' => null]);
+            }
 
-            DB::transaction(function () use ($imp, $motivo, $facturaIds, $asientoIds, $facturasCount) {
-                // 1) Romper FK factura.asiento_id antes de borrar el asiento.
+            // 2) Cascada: borrar SOLO las facturas no protegidas y sus asientos.
+            //    v1.50.5 — Patrón v1.22 §13: borrar el ASIENTO directo y dejar que
+            //    el CASCADE de fk_mov_asiento limpie los movimientos (evita que
+            //    trg_movimiento_ad rebote por "Asiento desbalanceado" al borrar
+            //    movs uno por uno).
+            $asientoIds = [];
+            if ($cascada && $borrables->isNotEmpty()) {
+                $facturaIds = $borrables->pluck('id')->all();
+                // No borrar asientos que comparta una factura WSFE_ERP preservada.
+                $asientoIds = $borrables->pluck('asiento_id')->filter()->unique()
+                    ->reject(fn ($aid) => in_array($aid, $protegidasAsientoIds, true))
+                    ->values()->all();
+
                 DB::table('erp_facturas_venta')
                     ->whereIn('id', $facturaIds)
                     ->update(['asiento_id' => null]);
-
-                // 2) Borrar los asientos. erp_movimientos_asiento se va por
-                //    CASCADE (fk_mov_asiento ON DELETE CASCADE).
                 if (! empty($asientoIds)) {
                     DB::table('erp_asientos')->whereIn('id', $asientoIds)->delete();
                 }
-
-                // 3) Borrar las facturas (forceDelete porque tiene SoftDeletes y
-                //    queremos liberar el UNIQUE de tipo+PV+nro).
                 FacturaVenta::whereIn('id', $facturaIds)->forceDelete();
+            }
 
-                // 4) Audit log y borrar el upload (libera el hash).
-                $this->audit->log('eliminado_cascada', $imp,
-                    ['facturas_count' => $facturasCount, 'asientos_ids' => $asientoIds], null,
-                    "Borrado cascada upload Libro IVA Ventas #{$imp->id}: ".
-                    ($motivo ?: 'sin motivo'));
-                $imp->delete();
-            });
-            return response()->json(null, 204);
-        }
-
-        DB::transaction(function () use ($imp, $motivo) {
-            $snapshot = $imp->toArray();
-            $descripcion = $motivo !== ''
-                ? "Borrado upload Libro IVA Ventas #{$imp->id} ({$imp->archivo_nombre}). Motivo: {$motivo}"
-                : "Borrado upload Libro IVA Ventas #{$imp->id} ({$imp->archivo_nombre}).";
-            $this->audit->log('eliminado', $imp, $snapshot, null, $descripcion);
+            // 3) Audit log y borrar el upload (libera el hash).
+            $preservadas = count($protegidasIds);
+            $this->audit->log(
+                $cascada ? 'eliminado_cascada' : 'eliminado',
+                $imp,
+                ['facturas_borradas' => $countBorrables, 'facturas_wsfe_preservadas' => $preservadas, 'asientos_borrados' => $asientoIds],
+                null,
+                "Borrado upload Libro IVA Ventas #{$imp->id} ({$imp->archivo_nombre}). "
+                . ($preservadas > 0 ? "Preservadas {$preservadas} facturas WSFE_ERP (desvinculadas). " : '')
+                . 'Motivo: ' . ($motivo ?: 'sin motivo')
+            );
             $imp->delete();
         });
 

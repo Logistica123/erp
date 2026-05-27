@@ -141,6 +141,10 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.asientos.anular');
         Route::delete('/asientos/{id}', [AsientosController::class, 'destroy'])
             ->whereNumber('id')->name('erp.asientos.destroy');
+        // Hard-delete con audit inmutable (super_admin + MFA fresh + motivo).
+        Route::delete('/asientos/{id}/definitivo', [AsientosController::class, 'eliminarDefinitivo'])
+            ->middleware('erp.mfa.fresh')
+            ->whereNumber('id')->name('erp.asientos.eliminar-definitivo');
 
         // Libro diario (json|csv|html)
         Route::get('/libro-diario', [LibroDiarioController::class, 'index'])->name('erp.libro-diario');

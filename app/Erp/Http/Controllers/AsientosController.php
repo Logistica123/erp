@@ -4,16 +4,48 @@ namespace App\Erp\Http\Controllers;
 
 use App\Erp\Models\Asiento;
 use App\Erp\Services\AsientoService;
+use App\Erp\Support\AuditLogger;
 use DomainException;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class AsientosController
 {
     use AuthorizesRequests;
 
-    public function __construct(private readonly AsientoService $service) {}
+    /**
+     * Tablas con FK asiento_id (NO ACTION) que hay que liberar antes del
+     * hard-delete. erp_movimientos_asiento cascadea solo (no va acá).
+     *
+     * @var array<string,string> tabla => columna
+     */
+    private const FK_ASIENTO = [
+        'erp_af_amortizaciones' => 'asiento_id',
+        'erp_af_movimientos' => 'asiento_id',
+        'erp_af_reexpresiones' => 'asiento_id',
+        'erp_ajustes_retroactivos' => 'asiento_ajuste_id',
+        'erp_arqueos_caja' => 'asiento_ajuste_id',
+        'erp_cobros' => 'asiento_id',
+        'erp_dias_contables' => 'asiento_cierre_id',
+        'erp_emp_cc_movimientos' => 'asiento_id',
+        'erp_emp_liquidaciones' => 'asiento_id',
+        'erp_emp_pagos' => 'asiento_id',
+        'erp_emp_prestamos' => 'asiento_alta_id',
+        'erp_facturas_compra' => 'asiento_id',
+        'erp_facturas_venta' => 'asiento_id',
+        'erp_movimientos_bancarios' => 'asiento_id',
+        'erp_ordenes_pago' => 'asiento_id',
+        'erp_recibos' => 'asiento_id',
+        'erp_transferencias_internas' => 'asiento_id',
+        // erp_asientos.asiento_reversa_id es SET NULL automático.
+    ];
+
+    public function __construct(
+        private readonly AsientoService $service,
+        private readonly AuditLogger $audit,
+    ) {}
 
     /**
      * GET /api/erp/asientos
@@ -180,6 +212,79 @@ class AsientosController
         $asiento->delete();
 
         return response()->json(['message' => 'Asiento eliminado.']);
+    }
+
+    /**
+     * DELETE /api/erp/asientos/{id}/definitivo
+     *
+     * Hard-delete de un asiento (cualquier estado, incluso CONTABILIZADO).
+     * Opción C: NUNCA sin traza. Requiere super_admin + permiso sensible=2 +
+     * MFA fresh + motivo. Deja audit log inmutable con snapshot completo del
+     * asiento + sus movimientos + las FKs liberadas. Libera (set NULL) las
+     * referencias en facturas/cobros/recibos/OP/etc antes de borrar.
+     *
+     * Uso previsto: limpiar asientos de prueba o errores graves de setup. Para
+     * la operación contable normal de revertir un asiento, usar /anular.
+     */
+    public function eliminarDefinitivo(Request $request, int $id): JsonResponse
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso('contabilidad.asientos.eliminar_definitivo')) {
+            return response()->json(['error' => [
+                'code' => 'NO_AUTORIZADO',
+                'message' => 'Solo super_admin con permiso contabilidad.asientos.eliminar_definitivo.',
+            ]], 403);
+        }
+
+        $data = $request->validate([
+            'motivo' => ['required', 'string', 'min:10', 'max:500'],
+        ]);
+
+        $empresaId = $this->empresaIdFromRequest($request);
+        $asiento = Asiento::where('empresa_id', $empresaId)->with('movimientos')->findOrFail($id);
+
+        // Snapshot completo ANTES de tocar nada (audit inmutable).
+        $snapshot = [
+            'asiento' => $asiento->toArray(),
+            'movimientos' => $asiento->movimientos->map->toArray()->all(),
+            'hash_integridad' => $asiento->hash_integridad,
+            'estado' => $asiento->estado,
+        ];
+
+        $resultado = DB::transaction(function () use ($asiento, $snapshot, $data, $request, $empresaId) {
+            // 1) Liberar FKs (NO ACTION) en todas las tablas que lo referencian.
+            $refsLiberadas = [];
+            foreach (self::FK_ASIENTO as $tabla => $col) {
+                $n = DB::table($tabla)->where($col, $asiento->id)->update([$col => null]);
+                if ($n > 0) $refsLiberadas["{$tabla}.{$col}"] = $n;
+            }
+            // asiento_reversa_id de otros asientos (SET NULL auto, pero explicitamos).
+            DB::table('erp_asientos')->where('asiento_reversa_id', $asiento->id)->update(['asiento_reversa_id' => null]);
+
+            // 2) Borrar movimientos + asiento (movimientos cascadea igual, explícito).
+            $asiento->movimientos()->delete();
+            $asientoId = $asiento->id;
+            $asiento->delete();
+
+            // 3) Audit log inmutable (hash-chain) con snapshot + refs liberadas + motivo.
+            $this->audit->log(
+                'eliminado_definitivo',
+                $asiento,
+                array_merge($snapshot, ['refs_liberadas' => $refsLiberadas]),
+                null,
+                sprintf('Borrado DEFINITIVO asiento #%d (estado %s) por %s. Motivo: %s. Refs liberadas: %s',
+                    $asientoId, $snapshot['estado'], $request->user()->email ?? $request->user()->id,
+                    $data['motivo'],
+                    empty($refsLiberadas) ? 'ninguna' : json_encode($refsLiberadas)),
+            );
+
+            return ['asiento_id' => $asientoId, 'refs_liberadas' => $refsLiberadas];
+        });
+
+        return response()->json([
+            'message' => 'Asiento eliminado definitivamente. Quedó registrado en audit log.',
+            'data' => $resultado,
+        ]);
     }
 
     private function empresaIdFromRequest(Request $request): int

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Loader2, Plus, Trash2, Eye, Pencil, Ban } from 'lucide-react';
+import { Download, Loader2, Plus, Trash2, Eye, Pencil, Ban, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
@@ -45,6 +46,17 @@ export function LibroDiarioPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
+  const [borrarDef, setBorrarDef] = useState<Asiento | null>(null);
+
+  // Permisos del usuario (para el botón de borrado definitivo).
+  const { data: misPermisos } = useQuery<{ data: { codigo: string; sensible: boolean }[] }>({
+    queryKey: ['mi-permisos'],
+    queryFn: () => api.get('/api/erp/mi-permisos'),
+    staleTime: 5 * 60 * 1000,
+  });
+  const puedeEliminarDef = (misPermisos?.data ?? []).some(
+    (p) => p.codigo === 'contabilidad.asientos.eliminar_definitivo',
+  );
 
   const eliminar = useMutation<unknown, ApiError, number>({
     mutationFn: (id) => api.delete(`/api/erp/asientos/${id}`),
@@ -224,6 +236,15 @@ export function LibroDiarioPage() {
                           <Ban className="w-3 h-3" />
                         </button>
                       )}
+                      {/* Borrado definitivo — solo super_admin. Deja audit log. */}
+                      {puedeEliminarDef && a.estado !== 'BORRADOR' && (
+                        <button
+                          onClick={() => setBorrarDef(a)}
+                          className="p-1 text-danger/60 hover:text-danger cursor-pointer"
+                          title="Borrar definitivo (super_admin · queda en audit log)">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -251,6 +272,65 @@ export function LibroDiarioPage() {
           </table>
         </CardBody>
       </Card>
+
+      {borrarDef && (
+        <BorrarDefinitivoModal
+          asiento={borrarDef}
+          onClose={() => setBorrarDef(null)}
+          onSuccess={() => {
+            setBorrarDef(null);
+            qc.invalidateQueries({ queryKey: ['asientos'] });
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function BorrarDefinitivoModal({ asiento, onClose, onSuccess }: {
+  asiento: Asiento;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const toast = useToast();
+  const [motivo, setMotivo] = useState('');
+  const mut = useMutation<unknown, ApiError, void>({
+    mutationFn: () => api.delete(`/api/erp/asientos/${asiento.id}/definitivo`, { motivo: motivo.trim() }),
+    onSuccess: () => {
+      toast.success('Asiento eliminado definitivamente', 'Quedó registrado en el audit log.');
+      onSuccess();
+    },
+    onError: (e) => toast.error('No se pudo borrar', e.message),
+  });
+
+  return (
+    <Modal open onClose={onClose} title={`Borrar definitivo · asiento #${asiento.numero}`} size="md" footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+        <Button variant="danger" disabled={motivo.trim().length < 10 || mut.isPending}
+          onClick={() => mut.mutate()}>
+          {mut.isPending && <Loader2 className="w-3 h-3 animate-spin" />} Borrar definitivamente
+        </Button>
+      </>
+    }>
+      <div className="space-y-2 text-[12px]">
+        <div className="border border-danger/40 bg-danger-bg/20 rounded p-2 flex items-start gap-1.5">
+          <AlertTriangle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+          <div>
+            <strong>Borrado físico irreversible</strong> del asiento {asiento.estado} #{asiento.numero}
+            ({asiento.diario?.codigo}) por ${fmtMoney(Number(asiento.total_debe))}.
+            <br />Se libera el vínculo en facturas/cobros/recibos/OP que lo referencien.
+            Para revertir un asiento contable lo correcto es <strong>Anular</strong> (genera reversa).
+            <br />Esta acción <strong>queda registrada en el audit log</strong> con tu usuario, fecha y motivo.
+          </div>
+        </div>
+        <label className="block text-[11px] text-ink-muted">Motivo * (mín 10 chars)</label>
+        <textarea rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+          maxLength={500}
+          placeholder="Ej: asiento de prueba cargado durante el setup; error de carga sin impacto fiscal; etc."
+          className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+        <div className="text-[10px] text-ink-muted">{motivo.length} / 500</div>
+      </div>
+    </Modal>
   );
 }

@@ -431,9 +431,10 @@ export function FacturacionPage() {
                             </Button>
                           )}
                           {/* v1.29 — Eliminar con permiso condicional. El backend
-                              valida el permiso real. Mostramos el botón siempre
-                              y dejamos que el modal maneje el caso 403. */}
-                          {(puedeEliminarWs || puedeEliminarSinCae || puedeBorrarManual) && (
+                              valida el permiso real. Las emitidas por Web Service
+                              (WSFE_ERP) NO se borran desde acá: lo correcto es
+                              emitir una NC. Se oculta el tacho para ese origen. */}
+                          {f.origen !== 'WSFE_ERP' && (puedeEliminarWs || puedeEliminarSinCae || puedeBorrarManual) && (
                             <Button size="sm" variant="ghost" onClick={() => setEliminarFactura(f)}>
                               <Trash2 className="w-3 h-3 text-danger" />
                             </Button>

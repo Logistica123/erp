@@ -748,16 +748,16 @@ function EliminarFacturaModal({ factura, onClose, onSuccess }: {
   const [motivo, setMotivo] = useState('');
   const [err, setErr] = useState<string | null>(null);
 
-  if (!factura) return null;
-
-  const esWs = ['EMITIDA', 'WSFE', 'WS', 'WSFE_ERP', 'MIS_COMPROBANTES'].includes(factura.origen);
-  const tieneCae = !!factura.cae;
-  const caeVigente = tieneCae && factura.estado !== 'EMISION_FALLIDA' && factura.estado !== 'ANULADA_POR_NC';
+  // Valores derivados de la factura (con guard de null para no romper el
+  // orden de hooks — el early return va DESPUÉS de todos los hooks).
+  const esWs = factura ? ['EMITIDA', 'WSFE', 'WS', 'WSFE_ERP', 'MIS_COMPROBANTES'].includes(factura.origen) : false;
+  const tieneCae = !!factura?.cae;
+  const caeVigente = tieneCae && factura?.estado !== 'EMISION_FALLIDA' && factura?.estado !== 'ANULADA_POR_NC';
   const requiereDoble = esWs && caeVigente;
 
   const submitMut = useMutation({
     mutationFn: () =>
-      api.delete(`/api/erp/facturas-venta/${factura.id}`, requiereDoble
+      api.delete(`/api/erp/facturas-venta/${factura!.id}`, requiereDoble
         ? { confirm_text: confirmText, motivo: motivo.trim() }
         : { motivo: motivo.trim() || undefined }),
     onSuccess: () => {
@@ -766,6 +766,9 @@ function EliminarFacturaModal({ factura, onClose, onSuccess }: {
     },
     onError: (e: ApiError) => setErr(e.message),
   });
+
+  // React #310 fix: el return temprano va después de TODOS los hooks.
+  if (!factura) return null;
 
   const valid = requiereDoble
     ? (confirmText === 'ELIMINAR' && motivo.trim().length >= 20)

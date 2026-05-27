@@ -147,6 +147,13 @@ class MergeAuxiliaresService
         }
 
         return DB::transaction(function () use ($ids, $cuit, $motivo, $userId) {
+            // v1.36 — El trigger trg_fv_inmutable_bu bloquea reasignar auxiliar_id
+            // en facturas de venta con CAE (RN-32). Para el merge legítimo (mismo
+            // cliente real, solo se cambia el puntero al maestro) seteamos la var
+            // de sesión que exime SOLO el cambio de auxiliar_id — los demás guards
+            // fiscales (importes, CAE, número) siguen activos.
+            DB::statement('SET @erp_merge_auxiliares = 1');
+
             $auxiliares = DB::table('erp_auxiliares')->whereIn('id', $ids)
                 ->lockForUpdate()->get();
             if ($auxiliares->count() < 2) {
@@ -221,6 +228,8 @@ class MergeAuxiliaresService
                 'ejecutado_por_user_id' => $userId,
                 'ejecutado_at' => now(),
             ]);
+
+            DB::statement('SET @erp_merge_auxiliares = NULL');
 
             return [
                 'canonico_id' => $canonicoId,

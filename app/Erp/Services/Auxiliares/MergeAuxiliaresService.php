@@ -183,13 +183,25 @@ class MergeAuxiliaresService
             // 2) Centros de costo (UNIQUE 1:1 sobre auxiliar_id).
             $fks = array_merge($fks, $this->reasignarCentrosCosto($perdedoresIds, $canonicoId));
 
-            // 3) Normalizar canónico (código CLI-{cuit}, cuit sin guiones).
+            // 3) Normalizar canónico (código CLI-{cuit}, cuit sin guiones) +
+            //    heredar del perdedor lo que al canónico le falte (vínculo
+            //    DistriApp id_ref/tabla_ref + cuenta contable default).
             $codigoFinal = $canonico->tipo === 'Proveedor' ? "PROV-{$cuit}" : "CLI-{$cuit}";
-            DB::table('erp_auxiliares')->where('id', $canonicoId)->update([
-                'codigo' => $codigoFinal,
-                'cuit' => $cuit,
-                'updated_at' => now(),
-            ]);
+            $update = ['codigo' => $codigoFinal, 'cuit' => $cuit, 'updated_at' => now()];
+            if (empty($canonico->id_ref)) {
+                $donante = $perdedores->first(fn ($p) => ! empty($p->id_ref));
+                if ($donante) {
+                    $update['tabla_ref'] = $donante->tabla_ref;
+                    $update['id_ref'] = $donante->id_ref;
+                }
+            }
+            if (empty($canonico->cuenta_contable_default_id)) {
+                $donanteCta = $perdedores->first(fn ($p) => ! empty($p->cuenta_contable_default_id));
+                if ($donanteCta) {
+                    $update['cuenta_contable_default_id'] = $donanteCta->cuenta_contable_default_id;
+                }
+            }
+            DB::table('erp_auxiliares')->where('id', $canonicoId)->update($update);
 
             // 4) Borrar perdedores (físico — no hay soft delete).
             DB::table('erp_auxiliares')->whereIn('id', $perdedoresIds)->delete();

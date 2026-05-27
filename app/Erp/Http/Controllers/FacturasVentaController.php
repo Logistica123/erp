@@ -214,6 +214,123 @@ class FacturasVentaController extends Controller
         return response()->json(null, 204);
     }
 
+    /**
+     * POST /api/erp/facturas-venta/borrar-masivo
+     *
+     * Borra en masa las facturas seleccionadas EXCEPTO:
+     *  - origen=WSFE_ERP (emitidas por el propio ERP vía Web Service — fiscales).
+     *  - las referenciadas por recibos / cobros / imputaciones NC / Libro IVA
+     *    (se omiten para no romper integridad; se reportan).
+     *
+     * Permiso: ventas.facturas.borrar_masivo (super_admin + contador).
+     * Cada borrado deja audit log inmutable con snapshot.
+     */
+    public function borrarMasivo(Request $request): JsonResponse
+    {
+        $perfil = $request->user()?->erpPerfil;
+        if (! $perfil || ! $perfil->tienePermiso('ventas.facturas.borrar_masivo')) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO', 'message' => 'Falta permiso ventas.facturas.borrar_masivo.',
+            ]], 403);
+        }
+
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:2000'],
+            'ids.*' => ['integer'],
+            'motivo' => ['nullable', 'string', 'max:500'],
+        ]);
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $motivo = trim((string) ($data['motivo'] ?? ''));
+
+        $facturas = FacturaVenta::where('empresa_id', $empresaId)
+            ->whereIn('id', $data['ids'])->get();
+
+        $borradas = [];
+        $omitidasWs = [];
+        $omitidasRef = [];
+        $errores = [];
+
+        foreach ($facturas as $factura) {
+            // 1) Excluir WSFE_ERP (requisito explícito) y cualquier WS con CAE vigente.
+            if ($factura->origen === 'WSFE_ERP') {
+                $omitidasWs[] = $factura->id;
+                continue;
+            }
+
+            // 2) Omitir si está referenciada por algo que rompería integridad.
+            $bloqueo = $this->referenciaBloqueante((int) $factura->id, $empresaId);
+            if ($bloqueo !== null) {
+                $omitidasRef[] = ['id' => $factura->id, 'motivo' => $bloqueo];
+                continue;
+            }
+
+            try {
+                $snapshot = [
+                    'id' => $factura->id, 'numero' => $factura->numero,
+                    'tipo_comprobante_id' => $factura->tipo_comprobante_id,
+                    'punto_venta_id' => $factura->punto_venta_id,
+                    'fecha_emision' => $factura->fecha_emision?->toDateString(),
+                    'imp_total' => (float) $factura->imp_total,
+                    'origen' => $factura->origen, 'estado' => $factura->estado,
+                    'cae' => $factura->cae, 'asiento_id' => $factura->asiento_id,
+                    'auxiliar_id' => $factura->auxiliar_id,
+                ];
+                DB::transaction(function () use ($factura, $snapshot, $motivo, $request) {
+                    DB::statement('SET @erp_current_user_id = ?', [$request->user()->id]);
+                    if ($factura->asiento_id) {
+                        DB::table('erp_facturas_venta')->where('id', $factura->id)->update(['asiento_id' => null]);
+                        DB::table('erp_asientos')->where('id', $factura->asiento_id)->delete();
+                    }
+                    $this->audit->log('factura_venta_eliminada_masivo', $factura, $snapshot, null,
+                        sprintf('[BULK] factura venta #%d (origen=%s). Motivo: %s',
+                            $factura->id, $factura->origen, $motivo ?: 'sin motivo'));
+                    $factura->forceDelete();
+                });
+                $borradas[] = $factura->id;
+            } catch (\Throwable $e) {
+                $errores[] = ['id' => $factura->id, 'error' => substr($e->getMessage(), 0, 160)];
+            }
+        }
+
+        return response()->json(['ok' => true, 'data' => [
+            'borradas' => count($borradas),
+            'borradas_ids' => $borradas,
+            'omitidas_ws' => count($omitidasWs),
+            'omitidas_ws_ids' => $omitidasWs,
+            'omitidas_referenciadas' => $omitidasRef,
+            'errores' => $errores,
+        ]]);
+    }
+
+    /**
+     * Devuelve un motivo si la factura está referenciada por algo que impide
+     * el borrado (recibos, cobros, imputaciones NC, Libro IVA, NC asociada),
+     * o null si es borrable.
+     */
+    private function referenciaBloqueante(int $facturaId, int $empresaId): ?string
+    {
+        if (DB::table('erp_recibos_comprobantes_imputados')->where('factura_venta_id', $facturaId)->exists()
+            || DB::table('erp_recibos')->where('factura_venta_id', $facturaId)->whereNotIn('estado', ['ANULADO'])->exists()) {
+            return 'imputada en un recibo';
+        }
+        if (DB::table('erp_recibos_nc_aplicadas')->where('nc_factura_id', $facturaId)->exists()) {
+            return 'NC aplicada en un recibo';
+        }
+        if (DB::table('erp_imputaciones_nc')->where('factura_id', $facturaId)->orWhere('nc_id', $facturaId)->exists()) {
+            return 'tiene imputación de NC';
+        }
+        if (DB::table('erp_cobro_items')->where('factura_id', $facturaId)->exists()) {
+            return 'tiene cobros';
+        }
+        if (DB::table('erp_libro_iva_detalle')->where('factura_venta_id', $facturaId)->exists()) {
+            return 'incluida en un Libro IVA generado';
+        }
+        if (DB::table('erp_factura_venta_asociadas')->where('factura_original_id', $facturaId)->exists()) {
+            return 'tiene NC/ND asociada';
+        }
+        return null;
+    }
+
     public function cobrar(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([

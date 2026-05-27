@@ -494,6 +494,9 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.facturas-venta.periodos-trabajados');
         Route::patch('/facturas-venta/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodosTrabajadosBulk'])
             ->name('erp.facturas-venta.periodos-trabajados.bulk');
+        // Borrado masivo (excepto WSFE_ERP). Antes del {id} para no colisionar.
+        Route::post('/facturas-venta/borrar-masivo', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'borrarMasivo'])
+            ->name('erp.fv.borrar-masivo');
         // v1.29 — DELETE factura venta con permisos condicionales.
         Route::delete('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'destroy'])
             ->whereNumber('id')->name('erp.fv.destroy');

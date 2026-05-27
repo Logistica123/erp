@@ -8,6 +8,7 @@ import { fmtMoney } from '@/lib/cn';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/useApi';
+import { useToast } from '@/hooks/useToast';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
 
@@ -116,6 +117,7 @@ export function FacturacionPage() {
   // v1.27 — bulk select + edición.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [editarPeriodoOpen, setEditarPeriodoOpen] = useState(false);
+  const [borrarMasivoOpen, setBorrarMasivoOpen] = useState(false);
 
   // v1.27 — permisos + lista distinct.
   const { data: misPermisos } = useApi<Array<{ codigo: string }>>(
@@ -127,6 +129,8 @@ export function FacturacionPage() {
   const puedeEliminarWs = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.eliminar_ws');
   const puedeEliminarSinCae = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.eliminar_sin_cae');
   const puedeBorrarManual = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.borrar_masivo');
+  const puedeBorrarMasivo = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.borrar_masivo');
+  const puedeSeleccionar = puedeEditarPeriodo || puedeBorrarMasivo;
   const { data: periodosDistinct } = useApi<string[]>(
     ['facturas-venta-periodos-trabajados'],
     '/api/erp/facturas-venta/periodos-trabajados',
@@ -298,7 +302,7 @@ export function FacturacionPage() {
         </CardHeader>
         <CardBody className="p-0">
           {/* v1.27 — barra de acción con selección. */}
-          {puedeEditarPeriodo && selectedIds.size > 0 && (
+          {puedeSeleccionar && selectedIds.size > 0 && (
             <div className="flex items-center justify-between border-b border-warning/40 bg-warning-bg/30 px-4 py-2 text-[12px]">
               <span className="text-warning font-medium">
                 {selectedIds.size} factura{selectedIds.size === 1 ? '' : 's'} seleccionada{selectedIds.size === 1 ? '' : 's'}
@@ -307,9 +311,16 @@ export function FacturacionPage() {
                 <Button size="sm" variant="outline" onClick={() => setSelectedIds(new Set())}>
                   Limpiar
                 </Button>
-                <Button size="sm" variant="primary" onClick={() => setEditarPeriodoOpen(true)}>
-                  <CalendarRange className="w-3 h-3" /> Asignar período
-                </Button>
+                {puedeEditarPeriodo && (
+                  <Button size="sm" variant="primary" onClick={() => setEditarPeriodoOpen(true)}>
+                    <CalendarRange className="w-3 h-3" /> Asignar período
+                  </Button>
+                )}
+                {puedeBorrarMasivo && (
+                  <Button size="sm" variant="danger" onClick={() => setBorrarMasivoOpen(true)}>
+                    <Trash2 className="w-3 h-3" /> Borrar seleccionadas (excepto WSFE)
+                  </Button>
+                )}
               </div>
             </div>
           )}
@@ -326,7 +337,7 @@ export function FacturacionPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 text-left text-[11px] font-semibold uppercase text-gray-500 tracking-wider">
                   <tr>
-                    {puedeEditarPeriodo && (
+                    {puedeSeleccionar && (
                       <th className="px-2 py-3 w-[40px]">
                         <input type="checkbox" checked={todoSeleccionado} onChange={toggleTodos} />
                       </th>
@@ -348,7 +359,7 @@ export function FacturacionPage() {
                 <tbody className="divide-y divide-gray-100">
                   {facturas.map((f) => (
                     <tr key={f.id} className="hover:bg-gray-50">
-                      {puedeEditarPeriodo && (
+                      {puedeSeleccionar && (
                         <td className="px-2 py-3 text-center">
                           <input
                             type="checkbox"
@@ -466,7 +477,92 @@ export function FacturacionPage() {
           qc.invalidateQueries({ queryKey: ['facturas-venta'] });
         }}
       />
+
+      {borrarMasivoOpen && (
+        <BorrarMasivoModal
+          facturas={seleccionadas}
+          onClose={() => setBorrarMasivoOpen(false)}
+          onDone={() => {
+            setSelectedIds(new Set());
+            setBorrarMasivoOpen(false);
+            qc.invalidateQueries({ queryKey: ['facturas-venta'] });
+            qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function BorrarMasivoModal({ facturas, onClose, onDone }: {
+  facturas: Factura[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [motivo, setMotivo] = useState('');
+  const wsfe = facturas.filter((f) => f.origen === 'WSFE_ERP');
+  const candidatas = facturas.filter((f) => f.origen !== 'WSFE_ERP');
+
+  const mut = useMutation<{ data: {
+    borradas: number; omitidas_ws: number;
+    omitidas_referenciadas: Array<{ id: number; motivo: string }>;
+    errores: Array<{ id: number; error: string }>;
+  } }, ApiError, void>({
+    mutationFn: () => api.post('/api/erp/facturas-venta/borrar-masivo', {
+      ids: facturas.map((f) => f.id),
+      motivo: motivo.trim() || undefined,
+    }),
+    onSuccess: (r) => {
+      const d = r.data;
+      const partes = [`${d.borradas} borradas`];
+      if (d.omitidas_ws > 0) partes.push(`${d.omitidas_ws} WSFE omitidas`);
+      if (d.omitidas_referenciadas.length > 0) partes.push(`${d.omitidas_referenciadas.length} con referencias omitidas`);
+      if (d.errores.length > 0) partes.push(`${d.errores.length} con error`);
+      toast.success('Borrado masivo terminado', partes.join(' · '));
+      onDone();
+    },
+    onError: (e) => toast.error('No se pudo borrar', e.message),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Borrar facturas seleccionadas" size="md" footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+        <Button variant="danger" disabled={candidatas.length === 0 || mut.isPending}
+          onClick={() => mut.mutate()}>
+          {mut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+          Borrar {candidatas.length} factura{candidatas.length === 1 ? '' : 's'}
+        </Button>
+      </>
+    }>
+      <div className="space-y-2 text-[12px]">
+        <div className="border border-danger/40 bg-danger-bg/20 rounded p-2 flex items-start gap-1.5">
+          <AlertTriangle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+          <div>
+            Borrado físico irreversible de <strong>{candidatas.length}</strong> factura{candidatas.length === 1 ? '' : 's'}.
+            Cada una queda en el audit log.
+          </div>
+        </div>
+        {wsfe.length > 0 && (
+          <div className="text-[11.5px] text-ink">
+            <strong>{wsfe.length}</strong> seleccionada{wsfe.length === 1 ? '' : 's'} {wsfe.length === 1 ? 'es' : 'son'} <code>WSFE_ERP</code> (emitida{wsfe.length === 1 ? '' : 's'} por Web Service) →
+            <strong> no se borran</strong>, se omiten automáticamente.
+          </div>
+        )}
+        <div className="text-[11px] text-ink-muted">
+          Las facturas que estén imputadas en recibos, cobradas, con NC o incluidas en un Libro IVA generado
+          también se omiten (se reportan al terminar).
+        </div>
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">Motivo (opcional)</label>
+          <textarea rows={2} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            maxLength={500}
+            placeholder="Ej: limpieza de comprobantes importados de prueba"
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+        </div>
+      </div>
+    </Modal>
   );
 }
 

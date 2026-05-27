@@ -146,6 +146,16 @@ Route::prefix('api/erp')->group(function () {
             ->middleware('erp.mfa.fresh')
             ->whereNumber('id')->name('erp.asientos.eliminar-definitivo');
 
+        // Plantillas/modelos de asiento (asientos repetitivos: sueldos, etc).
+        Route::get('/asiento-plantillas', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'index'])
+            ->name('erp.asiento-plantillas.index');
+        Route::post('/asiento-plantillas', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'store'])
+            ->name('erp.asiento-plantillas.store');
+        Route::get('/asiento-plantillas/{id}', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'show'])
+            ->whereNumber('id')->name('erp.asiento-plantillas.show');
+        Route::delete('/asiento-plantillas/{id}', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.asiento-plantillas.destroy');
+
         // Libro diario (json|csv|html)
         Route::get('/libro-diario', [LibroDiarioController::class, 'index'])->name('erp.libro-diario');
 

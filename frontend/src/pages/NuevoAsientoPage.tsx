@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Check, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, Bookmark, Save } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { fmtMoney } from '@/lib/cn';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { SelectorCuentaContable } from '@/components/contabilidad/SelectorCuentaContable';
+import { useToast } from '@/hooks/useToast';
 
 type Diario = { id: number; codigo: string; nombre: string; tipo: string };
 type Cuenta = {
@@ -19,6 +21,13 @@ type Cuenta = {
 type CC = { id: number; codigo: string; nombre: string };
 type Auxiliar = { id: number; codigo: string; nombre: string; tipo: string };
 type Periodo = { id: number; anio: number; mes: number; fecha_inicio: string; fecha_fin: string; estado: string };
+type Plantilla = { id: number; codigo: string; nombre: string; descripcion: string | null; diario_id: number };
+type PlantillaDetalle = {
+  id: number; nombre: string; diario_id: number | null;
+  glosa_default: string | null; observaciones_default: string | null;
+  lineas: Array<{ cuenta_id: number | null; cuenta_codigo: string; centro_costo_id: number | null;
+    auxiliar_id: number | null; glosa: string; debe: number; haber: number }>;
+};
 
 type Linea = {
   id: string;
@@ -52,6 +61,7 @@ function parseMoney(s: string): number {
 
 export function NuevoAsientoPage() {
   const qc = useQueryClient();
+  const toast = useToast();
 
   const { data: diariosResp } = useQuery<{ data: Diario[] }>({
     queryKey: ['diarios'],
@@ -85,6 +95,78 @@ export function NuevoAsientoPage() {
   const [observaciones, setObservaciones] = useState(''); // v1.15 Sprint M
   const [lineas, setLineas] = useState<Linea[]>([emptyLinea(), emptyLinea()]);
   const [resultado, setResultado] = useState<{ ok: string; detalle?: string } | null>(null);
+
+  // Plantillas/modelos de asiento (asientos repetitivos).
+  const [plantillaSel, setPlantillaSel] = useState('');
+  const [guardarOpen, setGuardarOpen] = useState(false);
+  const { data: plantillasResp } = useQuery<{ data: Plantilla[] }>({
+    queryKey: ['asiento-plantillas'],
+    queryFn: () => api.get('/api/erp/asiento-plantillas'),
+  });
+  const plantillas = plantillasResp?.data ?? [];
+
+  async function aplicarPlantilla(id: string) {
+    setPlantillaSel(id);
+    if (!id) return;
+    try {
+      const resp = await api.get<{ data: PlantillaDetalle }>(`/api/erp/asiento-plantillas/${id}`);
+      const p = resp.data;
+      if (p.diario_id) setDiarioId(p.diario_id);
+      if (p.glosa_default) setGlosa(p.glosa_default);
+      if (p.observaciones_default) setObservaciones(p.observaciones_default);
+      setLineas(p.lineas.length
+        ? p.lineas.map((l) => ({
+            id: crypto.randomUUID(),
+            cuenta_id: l.cuenta_id,
+            cuenta_codigo: l.cuenta_codigo,
+            centro_costo_id: l.centro_costo_id,
+            auxiliar_id: l.auxiliar_id,
+            glosa: l.glosa,
+            debe: Number(l.debe),
+            haber: Number(l.haber),
+          }))
+        : [emptyLinea(), emptyLinea()]);
+      toast.success('Plantilla cargada', p.nombre);
+    } catch (e) {
+      toast.error('No se pudo cargar la plantilla', e instanceof ApiError ? e.message : 'Error');
+    }
+  }
+
+  const guardarPlantilla = useMutation<{ data: { id: number } }, ApiError, { nombre: string; descripcion: string }>({
+    mutationFn: (body) => api.post('/api/erp/asiento-plantillas', {
+      nombre: body.nombre,
+      descripcion: body.descripcion || null,
+      diario_id: diarioId,
+      glosa_default: glosa || null,
+      observaciones_default: observaciones || null,
+      lineas: lineas.filter((l) => l.cuenta_id).map((l) => ({
+        cuenta_id: l.cuenta_id,
+        centro_costo_id: l.centro_costo_id,
+        auxiliar_id: l.auxiliar_id,
+        glosa: l.glosa || null,
+        debe: l.debe,
+        haber: l.haber,
+      })),
+    }),
+    onSuccess: () => {
+      toast.success('Plantilla guardada');
+      setGuardarOpen(false);
+      qc.invalidateQueries({ queryKey: ['asiento-plantillas'] });
+    },
+    onError: (e) => toast.error('No se pudo guardar', e.message),
+  });
+
+  const eliminarPlantilla = useMutation<unknown, ApiError, number>({
+    mutationFn: (id) => api.delete(`/api/erp/asiento-plantillas/${id}`),
+    onSuccess: () => {
+      toast.success('Plantilla eliminada');
+      setPlantillaSel('');
+      qc.invalidateQueries({ queryKey: ['asiento-plantillas'] });
+    },
+    onError: (e) => toast.error('No se pudo eliminar', e.message),
+  });
+
+  const tieneLineasConCuenta = lineas.some((l) => l.cuenta_id);
 
   // Default diario al primero cargado
   useMemo(() => {
@@ -206,6 +288,36 @@ export function NuevoAsientoPage() {
       )}
 
       <div className="bg-white border border-line rounded-lg mb-4">
+        {/* Plantillas/modelos de asiento */}
+        <div className="flex items-center gap-2 p-[10px_16px] border-b border-line bg-[#F4F8FD]">
+          <Bookmark className="w-3.5 h-3.5 text-azure" />
+          <span className="text-[11px] font-semibold text-navy-800">Plantilla</span>
+          <select
+            className="px-[9px] py-[5px] text-[12px] border border-line-strong rounded-md bg-white min-w-[240px]"
+            value={plantillaSel}
+            onChange={(e) => aplicarPlantilla(e.target.value)}
+          >
+            <option value="">Cargar plantilla guardada…</option>
+            {plantillas.map((p) => (
+              <option key={p.id} value={p.id}>{p.nombre}</option>
+            ))}
+          </select>
+          {plantillaSel && (
+            <button
+              onClick={() => {
+                const p = plantillas.find((x) => String(x.id) === plantillaSel);
+                if (p && confirm(`¿Eliminar la plantilla "${p.nombre}"?`)) eliminarPlantilla.mutate(p.id);
+              }}
+              className="text-ink-muted hover:text-danger p-1" title="Eliminar plantilla">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <div className="flex-1" />
+          <Button variant="secondary" onClick={() => setGuardarOpen(true)} disabled={!tieneLineasConCuenta}>
+            <Save className="w-3 h-3" /> Guardar como plantilla
+          </Button>
+        </div>
+
         {/* Meta */}
         <div className="grid grid-cols-[180px_140px_140px_1fr] gap-3 p-[14px_16px] bg-[#FAFBFC] border-b border-line">
           <div>
@@ -418,7 +530,59 @@ export function NuevoAsientoPage() {
         <strong className="text-navy-800">Cómo funciona.</strong> Al contabilizar se crea el asiento en BORRADOR, se
         valida RN-1 (partida doble) a RN-10 (CC obligatorio) y se transiciona a CONTABILIZADO calculando hash SHA-256.
         Para corregir un contabilizado se usa anulación (genera asiento reversa automático).
+        <br />
+        <strong className="text-navy-800">Plantillas.</strong> Para asientos repetitivos (sueldos, alquiler) armá las
+        líneas una vez y guardalas como plantilla. La próxima vez la seleccionás arriba y se cargan las cuentas (e
+        importes sugeridos, editables). No crea el asiento — solo prellena el form.
       </div>
+
+      {guardarOpen && (
+        <GuardarPlantillaModal
+          onClose={() => setGuardarOpen(false)}
+          onSave={(nombre, descripcion) => guardarPlantilla.mutate({ nombre, descripcion })}
+          saving={guardarPlantilla.isPending}
+          lineasCount={lineas.filter((l) => l.cuenta_id).length}
+        />
+      )}
     </>
+  );
+}
+
+function GuardarPlantillaModal({ onClose, onSave, saving, lineasCount }: {
+  onClose: () => void;
+  onSave: (nombre: string, descripcion: string) => void;
+  saving: boolean;
+  lineasCount: number;
+}) {
+  const [nombre, setNombre] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  return (
+    <Modal open onClose={onClose} title="Guardar como plantilla" size="md" footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+        <Button variant="primary" disabled={nombre.trim().length < 2 || saving}
+          onClick={() => onSave(nombre.trim(), descripcion.trim())}>
+          {saving && <Loader2 className="w-3 h-3 animate-spin" />} Guardar
+        </Button>
+      </>
+    }>
+      <div className="space-y-2 text-[12px]">
+        <div className="text-ink-muted">
+          Se guardan las {lineasCount} línea{lineasCount === 1 ? '' : 's'} con cuenta (cuenta + centro de costo +
+          auxiliar + glosa + importes sugeridos) + el diario y la glosa. Los importes son editables al aplicarla.
+        </div>
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">Nombre *</label>
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)}
+            placeholder="Ej: Registración de sueldos mensual"
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+        </div>
+        <div>
+          <label className="block text-[11px] text-ink-muted mb-1">Descripción (opcional)</label>
+          <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)}
+            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+        </div>
+      </div>
+    </Modal>
   );
 }

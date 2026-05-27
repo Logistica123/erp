@@ -488,10 +488,13 @@ class LibroIvaVentasImportService
         $headerMap = $this->mapearHeader($headerRaw);
 
         // Reutiliza el patrón de confirmar() pero filtrando filas.
+        // El hash del modo Control debe ser único y ≤64 chars (la columna es
+        // VARCHAR(64)). Hasheamos el combinado para que entre exacto en 64.
+        $hashControl = hash('sha256', $hash.'-control-'.now()->format('YmdHis').uniqid());
         $import = LibroIvaVentasImport::create([
             'empresa_id' => $empresaId,
-            'archivo_nombre' => $nombreArchivo.' (control: importar faltantes)',
-            'archivo_hash' => $hash.'-control-'.now()->format('YmdHis'),
+            'archivo_nombre' => mb_substr($nombreArchivo.' (control: importar faltantes)', 0, 250),
+            'archivo_hash' => $hashControl,
             'encoding_detectado' => $this->lastEncoding,
             'periodo_afip' => $this->detectarPeriodoNombre($nombreArchivo),
             'periodo_imputacion_id' => $periodoImputacionId,

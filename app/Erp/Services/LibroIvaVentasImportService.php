@@ -890,8 +890,31 @@ class LibroIvaVentasImportService
     {
         $s = trim($s);
         if ($s === '') return null;
+
+        // Formato canónico ya válido: YYYY-MM o YYYY-MM-Q1/Q2.
         if (preg_match('/^\d{4}-\d{2}(-Q[12])?$/', $s)) return $s;
-        return null;
+
+        // Normalizaciones numéricas comunes a YYYY-MM (para que el filtro agrupe):
+        //  - "YYYYMM"   ej 202604
+        if (preg_match('/^(\d{4})(0[1-9]|1[0-2])$/', $s, $m)) {
+            return $m[1].'-'.$m[2];
+        }
+        //  - "MM/YYYY" o "MM-YYYY"  ej 04/2026
+        if (preg_match('#^(\d{1,2})[/\-](\d{4})$#', $s, $m)
+            && (int) $m[1] >= 1 && (int) $m[1] <= 12) {
+            return $m[2].'-'.str_pad($m[1], 2, '0', STR_PAD_LEFT);
+        }
+        //  - "YYYY/MM" o "YYYY.MM"  ej 2026/04
+        if (preg_match('#^(\d{4})[/.](\d{1,2})$#', $s, $m)
+            && (int) $m[2] >= 1 && (int) $m[2] <= 12) {
+            return $m[1].'-'.str_pad($m[2], 2, '0', STR_PAD_LEFT);
+        }
+
+        // Cualquier otro texto que cargue el contador (ej "ABRIL 2026",
+        // "1RA QUINC ABRIL") se conserva tal cual, acotado al largo de la
+        // columna (varchar 20). Antes se descartaba (return null) y por eso el
+        // período trabajado no se guardaba aunque la columna estuviera mapeada.
+        return mb_substr($s, 0, 20);
     }
 
     private function calcularFechaImputacion(string $fechaEmision, object $periodo): array

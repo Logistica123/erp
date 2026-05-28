@@ -302,7 +302,12 @@ export function RecibosPage() {
   const totalNc = draft.ncAplicadas.reduce((s, n) => s + n.monto, 0);
   const totalRet = parseMontoEs(draft.retencionIva) + parseMontoEs(draft.retencionIibb) + parseMontoEs(draft.retencionGanancias);
   const totalCobro = parseMontoEs(draft.importeRecibido) + totalRet;
-  const montoCobrable = Math.max(0, totalImputado - totalNc - totalRet);
+  // Monto cobrable = total que se está saldando con este recibo (= total
+  // imputado neto de NC). Las retenciones no se restan acá: forman parte del
+  // total cobrado (el cliente las paga al fisco en lugar de a nosotros).
+  // Así Monto cobrable == Total cobro (recibido + ret) == TOTAL IMPUTADO del
+  // recibo impreso. El cash neto que entra es `importeRecibido`.
+  const montoCobrable = Math.max(0, totalImputado - totalNc);
 
   const crearMut = useApiMutation<{ data: Recibo }, Record<string, unknown>>(
     (body) => api.post('/api/erp/tesoreria/recibos', body),
@@ -646,10 +651,15 @@ export function RecibosPage() {
                 <div className="text-[11.5px] space-y-0.5 bg-azure-soft/10 border border-azure-soft rounded p-2">
                   <div className="flex justify-between"><span>Total imputado (facturas):</span><span className="tabular">${fmtMoney(totalImputado)}</span></div>
                   {totalNc > 0 && <div className="flex justify-between text-success"><span>− NC aplicadas:</span><span className="tabular">−${fmtMoney(totalNc)}</span></div>}
-                  {totalRet > 0 && <div className="flex justify-between"><span>− Retenciones:</span><span className="tabular">−${fmtMoney(totalRet)}</span></div>}
                   <div className="flex justify-between font-semibold border-t border-azure-soft pt-0.5">
                     <span>Monto cobrable:</span><span className="tabular">${fmtMoney(montoCobrable)}</span>
                   </div>
+                  {totalRet > 0 && (
+                    <div className="flex justify-between text-ink-muted text-[11px]">
+                      <span>Retenciones (las paga el cliente al fisco):</span>
+                      <span className="tabular">${fmtMoney(totalRet)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold">
                     <span>Total cobro (recibido + ret):</span><span className="tabular">${fmtMoney(totalCobro)}</span>
                   </div>

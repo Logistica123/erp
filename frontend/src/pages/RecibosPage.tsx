@@ -57,7 +57,6 @@ type ReciboDetalle = Recibo & {
   snapshot_cliente_direccion_2?: string | null;
   snapshot_cliente_condicion_iva?: string | null;
 };
-type CuentaBancaria = { id: number; nombre: string };
 type NcLibre = {
   id: number; tipo: string; numero: number; numero_completo: string;
   fecha_emision: string; imp_total: number; saldo_imputable: number;
@@ -225,10 +224,14 @@ export function RecibosPage() {
     '/api/erp/clientes/para-recibos',
   );
   const clientes = clientesResp ?? [];
-  const { data: bancosResp } = useApi<{ ok: boolean; data: CuentaBancaria[] }>(
-    ['cuentas-bancarias'], '/api/erp/cuentas-bancarias',
+  // El campo es "Medio de cobro" → FK a erp_medios_pago (id, codigo, nombre:
+  // EFECTIVO, TRANSFERENCIA, MP, CHEQUE, etc.), NO cuentas bancarias. Antes
+  // cargaba /cuentas-bancarias (concepto distinto) y el backend rebotaba con
+  // MEDIO_COBRO_REQUERIDO porque medio_cobro_id queda en null.
+  const { data: mediosResp } = useApi<{ data: Array<{ id: number; codigo: string; nombre: string }> }>(
+    ['medios-pago'], '/api/erp/medios-pago',
   );
-  const bancos = bancosResp?.data ?? [];
+  const medios = mediosResp?.data ?? [];
 
   // Cargar facturas del cliente seleccionado.
   const { data: facturasResp } = useApi<FacturaImputable[]>(
@@ -677,7 +680,7 @@ export function RecibosPage() {
                     onChange={(e) => setDraft({ ...draft, medioCobroId: e.target.value })}
                     disabled={!!selectedReciboId}
                     options={[{ value: '', label: '—' },
-                      ...bancos.map((b) => ({ value: String(b.id), label: b.nombre }))]} />
+                      ...medios.map((m) => ({ value: String(m.id), label: m.nombre }))]} />
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11.5px]">
                   <Field label="Ret IVA" type="text" inputMode="decimal"

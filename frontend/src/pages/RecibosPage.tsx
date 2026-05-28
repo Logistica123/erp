@@ -143,25 +143,52 @@ const DRAFT_INICIAL: Draft = {
 function parseMontoEs(s: string | number | null | undefined): number {
   if (s === null || s === undefined || s === '') return 0;
   if (typeof s === 'number') return s;
-  const str = String(s).trim();
-  if (str === '') return 0;
+  // Sacamos espacios, símbolo de peso, NBSP. Cualquier cosa que no sea
+  // dígito/coma/punto/menos se descarta acá.
+  const str = String(s).replace(/[\s$ ]/g, '').trim();
+  if (!str) return 0;
   const tieneComa = str.includes(',');
   const tienePunto = str.includes('.');
-  // El antiguo `replace(/\./g, '')` asumía formato AR (1.234,56) y
-  // rompía los <input type="number">, que por spec HTML siempre devuelven el
-  // decimal con punto (56.78 -> 5678). Detectamos el formato real:
-  //  - coma y punto -> AR formateado: puntos = miles, coma = decimal.
-  //  - solo coma     -> AR decimal "56,78".
-  //  - solo punto / sin separadores -> decimal nativo (input type=number).
-  let normalizado: string;
+
+  // Caso 1: tiene ambos. El SEGUNDO separador (el más a la derecha) es el
+  // decimal; el otro es el de miles. AR: 13.000,26 / US: 13,000.26.
   if (tieneComa && tienePunto) {
-    normalizado = str.replace(/\./g, '').replace(',', '.');
-  } else if (tieneComa) {
-    normalizado = str.replace(',', '.');
-  } else {
-    normalizado = str;
+    const lastComma = str.lastIndexOf(',');
+    const lastDot = str.lastIndexOf('.');
+    if (lastComma > lastDot) {
+      return Number(str.replace(/\./g, '').replace(',', '.')) || 0; // AR
+    }
+    return Number(str.replace(/,/g, '')) || 0; // US
   }
-  return Number(normalizado) || 0;
+
+  // Caso 2: solo coma. En AR la coma es decimal salvo que vengan grupos
+  // múltiples (raro). "13,5" → 13.5; "13,50" → 13.50; "13,000" → 13.0.
+  if (tieneComa) {
+    const parts = str.split(',');
+    if (parts.length > 2) return Number(str.replace(/,/g, '')) || 0;
+    return Number(str.replace(',', '.')) || 0;
+  }
+
+  // Caso 3: solo punto. Acá está el quilombo de los <input type=number>
+  // y los pegados desde Excel:
+  //  - "56.78" / "0.5" → decimal (input type=number).
+  //  - "13.000" → AR miles (pegado de Excel): 1 punto, 3 dígitos atrás.
+  //  - "1.000.000" → AR miles: varios puntos.
+  // Heurística: si hay 2+ puntos, son todos miles. Si hay 1 punto con
+  // EXACTAMENTE 3 dígitos atrás y al menos 1 dígito adelante, también es
+  // miles. En cualquier otro caso es decimal.
+  if (tienePunto) {
+    const parts = str.split('.');
+    if (parts.length > 2) return Number(str.replace(/\./g, '')) || 0;
+    const trailing = parts[1] ?? '';
+    if (trailing.length === 3 && /^\d+$/.test(parts[0]) && parts[0].length >= 1) {
+      return Number(str.replace('.', '')) || 0;
+    }
+    return Number(str) || 0;
+  }
+
+  // Caso 4: sin separadores.
+  return Number(str) || 0;
 }
 function fmtFecha(s?: string | null): string {
   if (!s) return '—';
@@ -628,8 +655,10 @@ export function RecibosPage() {
                     onChange={(e) => setDraft({ ...draft, detalleCobro: e.target.value })}
                     placeholder="ECHEQ BANCO X N°..."
                     disabled={!!selectedReciboId} />
-                  <Field label="Importe recibido" type="number" value={draft.importeRecibido}
+                  <Field label="Importe recibido" type="text" inputMode="decimal"
+                    value={draft.importeRecibido}
                     onChange={(e) => setDraft({ ...draft, importeRecibido: e.target.value })}
+                    placeholder="0,00 o 13.000,26"
                     disabled={!!selectedReciboId} />
                   <SelectField label="Medio de cobro" value={draft.medioCobroId}
                     onChange={(e) => setDraft({ ...draft, medioCobroId: e.target.value })}
@@ -638,13 +667,16 @@ export function RecibosPage() {
                       ...bancos.map((b) => ({ value: String(b.id), label: b.nombre }))]} />
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11.5px]">
-                  <Field label="Ret IVA" type="number" value={draft.retencionIva}
+                  <Field label="Ret IVA" type="text" inputMode="decimal"
+                    value={draft.retencionIva}
                     onChange={(e) => setDraft({ ...draft, retencionIva: e.target.value })}
                     disabled={!!selectedReciboId} />
-                  <Field label="Ret IIBB" type="number" value={draft.retencionIibb}
+                  <Field label="Ret IIBB" type="text" inputMode="decimal"
+                    value={draft.retencionIibb}
                     onChange={(e) => setDraft({ ...draft, retencionIibb: e.target.value })}
                     disabled={!!selectedReciboId} />
-                  <Field label="Ret Ganancias" type="number" value={draft.retencionGanancias}
+                  <Field label="Ret Ganancias" type="text" inputMode="decimal"
+                    value={draft.retencionGanancias}
                     onChange={(e) => setDraft({ ...draft, retencionGanancias: e.target.value })}
                     disabled={!!selectedReciboId} />
                 </div>

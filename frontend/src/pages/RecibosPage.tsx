@@ -143,7 +143,25 @@ const DRAFT_INICIAL: Draft = {
 function parseMontoEs(s: string | number | null | undefined): number {
   if (s === null || s === undefined || s === '') return 0;
   if (typeof s === 'number') return s;
-  return Number(String(s).replace(/\./g, '').replace(',', '.')) || 0;
+  const str = String(s).trim();
+  if (str === '') return 0;
+  const tieneComa = str.includes(',');
+  const tienePunto = str.includes('.');
+  // El antiguo `replace(/\./g, '')` asumía formato AR (1.234,56) y
+  // rompía los <input type="number">, que por spec HTML siempre devuelven el
+  // decimal con punto (56.78 -> 5678). Detectamos el formato real:
+  //  - coma y punto -> AR formateado: puntos = miles, coma = decimal.
+  //  - solo coma     -> AR decimal "56,78".
+  //  - solo punto / sin separadores -> decimal nativo (input type=number).
+  let normalizado: string;
+  if (tieneComa && tienePunto) {
+    normalizado = str.replace(/\./g, '').replace(',', '.');
+  } else if (tieneComa) {
+    normalizado = str.replace(',', '.');
+  } else {
+    normalizado = str;
+  }
+  return Number(normalizado) || 0;
 }
 function fmtFecha(s?: string | null): string {
   if (!s) return '—';

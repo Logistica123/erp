@@ -228,10 +228,12 @@ export function RecibosPage() {
   // EFECTIVO, TRANSFERENCIA, MP, CHEQUE, etc.), NO cuentas bancarias. Antes
   // cargaba /cuentas-bancarias (concepto distinto) y el backend rebotaba con
   // MEDIO_COBRO_REQUERIDO porque medio_cobro_id queda en null.
-  const { data: mediosResp } = useApi<{ data: Array<{ id: number; codigo: string; nombre: string }> }>(
+  // useApi YA desempaqueta el .data del response (queryFn: return resp.data),
+  // así que `data` es el array directo. Tipar como `{data: array}` y luego
+  // acceder .data daba undefined → dropdown vacío.
+  const { data: medios = [] } = useApi<Array<{ id: number; codigo: string; nombre: string }>>(
     ['medios-pago'], '/api/erp/medios-pago',
   );
-  const medios = mediosResp?.data ?? [];
 
   // Cargar facturas del cliente seleccionado.
   const { data: facturasResp } = useApi<FacturaImputable[]>(

@@ -335,6 +335,12 @@ export function RecibosPage() {
   // Así Monto cobrable == Total cobro (recibido + ret) == TOTAL IMPUTADO del
   // recibo impreso. El cash neto que entra es `importeRecibido`.
   const montoCobrable = Math.max(0, totalImputado - totalNc);
+  // Validación del recibo: los 4 importes (Monto cobrable / Total imputado del
+  // recibo impreso / Total cobro recibido+ret / TOTAL COBRO impreso) deben
+  // coincidir. Si no, hay que bloquear "Emitir e imprimir" y mostrar la
+  // diferencia (positiva = falta cargar; negativa = sobra).
+  const diferenciaCobro = Math.round((totalCobro - montoCobrable) * 100) / 100;
+  const cobroCuadra = Math.abs(diferenciaCobro) < 0.01;
 
   const crearMut = useApiMutation<{ data: Recibo }, Record<string, unknown>>(
     (body) => api.post('/api/erp/tesoreria/recibos', body),
@@ -378,6 +384,11 @@ export function RecibosPage() {
     const fakeIds = draft.comprobantes.filter((c) => !c.factura_venta_id);
     if (fakeIds.length > 0) {
       toast.error('Restablecer ejemplo activo', 'Los comprobantes del ejemplo son ficticios. Restablecé y elegí facturas reales.');
+      return;
+    }
+    if (!cobroCuadra) {
+      toast.error('El cobro no cuadra',
+        `Diferencia ${diferenciaCobro >= 0 ? '+' : ''}$${fmtMoney(diferenciaCobro)} — ajustá importe recibido o retenciones para que el total cobro = monto cobrable.`);
       return;
     }
     try {
@@ -461,7 +472,7 @@ export function RecibosPage() {
       {/* Main — Form + Preview */}
       <div className="flex-1 overflow-auto p-3 space-y-3">
         {/* Header acciones */}
-        <div className="flex items-center justify-between gap-2 sticky top-0 bg-bg-base z-10 pb-2 border-b border-line">
+        <div className="flex items-center justify-between gap-2 sticky top-0 bg-surface-bg z-10 pb-2 pt-1 border-b border-line shadow-sm">
           <div className="text-[14px] font-semibold text-navy-800 flex items-center gap-2">
             <Receipt className="w-4 h-4" /> Recibos (v1.32)
             {selectedReciboId && reciboDetalle && (
@@ -479,7 +490,9 @@ export function RecibosPage() {
               <RotateCcw className="w-3 h-3" /> Restablecer ejemplo
             </Button>
             {!selectedReciboId && (
-              <Button variant="primary" size="sm" onClick={handleEmitirEImprimir} disabled={crearMut.isPending}>
+              <Button variant="primary" size="sm" onClick={handleEmitirEImprimir}
+                disabled={crearMut.isPending || !cobroCuadra}
+                title={cobroCuadra ? '' : `Falta cuadrar el cobro: diferencia ${diferenciaCobro >= 0 ? '+' : ''}$${fmtMoney(diferenciaCobro)}`}>
                 <Printer className="w-3 h-3" /> Emitir e imprimir
               </Button>
             )}
@@ -695,6 +708,16 @@ export function RecibosPage() {
                   <div className="flex justify-between font-bold">
                     <span>Total cobro (recibido + ret):</span><span className="tabular">${fmtMoney(totalCobro)}</span>
                   </div>
+                  {!cobroCuadra && (
+                    <div className="mt-1 -mx-2 -mb-2 px-2 py-1.5 border-t border-danger/40 bg-danger-bg/60 text-danger flex justify-between items-center font-semibold">
+                      <span>
+                        {diferenciaCobro > 0
+                          ? '⚠ Sobra (recibido + ret > cobrable):'
+                          : '⚠ Falta cargar (recibido + ret < cobrable):'}
+                      </span>
+                      <span className="tabular">${fmtMoney(Math.abs(diferenciaCobro))}</span>
+                    </div>
+                  )}
                 </div>
               </CardBody>
             </Card>

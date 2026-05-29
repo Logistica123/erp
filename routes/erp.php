@@ -308,6 +308,10 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.recibos.store');
         Route::get('/tesoreria/recibos/{id}', [\App\Erp\Http\Controllers\RecibosController::class, 'show'])
             ->whereNumber('id')->name('erp.recibos.show');
+        // v1.32 — Editar un borrador (delete + reinsert imputaciones / NC /
+        // retenciones, recalcula totales).
+        Route::patch('/tesoreria/recibos/{id}', [\App\Erp\Http\Controllers\RecibosController::class, 'update'])
+            ->whereNumber('id')->name('erp.recibos.update');
         Route::post('/tesoreria/recibos/{id}/emitir', [\App\Erp\Http\Controllers\RecibosController::class, 'emitir'])
             ->whereNumber('id')->name('erp.recibos.emitir');
         Route::post('/tesoreria/recibos/{id}/anular', [\App\Erp\Http\Controllers\RecibosController::class, 'anular'])

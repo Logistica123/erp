@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Receipt, Plus, Search, Printer, Trash2, Ban, AlertTriangle } from 'lucide-react';
+import { Receipt, Plus, Search, Printer, Trash2, Ban, AlertTriangle, Save } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -287,6 +287,9 @@ export function RecibosPage() {
     `/api/erp/tesoreria/recibos/${selectedReciboId}`,
     { enabled: !!selectedReciboId },
   );
+  // v1.32 — Un recibo es editable si es nuevo (sin seleccionar) o si el
+  // seleccionado está en BORRADOR. EMITIDO/CONCILIADO/ANULADO: read-only.
+  const esEditable = !selectedReciboId || reciboDetalle?.estado === 'BORRADOR';
   useEffect(() => {
     if (reciboDetalle) {
       setDraft({
@@ -362,6 +365,55 @@ export function RecibosPage() {
     setDraft({ ...DRAFT_INICIAL, numero: '' });
     refetchProximoNumero();
   };
+  // Construye el body común para crear/actualizar un recibo.
+  const armarBodyRecibo = () => ({
+    cliente_auxiliar_id: Number(draft.clienteId),
+    fecha_emision: draft.fecha,
+    detalle_cobro: draft.detalleCobro || null,
+    comprobantes_imputados: draft.comprobantes.map((c) => ({
+      factura_venta_id: c.factura_venta_id,
+      monto_imputado: c.imputado,
+    })),
+    nc_aplicadas: draft.ncAplicadas.map((n) => ({
+      nc_factura_id: n.nc_factura_id,
+      monto_aplicado: n.monto,
+    })),
+    monto_cobrado: parseMontoEs(draft.importeRecibido),
+    medio_cobro_id: draft.medioCobroId ? Number(draft.medioCobroId) : null,
+    retencion_iva_total: parseMontoEs(draft.retencionIva),
+    retencion_iibb_total: parseMontoEs(draft.retencionIibb),
+    retencion_ganancias_total: parseMontoEs(draft.retencionGanancias),
+    observaciones: draft.observaciones || null,
+  });
+
+  // v1.32 — Guarda como BORRADOR sin emitir. No exige cobroCuadra (un borrador
+  // puede quedar incompleto). Si hay un recibo seleccionado en BORRADOR, hace
+  // PATCH; si no, hace POST (nuevo borrador).
+  const handleGuardarBorrador = async () => {
+    if (!draft.clienteId) { toast.error('Cliente requerido', 'Seleccioná un cliente.'); return; }
+    if (draft.comprobantes.length === 0) {
+      toast.error('Sin comprobantes', 'Agregá al menos una factura.');
+      return;
+    }
+    try {
+      const body = { ...armarBodyRecibo(), auto_imputar_nc: false };
+      let reciboId: number;
+      if (selectedReciboId && reciboDetalle?.estado === 'BORRADOR') {
+        const updated = await api.patch<{ data: Recibo }>(`/api/erp/tesoreria/recibos/${selectedReciboId}`, body);
+        reciboId = updated.data.id;
+        toast.success('Borrador actualizado');
+      } else {
+        const created = await api.post<{ data: Recibo }>('/api/erp/tesoreria/recibos', body);
+        reciboId = created.data.id;
+        toast.success('Borrador guardado', 'Podés seguir editándolo o emitirlo más tarde.');
+      }
+      invalidate();
+      setSelectedReciboId(reciboId);
+    } catch (e) {
+      toast.error('No se pudo guardar', (e as ApiError).message);
+    }
+  };
+
   const handleEmitirEImprimir = async () => {
     if (!draft.clienteId) { toast.error('Cliente requerido', 'Seleccioná un cliente.'); return; }
     if (draft.comprobantes.length === 0) {
@@ -374,34 +426,22 @@ export function RecibosPage() {
       return;
     }
     try {
-      const body = {
-        cliente_auxiliar_id: Number(draft.clienteId),
-        fecha_emision: draft.fecha,
-        detalle_cobro: draft.detalleCobro || null,
-        comprobantes_imputados: draft.comprobantes.map((c) => ({
-          factura_venta_id: c.factura_venta_id,
-          monto_imputado: c.imputado,
-        })),
-        nc_aplicadas: draft.ncAplicadas.map((n) => ({
-          nc_factura_id: n.nc_factura_id,
-          monto_aplicado: n.monto,
-        })),
-        auto_imputar_nc: false, // el operador elige las NC manualmente desde el modal.
-        monto_cobrado: parseMontoEs(draft.importeRecibido),
-        medio_cobro_id: draft.medioCobroId ? Number(draft.medioCobroId) : null,
-        retencion_iva_total: parseMontoEs(draft.retencionIva),
-        retencion_iibb_total: parseMontoEs(draft.retencionIibb),
-        retencion_ganancias_total: parseMontoEs(draft.retencionGanancias),
-        observaciones: draft.observaciones || null,
-      };
-      const created = await api.post<{ data: Recibo }>('/api/erp/tesoreria/recibos', body);
-      const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${created.data.id}/emitir`, {});
+      const body = { ...armarBodyRecibo(), auto_imputar_nc: false };
+      // Si estamos editando un BORRADOR existente, PATCH antes de emitir.
+      // Si es uno nuevo, POST para crearlo en BORRADOR.
+      let reciboId: number;
+      if (selectedReciboId && reciboDetalle?.estado === 'BORRADOR') {
+        const updated = await api.patch<{ data: Recibo }>(`/api/erp/tesoreria/recibos/${selectedReciboId}`, body);
+        reciboId = updated.data.id;
+      } else {
+        const created = await api.post<{ data: Recibo }>('/api/erp/tesoreria/recibos', body);
+        reciboId = created.data.id;
+      }
+      const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${reciboId}/emitir`, {});
       toast.success('Recibo emitido', `Recibo ${draft.puntoVenta}-${draft.numero}`);
       invalidate();
-      // Imprimir via window.print del HTML del preview.
       printRecibo(draft, { total_cobro: totalCobro, total_imputado: totalImputado - totalNc, watermark: null });
       if (draft.autoIncrementar) {
-        // Próximo número auto.
         const next = await api.get<ProximoNumero>(`/api/erp/tesoreria/recibos/proximo-numero?pv=${draft.puntoVenta}`);
         setSelectedReciboId(null);
         setDraft({ ...DRAFT_INICIAL, numero: next.numero });
@@ -466,9 +506,16 @@ export function RecibosPage() {
           </div>
           <div className="flex gap-1.5">
             <Button variant="ghost" size="sm" onClick={handleNuevoBorrador}>
-              <Plus className="w-3 h-3" /> Nuevo borrador
+              <Plus className="w-3 h-3" /> Nuevo recibo
             </Button>
-            {!selectedReciboId && (
+            {esEditable && (
+              <Button variant="secondary" size="sm" onClick={handleGuardarBorrador}
+                disabled={crearMut.isPending}
+                title="Guarda como borrador sin emitir. Lo podés seguir editando o emitir más tarde.">
+                <Save className="w-3 h-3" /> Guardar borrador
+              </Button>
+            )}
+            {esEditable && (
               <Button variant="primary" size="sm" onClick={handleEmitirEImprimir}
                 disabled={crearMut.isPending || !cobroCuadra}
                 title={cobroCuadra ? '' : `Falta cuadrar el cobro: diferencia ${diferenciaCobro >= 0 ? '+' : ''}$${fmtMoney(diferenciaCobro)}`}>
@@ -491,14 +538,14 @@ export function RecibosPage() {
                 <div className="grid grid-cols-3 gap-2 text-[11.5px]">
                   <Field label="PV" value={draft.puntoVenta}
                     onChange={(e) => setDraft({ ...draft, puntoVenta: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Número" value={draft.numero}
                     onChange={(e) => setDraft({ ...draft, numero: e.target.value })}
-                    disabled={!!selectedReciboId}
+                    disabled={!esEditable}
                     hint={proximoNumeroResp?.consultado_distriapp ? `Distri max=${proximoNumeroResp.max_distriapp}` : undefined} />
                   <Field label="Fecha recibo *" type="date" value={draft.fecha}
                     onChange={(e) => setDraft({ ...draft, fecha: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                 </div>
                 <div className="text-[10.5px] text-ink-muted">
                   <label className="flex items-center gap-1">
@@ -515,7 +562,7 @@ export function RecibosPage() {
               <CardBody className="space-y-2">
                 <SelectField label="Cliente *" value={draft.clienteId}
                   onChange={(e) => onPickCliente(e.target.value)}
-                  disabled={!!selectedReciboId}
+                  disabled={!esEditable}
                   options={[{ value: '', label: clientes.length === 0 ? 'Cargando…' : 'Elegí cliente…' },
                     ...clientes.map((c) => ({
                       value: String(c.id),
@@ -524,16 +571,16 @@ export function RecibosPage() {
                 <div className="grid grid-cols-2 gap-2 text-[11.5px]">
                   <Field label="CUIT" value={draft.clienteCuit}
                     onChange={(e) => setDraft({ ...draft, clienteCuit: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Cond. IVA" value={draft.clienteIva}
                     onChange={(e) => setDraft({ ...draft, clienteIva: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Dirección" value={draft.clienteDireccion1}
                     onChange={(e) => setDraft({ ...draft, clienteDireccion1: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Localidad" value={draft.clienteDireccion2}
                     onChange={(e) => setDraft({ ...draft, clienteDireccion2: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                 </div>
               </CardBody>
             </Card>
@@ -542,7 +589,7 @@ export function RecibosPage() {
               <CardHeader title={
                 <div className="flex items-center justify-between">
                   <div className="text-[12px] font-semibold">Comprobantes imputados ({draft.comprobantes.length})</div>
-                  {!selectedReciboId && draft.clienteId && (
+                  {esEditable && draft.clienteId && (
                     <Button variant="ghost" size="sm" onClick={() => setAgregarCompModalOpen(true)}>
                       <Plus className="w-3 h-3" /> Agregar
                     </Button>
@@ -559,7 +606,7 @@ export function RecibosPage() {
                       <th className="text-left">N° Fact</th>
                       <th className="text-right">Total fact</th>
                       <th className="text-right">Imputado</th>
-                      {!selectedReciboId && <th></th>}
+                      {esEditable && <th></th>}
                     </tr></thead>
                     <tbody>
                       {draft.comprobantes.map((c, i) => (
@@ -568,7 +615,7 @@ export function RecibosPage() {
                           <td className="font-mono">{c.numeroFactura}</td>
                           <td className="text-right tabular">${fmtMoney(c.totalFactura)}</td>
                           <td className="text-right tabular font-semibold">${fmtMoney(c.imputado)}</td>
-                          {!selectedReciboId && (
+                          {esEditable && (
                             <td className="text-right">
                               <button onClick={() => setDraft({ ...draft, comprobantes: draft.comprobantes.filter((_, idx) => idx !== i) })}>
                                 <Trash2 className="w-3 h-3 text-danger" />
@@ -580,7 +627,7 @@ export function RecibosPage() {
                       <tr className="font-semibold border-t border-line bg-azure-soft/10">
                         <td colSpan={3} className="text-right px-1">Total imputado</td>
                         <td className="text-right tabular">${fmtMoney(totalImputado)}</td>
-                        {!selectedReciboId && <td></td>}
+                        {esEditable && <td></td>}
                       </tr>
                     </tbody>
                   </table>
@@ -608,7 +655,7 @@ export function RecibosPage() {
                       <th className="text-left px-1">NC</th>
                       <th className="text-right">Saldo NC</th>
                       <th className="text-right">Aplicado</th>
-                      {!selectedReciboId && <th></th>}
+                      {esEditable && <th></th>}
                     </tr></thead>
                     <tbody>
                       {draft.ncAplicadas.map((n, i) => (
@@ -616,7 +663,7 @@ export function RecibosPage() {
                           <td className="px-1 font-mono">{n.numeroNc}</td>
                           <td className="text-right tabular">${fmtMoney(n.saldo)}</td>
                           <td className="text-right tabular font-semibold text-success">−${fmtMoney(n.monto)}</td>
-                          {!selectedReciboId && (
+                          {esEditable && (
                             <td className="text-right">
                               <button onClick={() => setDraft({ ...draft, ncAplicadas: draft.ncAplicadas.filter((_, idx) => idx !== i) })}>
                                 <Trash2 className="w-3 h-3 text-danger" />
@@ -628,7 +675,7 @@ export function RecibosPage() {
                       <tr className="font-semibold border-t border-line bg-success-bg/20">
                         <td colSpan={2} className="text-right px-1">Total NC</td>
                         <td className="text-right tabular text-success">−${fmtMoney(totalNc)}</td>
-                        {!selectedReciboId && <td></td>}
+                        {esEditable && <td></td>}
                       </tr>
                     </tbody>
                   </table>
@@ -642,19 +689,19 @@ export function RecibosPage() {
                 <div className="grid grid-cols-2 gap-2 text-[11.5px]">
                   <Field label="Fecha cobro" type="date" value={draft.fechaCobro}
                     onChange={(e) => setDraft({ ...draft, fechaCobro: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Detalle cobro" value={draft.detalleCobro}
                     onChange={(e) => setDraft({ ...draft, detalleCobro: e.target.value })}
                     placeholder="ECHEQ BANCO X N°..."
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Importe recibido" type="text" inputMode="decimal"
                     value={draft.importeRecibido}
                     onChange={(e) => setDraft({ ...draft, importeRecibido: e.target.value })}
                     placeholder="0,00 o 13.000,26"
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <SelectField label="Medio de cobro" value={draft.medioCobroId}
                     onChange={(e) => setDraft({ ...draft, medioCobroId: e.target.value })}
-                    disabled={!!selectedReciboId}
+                    disabled={!esEditable}
                     options={[{ value: '', label: '—' },
                       ...bancos.map((b) => ({ value: String(b.id), label: b.nombre }))]} />
                 </div>
@@ -662,15 +709,15 @@ export function RecibosPage() {
                   <Field label="Ret IVA" type="text" inputMode="decimal"
                     value={draft.retencionIva}
                     onChange={(e) => setDraft({ ...draft, retencionIva: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Ret IIBB" type="text" inputMode="decimal"
                     value={draft.retencionIibb}
                     onChange={(e) => setDraft({ ...draft, retencionIibb: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                   <Field label="Ret Ganancias" type="text" inputMode="decimal"
                     value={draft.retencionGanancias}
                     onChange={(e) => setDraft({ ...draft, retencionGanancias: e.target.value })}
-                    disabled={!!selectedReciboId} />
+                    disabled={!esEditable} />
                 </div>
                 <div className="text-[11.5px] space-y-0.5 bg-azure-soft/10 border border-azure-soft rounded p-2">
                   <div className="flex justify-between"><span>Total imputado (facturas):</span><span className="tabular">${fmtMoney(totalImputado)}</span></div>

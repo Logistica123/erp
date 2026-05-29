@@ -296,6 +296,51 @@ class RecibosController
         }
     }
 
+    /**
+     * v1.32 — PATCH /tesoreria/recibos/{id}: actualiza un BORRADOR. Misma
+     * validación que store(). El service rebota si el estado dejó de ser
+     * BORRADOR (emitido/anulado).
+     */
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'tesoreria.recibos.crear');
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $recibo = Recibo::where('empresa_id', $empresaId)->findOrFail($id);
+
+        $data = $request->validate([
+            'cliente_auxiliar_id' => ['required', 'integer', 'exists:erp_auxiliares,id'],
+            'fecha_emision' => ['nullable', 'date'],
+            'detalle_cobro' => ['nullable', 'string', 'max:200'],
+            'comprobantes_imputados' => ['required', 'array', 'min:1'],
+            'comprobantes_imputados.*.factura_venta_id' => ['required', 'integer', 'exists:erp_facturas_venta,id'],
+            'comprobantes_imputados.*.monto_imputado' => ['required', 'numeric', 'min:0.01'],
+            'monto_cobrado' => ['nullable', 'numeric', 'min:0'],
+            'medio_cobro_id' => ['nullable', 'integer', 'exists:erp_cuentas_bancarias,id'],
+            'observaciones' => ['nullable', 'string', 'max:1000'],
+            'nc_aplicadas' => ['nullable', 'array'],
+            'nc_aplicadas.*.nc_factura_id' => ['required', 'integer'],
+            'nc_aplicadas.*.monto_aplicado' => ['required', 'numeric', 'min:0.01'],
+            'retencion_iva_total' => ['nullable', 'numeric', 'min:0'],
+            'retencion_iibb_total' => ['nullable', 'numeric', 'min:0'],
+            'retencion_ganancias_total' => ['nullable', 'numeric', 'min:0'],
+            'retenciones' => ['nullable', 'array'],
+            'retenciones.*.tipo' => ['required', 'in:GANANCIAS,IVA,IIBB,SUSS,OTRO'],
+            'retenciones.*.jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
+            'retenciones.*.numero_certificado' => ['nullable', 'string', 'max:40'],
+            'retenciones.*.alicuota' => ['nullable', 'numeric'],
+            'retenciones.*.base_imponible' => ['nullable', 'numeric'],
+            'retenciones.*.monto' => ['required', 'numeric', 'min:0.01'],
+            'retenciones.*.cuenta_contable_id' => ['required', 'integer', 'exists:erp_cuentas_contables,id'],
+        ]);
+
+        try {
+            $actualizado = $this->svc->actualizar($recibo, $data, $request->user(), $empresaId);
+            return response()->json(['ok' => true, 'data' => $actualizado]);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+    }
+
     public function emitir(Request $request, int $id): JsonResponse
     {
         $this->mustHave($request, 'tesoreria.recibos.crear');

@@ -678,8 +678,11 @@ class ReciboService
 
     private function admiteCc(int $cuentaId): bool
     {
+        // La columna real es `admite_cc` (tinyint). El resto del código usa
+        // ese nombre; acá había quedado el largo `admite_centro_costo` y
+        // MariaDB tiraba 1054 Unknown column → 500 al emitir recibo.
         return (bool) DB::table('erp_cuentas_contables')
-            ->where('id', $cuentaId)->value('admite_centro_costo');
+            ->where('id', $cuentaId)->value('admite_cc');
     }
 
     /**

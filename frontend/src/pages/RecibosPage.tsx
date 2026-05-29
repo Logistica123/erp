@@ -618,29 +618,37 @@ export function RecibosPage() {
                           <td className="text-right tabular">${fmtMoney(c.totalFactura)}</td>
                           <td className="text-right tabular font-semibold">
                             {esEditable ? (
-                              <input
-                                type="text" inputMode="decimal"
-                                value={c.imputado}
-                                onChange={(e) => {
-                                  const v = parseMontoEs(e.target.value);
-                                  setDraft({
+                              <div className="inline-flex items-center gap-1 justify-end">
+                                <input
+                                  type="text" inputMode="decimal"
+                                  value={c.imputado}
+                                  onChange={(e) => {
+                                    const v = parseMontoEs(e.target.value);
+                                    setDraft({
+                                      ...draft,
+                                      comprobantes: draft.comprobantes.map((cc, idx) =>
+                                        idx === i ? { ...cc, imputado: v } : cc),
+                                    });
+                                  }}
+                                  title={imputadoInvalido
+                                    ? `Debe ser > 0 y ≤ $${fmtMoney(c.totalFactura)}`
+                                    : ''}
+                                  className={`w-[120px] px-1.5 py-0.5 text-right tabular border rounded focus:outline-none ${
+                                    imputadoInvalido
+                                      ? 'border-danger text-danger focus:border-danger'
+                                      : 'border-azure-soft focus:border-azure'}`} />
+                                <button
+                                  type="button"
+                                  onClick={() => setDraft({
                                     ...draft,
                                     comprobantes: draft.comprobantes.map((cc, idx) =>
-                                      idx === i ? { ...cc, imputado: v } : cc),
-                                  });
-                                }}
-                                title={imputadoInvalido
-                                  ? `Debe ser > 0 y ≤ $${fmtMoney(c.totalFactura)}`
-                                  : 'Doble click para imputar el total'}
-                                onDoubleClick={() => setDraft({
-                                  ...draft,
-                                  comprobantes: draft.comprobantes.map((cc, idx) =>
-                                    idx === i ? { ...cc, imputado: cc.totalFactura } : cc),
-                                })}
-                                className={`w-[120px] px-1.5 py-0.5 text-right tabular border rounded focus:outline-none ${
-                                  imputadoInvalido
-                                    ? 'border-danger text-danger focus:border-danger'
-                                    : 'border-azure-soft focus:border-azure'}`} />
+                                      idx === i ? { ...cc, imputado: cc.totalFactura } : cc),
+                                  })}
+                                  title="Imputar el total de la factura"
+                                  className="px-1 text-[10px] text-azure hover:bg-azure-soft/40 rounded cursor-pointer">
+                                  total
+                                </button>
+                              </div>
                             ) : (
                               <>${fmtMoney(c.imputado)}</>
                             )}

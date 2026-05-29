@@ -224,15 +224,17 @@ export function RecibosPage() {
     '/api/erp/clientes/para-recibos',
   );
   const clientes = clientesResp ?? [];
-  // El campo es "Medio de cobro" → FK a erp_medios_pago (id, codigo, nombre:
-  // EFECTIVO, TRANSFERENCIA, MP, CHEQUE, etc.), NO cuentas bancarias. Antes
-  // cargaba /cuentas-bancarias (concepto distinto) y el backend rebotaba con
-  // MEDIO_COBRO_REQUERIDO porque medio_cobro_id queda en null.
-  // useApi YA desempaqueta el .data del response (queryFn: return resp.data),
-  // así que `data` es el array directo. Tipar como `{data: array}` y luego
-  // acceder .data daba undefined → dropdown vacío.
-  const { data: medios = [] } = useApi<Array<{ id: number; codigo: string; nombre: string }>>(
-    ['medios-pago'], '/api/erp/medios-pago',
+  // El campo se llama "Medio de cobro" pero en este ERP FK a erp_cuentas_bancarias:
+  // representa la cuenta/caja destino (es lo que tiene la cuenta_contable_id que el
+  // asiento de cobro debita). Las opciones del dropdown son cuentas tipo "Banco
+  // Supervielle cta. operativa", "Caja chica", etc. El TIPO de instrumento
+  // (transferencia/efectivo/cheque) lo describe el usuario en "Detalle cobro".
+  //
+  // Antes el dropdown salía vacío por bug de shape: useApi YA desempaqueta el
+  // .data del response (return resp.data), así que el data es el array directo.
+  // Tipar como {data: array} y luego acceder .data daba undefined → [].
+  const { data: bancos = [] } = useApi<Array<{ id: number; nombre: string; codigo?: string }>>(
+    ['cuentas-bancarias'], '/api/erp/cuentas-bancarias',
   );
 
   // Cargar facturas del cliente seleccionado.
@@ -682,7 +684,7 @@ export function RecibosPage() {
                     onChange={(e) => setDraft({ ...draft, medioCobroId: e.target.value })}
                     disabled={!!selectedReciboId}
                     options={[{ value: '', label: '—' },
-                      ...medios.map((m) => ({ value: String(m.id), label: m.nombre }))]} />
+                      ...bancos.map((b) => ({ value: String(b.id), label: b.nombre }))]} />
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11.5px]">
                   <Field label="Ret IVA" type="text" inputMode="decimal"

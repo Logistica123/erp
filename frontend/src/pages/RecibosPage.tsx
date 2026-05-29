@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Receipt, Plus, Search, Printer, RotateCcw, Trash2, Ban, AlertTriangle } from 'lucide-react';
+import { Receipt, Plus, Search, Printer, Trash2, Ban, AlertTriangle } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -362,35 +362,10 @@ export function RecibosPage() {
     setDraft({ ...DRAFT_INICIAL, numero: '' });
     refetchProximoNumero();
   };
-  const handleRestablecerEjemplo = () => {
-    setSelectedReciboId(null);
-    setDraft({
-      ...DRAFT_INICIAL,
-      clienteNombre: 'OCASA SA (ejemplo)',
-      clienteCuit: '30-71706098-5',
-      clienteDireccion1: 'AV. EJEMPLO 1234',
-      clienteDireccion2: 'CABA',
-      clienteIva: 'RESP. INSCRIPTO',
-      detalleCobro: 'ECHEQ BANCO SUPERVIELLE N° 00005916 vto 31/05',
-      comprobantes: [
-        { factura_venta_id: 0, numeroFactura: '0002-00000596', fecha: '2026-04-07', totalFactura: 2764494.26, imputado: 2764494.26 },
-        { factura_venta_id: 0, numeroFactura: '0002-00000625', fecha: '2026-04-15', totalFactura: 681641.40, imputado: 681641.40 },
-      ],
-      retencionGanancias: '25234.98',
-      importeRecibido: '3420900.68',
-      numero: proximoNumeroResp?.numero ?? '',
-    });
-    toast.success('Ejemplo cargado', 'Datos ficticios para training/testing');
-  };
   const handleEmitirEImprimir = async () => {
     if (!draft.clienteId) { toast.error('Cliente requerido', 'Seleccioná un cliente.'); return; }
     if (draft.comprobantes.length === 0) {
       toast.error('Sin comprobantes', 'Agregá al menos una factura.');
-      return;
-    }
-    const fakeIds = draft.comprobantes.filter((c) => !c.factura_venta_id);
-    if (fakeIds.length > 0) {
-      toast.error('Restablecer ejemplo activo', 'Los comprobantes del ejemplo son ficticios. Restablecé y elegí facturas reales.');
       return;
     }
     if (!cobroCuadra) {
@@ -492,9 +467,6 @@ export function RecibosPage() {
           <div className="flex gap-1.5">
             <Button variant="ghost" size="sm" onClick={handleNuevoBorrador}>
               <Plus className="w-3 h-3" /> Nuevo borrador
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handleRestablecerEjemplo}>
-              <RotateCcw className="w-3 h-3" /> Restablecer ejemplo
             </Button>
             {!selectedReciboId && (
               <Button variant="primary" size="sm" onClick={handleEmitirEImprimir}

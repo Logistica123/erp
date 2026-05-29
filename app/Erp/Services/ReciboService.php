@@ -498,10 +498,21 @@ class ReciboService
                     ->where('id', $recibo->medio_cobro_id)
                     ->value('cuenta_contable_id');
                 if (! $cuentaMedioId) throw new RuntimeException('Medio de cobro sin cuenta contable.');
+                // Si la cuenta admite/requiere auxiliar Cliente (ej. 1.1.4.04
+                // "Valores al Cobro - Cheques Recibidos"), pasamos el cliente
+                // del recibo. AsientoService rebota AUXILIAR_REQUERIDO si la
+                // cuenta lo pide y no se pasa.
+                $cuentaMedioMeta = DB::table('erp_cuentas_contables')
+                    ->where('id', $cuentaMedioId)
+                    ->first(['admite_auxiliar', 'tipo_auxiliar']);
+                $auxMedio = ($cuentaMedioMeta && (int) $cuentaMedioMeta->admite_auxiliar === 1
+                    && $cuentaMedioMeta->tipo_auxiliar === 'Cliente')
+                    ? (int) $recibo->cliente_auxiliar_id
+                    : null;
                 $movimientos[] = [
                     'cuenta_id' => $cuentaMedioId,
                     'centro_costo_id' => $this->admiteCc((int) $cuentaMedioId) ? $ccGeneral : null,
-                    'auxiliar_id' => null,
+                    'auxiliar_id' => $auxMedio,
                     'debe' => (float) $recibo->monto_cobrado,
                     'haber' => 0,
                     'glosa' => 'Cobro ' . $recibo->numero_correlativo,

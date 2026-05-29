@@ -273,14 +273,10 @@ class ReciboService
                 throw new DomainException('ESTADO_INVALIDO: el recibo dejó de ser BORRADOR durante la edición.');
             }
 
-            // 1) Borrar imputaciones/NC/retenciones existentes (libera saldo
-            //    de facturas y NC para que la validación abajo sea exacta).
-            DB::table('erp_recibos_comprobantes_imputados')->where('recibo_id', $recibo->id)->delete();
-            DB::table('erp_recibos_nc_aplicadas')->where('recibo_id', $recibo->id)->delete();
-            DB::table('erp_recibos_retenciones')->where('recibo_id', $recibo->id)->delete();
-
-            // 2) Validar comprobantes con saldo ya liberado de este recibo.
-            //    Mismo bloque que crear() para asegurar reglas idénticas.
+            // 1) Validar PRIMERO (sin borrar nada). Si falla, el borrador queda
+            //    intacto. saldoFactura recibe excludeReciboId para que NO sume
+            //    la contribución actual de este recibo (sino daría saldo
+            //    negativo por doble conteo).
             $comprobantes = $data['comprobantes_imputados'] ?? [];
             if (empty($comprobantes)) {
                 throw new DomainException('SIN_COMPROBANTES: el recibo debe tener al menos un comprobante imputado.');
@@ -306,7 +302,7 @@ class ReciboService
                         $fv->id, $fv->auxiliar_id, $clienteId,
                     ));
                 }
-                $saldo = $this->saldoFactura($fv->id, $empresaId);
+                $saldo = $this->saldoFactura($fv->id, $empresaId, $recibo->id);
                 if ($monto > $saldo + 0.01) {
                     throw new DomainException(sprintf(
                         'FACTURA_SOBRE_IMPUTADA: factura #%d tiene saldo $%.2f, se intenta imputar $%.2f',
@@ -327,6 +323,12 @@ class ReciboService
                     ));
                 }
             }
+
+            // 2) Validación pasó: borrar imputaciones/NC/retenciones existentes
+            //    y re-insertar en el mismo loop transaccional.
+            DB::table('erp_recibos_comprobantes_imputados')->where('recibo_id', $recibo->id)->delete();
+            DB::table('erp_recibos_nc_aplicadas')->where('recibo_id', $recibo->id)->delete();
+            DB::table('erp_recibos_retenciones')->where('recibo_id', $recibo->id)->delete();
 
             $retencionesDetalle = $data['retenciones'] ?? [];
             $retIvaSimple = (float) ($data['retencion_iva_total'] ?? 0);
@@ -741,7 +743,7 @@ class ReciboService
      * Saldo de una factura = imp_total - SUM(cobros) - SUM(NC imputadas) - SUM(retenciones recibidas).
      * MVP: aprox via cobros + NC imputadas. Las retenciones se modelan en recibos a partir de v1.31.
      */
-    public function saldoFactura(int $facturaId, int $empresaId = 1): float
+    public function saldoFactura(int $facturaId, int $empresaId = 1, ?int $excludeReciboId = null): float
     {
         $factura = DB::table('erp_facturas_venta')
             ->where('id', $facturaId)->where('empresa_id', $empresaId)
@@ -758,24 +760,30 @@ class ReciboService
         // v1.32 — Imputado via recibos (multi-comprobante). Cada fila de
         // comprobantes_imputados tiene su monto_imputado, que es lo que el
         // recibo consumió de esta factura específicamente.
-        $imputadoRecibos = (float) DB::table('erp_recibos_comprobantes_imputados as rci')
+        // `excludeReciboId` permite excluir el recibo que está siendo editado
+        // (ver actualizar()): sin esto el saldo daba falso "sobre imputado"
+        // porque el monto_cobrado del recibo (suma de TODAS sus facturas)
+        // se sumaba a la factura puntual via el fallback v1.31.
+        $q = DB::table('erp_recibos_comprobantes_imputados as rci')
             ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
             ->where('rci.factura_venta_id', $facturaId)
-            ->where('r.estado', '!=', Recibo::ESTADO_ANULADO)
-            ->sum('rci.monto_imputado');
+            ->where('r.estado', '!=', Recibo::ESTADO_ANULADO);
+        if ($excludeReciboId !== null) $q->where('rci.recibo_id', '!=', $excludeReciboId);
+        $imputadoRecibos = (float) $q->sum('rci.monto_imputado');
 
         // Fallback v1.31: si NO hay imputaciones via tabla nueva pero sí hay
         // recibos legacy (1:1) referenciados via factura_venta_id, sumar su monto_cobrado.
         if ($imputadoRecibos < 0.01) {
-            $imputadoRecibos = (float) DB::table('erp_recibos')
+            $q2 = DB::table('erp_recibos')
                 ->where('factura_venta_id', $facturaId)
                 ->where('estado', '!=', Recibo::ESTADO_ANULADO)
                 ->whereNotExists(function ($q) {
                     $q->select(DB::raw(1))
                       ->from('erp_recibos_comprobantes_imputados as rci2')
                       ->whereColumn('rci2.recibo_id', 'erp_recibos.id');
-                })
-                ->sum('monto_cobrado');
+                });
+            if ($excludeReciboId !== null) $q2->where('id', '!=', $excludeReciboId);
+            $imputadoRecibos = (float) $q2->sum('monto_cobrado');
         }
 
         // Si la factura está imputada en recibos, los cobros legacy del v1.15

@@ -173,7 +173,9 @@ class ReciboService
             // abandonados).
             $recibo = Recibo::create([
                 'empresa_id' => $empresaId,
-                'numero_correlativo' => 'BORRADOR-' . uniqid('', true),
+                // 'BORRADOR-'.uniqid('',true) generaba ~32 chars y la columna
+                // es VARCHAR(20). 'B-' + 16 hex random = 18 chars, único.
+                'numero_correlativo' => 'B-' . bin2hex(random_bytes(8)),
                 'punto_venta' => null,
                 'numero' => null,
                 'fecha_emision' => $data['fecha_emision'] ?? today()->toDateString(),

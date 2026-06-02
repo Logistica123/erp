@@ -111,7 +111,7 @@ type Draft = {
 };
 
 const DRAFT_INICIAL: Draft = {
-  puntoVenta: '0001',
+  puntoVenta: '00001',
   numero: '',
   fecha: new Date().toISOString().slice(0, 10),
   fechaCobro: new Date().toISOString().slice(0, 10),
@@ -195,6 +195,18 @@ function fmtFecha(s?: string | null): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
 }
 
+// v1.32 — zero-pad para PV (5 dígitos) y Número (8 dígitos) de recibos.
+// Si el valor está vacío o no es solo dígitos, lo devolvemos como está
+// (no rompemos lo que el usuario tipea mientras edita).
+function padPv(s: string): string {
+  const t = String(s ?? '').trim();
+  return /^\d+$/.test(t) ? t.padStart(5, '0') : t;
+}
+function padNumero(s: string): string {
+  const t = String(s ?? '').trim();
+  return /^\d+$/.test(t) ? t.padStart(8, '0') : t;
+}
+
 export function RecibosPage() {
   const toast = useToast();
   const invalidate = useInvalidate(['recibos']);
@@ -262,7 +274,7 @@ export function RecibosPage() {
 
   useEffect(() => {
     if (!selectedReciboId && proximoNumeroResp && !draft.numero) {
-      setDraft((d) => ({ ...d, numero: proximoNumeroResp.numero }));
+      setDraft((d) => ({ ...d, numero: padNumero(proximoNumeroResp.numero) }));
     }
   }, [proximoNumeroResp, selectedReciboId, draft.numero]);
 
@@ -293,8 +305,8 @@ export function RecibosPage() {
   useEffect(() => {
     if (reciboDetalle) {
       setDraft({
-        puntoVenta: reciboDetalle.punto_venta ?? '0001',
-        numero: reciboDetalle.numero ?? '',
+        puntoVenta: padPv(reciboDetalle.punto_venta ?? '00001'),
+        numero: padNumero(reciboDetalle.numero ?? ''),
         fecha: String(reciboDetalle.fecha_emision).slice(0, 10),
         fechaCobro: String(reciboDetalle.fecha_emision).slice(0, 10),
         detalleCobro: reciboDetalle.detalle_cobro ?? '',
@@ -438,13 +450,13 @@ export function RecibosPage() {
         reciboId = created.data.id;
       }
       const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${reciboId}/emitir`, {});
-      toast.success('Recibo emitido', `Recibo ${draft.puntoVenta}-${draft.numero}`);
+      toast.success('Recibo emitido', `Recibo ${padPv(draft.puntoVenta)}-${padNumero(draft.numero)}`);
       invalidate();
       printRecibo(draft, { total_cobro: totalCobro, total_imputado: totalImputado - totalNc, watermark: null });
       if (draft.autoIncrementar) {
         const next = await api.get<ProximoNumero>(`/api/erp/tesoreria/recibos/proximo-numero?pv=${draft.puntoVenta}`);
         setSelectedReciboId(null);
-        setDraft({ ...DRAFT_INICIAL, numero: next.numero });
+        setDraft({ ...DRAFT_INICIAL, numero: padNumero(next.numero) });
       } else {
         setSelectedReciboId(emitido.data.recibo_id);
       }
@@ -538,9 +550,13 @@ export function RecibosPage() {
                 <div className="grid grid-cols-3 gap-2 text-[11.5px]">
                   <Field label="PV" value={draft.puntoVenta}
                     onChange={(e) => setDraft({ ...draft, puntoVenta: e.target.value })}
+                    onBlur={(e) => setDraft({ ...draft, puntoVenta: padPv(e.target.value) })}
+                    placeholder="00001"
                     disabled={!esEditable} />
                   <Field label="Número" value={draft.numero}
                     onChange={(e) => setDraft({ ...draft, numero: e.target.value })}
+                    onBlur={(e) => setDraft({ ...draft, numero: padNumero(e.target.value) })}
+                    placeholder="00000001"
                     disabled={!esEditable}
                     hint={proximoNumeroResp?.consultado_distriapp ? `Distri max=${proximoNumeroResp.max_distriapp}` : undefined} />
                   <Field label="Fecha recibo *" type="date" value={draft.fecha}
@@ -859,7 +875,7 @@ function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
           </div>
           <div className="p-2 text-center">
             <div className="text-[14px] font-extrabold">RECIBO</div>
-            <div className="text-[10px]">{draft.puntoVenta} - {draft.numero || '00000000'}</div>
+            <div className="text-[10px]">{padPv(draft.puntoVenta)} - {padNumero(draft.numero) || '00000000'}</div>
             <div className="mt-2 grid grid-cols-2 gap-x-1 text-[9.5px] text-left">
               <span className="font-bold">FECHA:</span><span>{fmtFecha(draft.fecha)}</span>
               <span className="font-bold">CUIT:</span><span>{draft.empresaCuit}</span>
@@ -1131,7 +1147,9 @@ function printRecibo(d: Draft, opts: { total_cobro: number; total_imputado: numb
     </tr>`).join('');
   const rows = rowsFact + rowsNc;
   const watermark = opts.watermark ? `<div class="wm"><span>${escape(opts.watermark)}</span></div>` : '';
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Recibo ${d.puntoVenta}-${d.numero}</title>
+  const pvPad = padPv(d.puntoVenta);
+  const nroPad = padNumero(d.numero);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Recibo ${pvPad}-${nroPad}</title>
   <style>
     @page { size: A4 landscape; margin: 10mm; }
     body { font-family: Arial, sans-serif; color:#111827; margin:0; }
@@ -1169,7 +1187,7 @@ function printRecibo(d: Draft, opts: { total_cobro: number; total_imputado: numb
       <div class="x"><div class="l">X</div><div class="t">DOCUMENTO<br/>NO VALIDO<br/>COMO FACTURA</div></div>
       <div>
         <div class="meta-t">RECIBO</div>
-        <div class="meta-s">${escape(d.puntoVenta)} - ${escape(d.numero)}</div>
+        <div class="meta-s">${escape(pvPad)} - ${escape(nroPad)}</div>
         <div class="grid">
           <span class="lbl">FECHA:</span><span>${escape(fmtFecha(d.fecha))}</span>
           <span class="lbl">CUIT:</span><span>${escape(d.empresaCuit)}</span>

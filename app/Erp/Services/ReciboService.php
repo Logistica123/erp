@@ -569,7 +569,11 @@ class ReciboService
                 'fecha' => $recibo->fecha_emision->toDateString(),
                 'glosa' => sprintf('Recibo %s · Cobro factura #%d',
                     $recibo->numero_correlativo, $recibo->factura_venta_id),
-                'origen' => 'RECIBO',
+                // erp_asientos.origen es un ENUM que NO incluye 'RECIBO'. Usamos
+                // 'COBRO' (el origen semánticamente correcto del asiento que
+                // genera un recibo). origen_tabla='erp_recibos' identifica la
+                // fuente puntual.
+                'origen' => 'COBRO',
                 'origen_id' => $recibo->id,
                 'origen_tabla' => 'erp_recibos',
                 'usuario_id' => $usuario->id,
@@ -649,7 +653,7 @@ class ReciboService
                     'diario_id' => $original->diario_id,
                     'fecha' => today()->toDateString(),
                     'glosa' => sprintf('Reversa recibo %s — %s', $recibo->numero_correlativo, $motivo),
-                    'origen' => 'RECIBO_ANULADO',
+                    'origen' => 'COBRO', // ENUM erp_asientos no incluye RECIBO_ANULADO
                     'origen_id' => $recibo->id,
                     'origen_tabla' => 'erp_recibos',
                     'usuario_id' => $usuario->id,

@@ -98,6 +98,7 @@ export const sections: NavSection[] = [
       { to: '/erp/reportes/aging', label: 'Aging clientes/prov', icon: TrendingUp },
       { to: '/erp/reportes/comparativo', label: 'Comparativo períodos', icon: TrendingUp },
       { to: '/erp/reportes/analiticos', label: 'Analíticos (CC + Jurisdicción)', icon: TrendingUp },
+      { to: '/erp/reportes/saldos-consolidados', label: 'Saldos consolidados', icon: TrendingUp },
     ],
   },
   {

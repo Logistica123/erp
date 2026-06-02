@@ -54,6 +54,7 @@ import { LibroIvaComprasExportPage } from './pages/LibroIvaComprasExportPage';
 import { LibroIvaComprasImportPage } from './pages/LibroIvaComprasImportPage';
 import { LibroIvaComprasNoTomadasPage } from './pages/LibroIvaComprasNoTomadasPage';
 import { ReportesAnaliticosPage } from './pages/ReportesAnaliticosPage';
+import { SaldosConsolidadosPage } from './pages/SaldosConsolidadosPage';
 import { ImputarNcPage } from './pages/ImputarNcPage';
 import { AsientoDetallePage } from './pages/AsientoDetallePage';
 import { CentrosCostoPage } from './pages/CentrosCostoPage';
@@ -171,6 +172,7 @@ export default function App() {
               <Route path="/erp/reportes/aging" element={<AgingPage />} handle={{ crumb: 'Aging' }} />
               <Route path="/erp/reportes/comparativo" element={<ComparativoPage />} handle={{ crumb: 'Comparativo' }} />
               <Route path="/erp/reportes/analiticos" element={<ReportesAnaliticosPage />} handle={{ crumb: 'Analíticos (CC + Jurisdicción)' }} />
+              <Route path="/erp/reportes/saldos-consolidados" element={<SaldosConsolidadosPage />} handle={{ crumb: 'Saldos consolidados' }} />
 
               {/* F6 — ARCA Gateway */}
               <Route path="/erp/arca/dashboard" element={<ArcaDashboardPage />} handle={{ crumb: 'ARCA Gateway' }} />

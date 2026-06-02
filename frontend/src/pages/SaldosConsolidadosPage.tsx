@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Loader2, RefreshCw, TrendingUp, TrendingDown, Activity, X, Calendar } from 'lucide-react';
+import { Loader2, RefreshCw, TrendingUp, TrendingDown, Activity, X, Calendar, FileSpreadsheet, FileText } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -8,6 +8,7 @@ import { fmtMoney } from '@/lib/cn';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useApi } from '@/hooks/useApi';
+import { auth } from '@/lib/auth';
 
 // v1.37 — Pantalla del reporte de saldos consolidados (Deudores ventas + Deuda
 // compras + aging + top deudores/acreedores + drill-down).
@@ -100,6 +101,23 @@ export function SaldosConsolidadosPage() {
     refetch();
   };
 
+  const descargar = async (formato: 'xlsx' | 'pdf') => {
+    const url = `/api/erp/reportes/saldos-consolidados/export/${formato}?${qs}`;
+    const token = auth.getToken();
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) {
+      alert(`No se pudo descargar (${resp.status})`);
+      return;
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `saldos_consolidados_${data?.fecha_corte ?? fechaCorte}.${formato}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
   return (
     <div className="p-3 space-y-3">
       {/* Header */}
@@ -113,10 +131,18 @@ export function SaldosConsolidadosPage() {
             Deudores por ventas + Deuda con proveedores. Al corte de {data?.fecha_corte ?? '—'}.
           </div>
         </div>
-        <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isFetching}>
-          {isFetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-          Actualizar
-        </Button>
+        <div className="flex gap-1.5">
+          <Button variant="secondary" size="sm" onClick={() => descargar('xlsx')} disabled={!data}>
+            <FileSpreadsheet className="w-3 h-3" /> Excel
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => descargar('pdf')} disabled={!data}>
+            <FileText className="w-3 h-3" /> PDF
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleRefresh} disabled={isFetching}>
+            {isFetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            Actualizar
+          </Button>
+        </div>
       </div>
 
       {/* Filtros */}

@@ -595,6 +595,13 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/reportes/saldos-consolidados/auxiliar/{id}',
             [\App\Erp\Http\Controllers\Reportes\SaldosConsolidadosController::class, 'auxiliar'])
             ->whereNumber('id')->name('erp.reportes.saldos-consolidados.auxiliar');
+        // v1.37 Fase 2.4 — exports XLSX y PDF.
+        Route::get('/reportes/saldos-consolidados/export/xlsx',
+            [\App\Erp\Http\Controllers\Reportes\SaldosConsolidadosController::class, 'exportXlsx'])
+            ->name('erp.reportes.saldos-consolidados.xlsx');
+        Route::get('/reportes/saldos-consolidados/export/pdf',
+            [\App\Erp\Http\Controllers\Reportes\SaldosConsolidadosController::class, 'exportPdf'])
+            ->name('erp.reportes.saldos-consolidados.pdf');
 
         // ARCA — emisión (fachada sobre factura venta) — SPEC 03 §6.6
         Route::get('/facturas-venta/{id}/emision-status', [ArcaController::class, 'emisionStatus'])

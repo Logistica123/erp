@@ -11,6 +11,7 @@ import { useApi } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
+import { CategoriaModal } from '@/components/factura/CategoriaModal';
 
 type Factura = {
   id: number;
@@ -118,6 +119,8 @@ export function FacturacionPage() {
   const [eliminarFactura, setEliminarFactura] = useState<Factura | null>(null);
   // v1.51 — modal de reparto de base imponible IIBB por jurisdicción.
   const [jurisFactura, setJurisFactura] = useState<Factura | null>(null);
+  // v1.37 — modal de cambio de categoría FACTURA ⇄ EFECTIVO.
+  const [categoriaFactura, setCategoriaFactura] = useState<Factura | null>(null);
   // v1.27 — bulk select + edición.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [editarPeriodoOpen, setEditarPeriodoOpen] = useState(false);
@@ -134,6 +137,9 @@ export function FacturacionPage() {
   const puedeEliminarSinCae = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.eliminar_sin_cae');
   const puedeBorrarManual = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.borrar_masivo');
   const puedeBorrarMasivo = !!misPermisos?.some((p) => p.codigo === 'ventas.facturas.borrar_masivo');
+  // v1.37 — permisos categoría FACTURA/EFECTIVO.
+  const puedeEditarCategoria = !!misPermisos?.some((p) => p.codigo === 'facturas.editar_categoria');
+  const puedeCrearEfectivo = !!misPermisos?.some((p) => p.codigo === 'facturas.crear_efectivo');
   const puedeSeleccionar = puedeEditarPeriodo || puedeBorrarMasivo;
   const { data: periodosDistinct } = useApi<string[]>(
     ['facturas-venta-periodos-trabajados'],
@@ -379,7 +385,22 @@ export function FacturacionPage() {
                       <td className="px-4 py-3 font-mono text-[12px] text-gray-800 whitespace-nowrap">
                         {formatNro(f.tipo_codigo, f.letra, f.pto_vta, f.numero)}
                         {f.categoria === 'EFECTIVO' && (
-                          <Badge variant="warning" className="ml-1.5">EFECTIVO</Badge>
+                          puedeEditarCategoria ? (
+                            <button onClick={() => setCategoriaFactura(f)}
+                                    title="Cambiar categoría"
+                                    className="ml-1.5 cursor-pointer">
+                              <Badge variant="warning">EFECTIVO</Badge>
+                            </button>
+                          ) : (
+                            <Badge variant="warning" className="ml-1.5">EFECTIVO</Badge>
+                          )
+                        )}
+                        {f.categoria !== 'EFECTIVO' && puedeEditarCategoria && (
+                          <button onClick={() => setCategoriaFactura(f)}
+                                  title="Marcar como EFECTIVO"
+                                  className="ml-1.5 text-[10px] text-azure opacity-50 hover:opacity-100 cursor-pointer">
+                            ⓘ
+                          </button>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -486,6 +507,17 @@ export function FacturacionPage() {
         onSuccess={() => {
           setJurisFactura(null);
           qc.invalidateQueries({ queryKey: ['facturas-venta'] });
+        }}
+      />
+      <CategoriaModal
+        factura={categoriaFactura}
+        tipo="venta"
+        puedeCrearEfectivo={puedeCrearEfectivo}
+        onClose={() => setCategoriaFactura(null)}
+        onSuccess={() => {
+          setCategoriaFactura(null);
+          qc.invalidateQueries({ queryKey: ['facturas-venta'] });
+          qc.invalidateQueries({ queryKey: ['saldos-consolidados'] });
         }}
       />
       {editarPeriodoOpen && (

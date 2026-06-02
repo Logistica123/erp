@@ -97,6 +97,8 @@ export function FacturaCompraManualPage() {
     observaciones: '',
     periodo_trabajado_texto: '',
     jurisdiccion_codigo: '',
+    // v1.37 — FACTURA (default) vs EFECTIVO (gestión interna).
+    categoria: 'FACTURA' as 'FACTURA' | 'EFECTIVO',
   });
 
   // Auto-default tipo + periodo.
@@ -208,6 +210,7 @@ export function FacturaCompraManualPage() {
       observaciones: form.observaciones || undefined,
       periodo_trabajado_texto: form.periodo_trabajado_texto || undefined,
       jurisdiccion_codigo: form.jurisdiccion_codigo || undefined,
+      categoria: form.categoria,
       // v1.28 — si el CUIT no está ACTIVO, mandamos el motivo de override.
       apoc_override_motivo: (apocEstado && apocEstado !== 'ACTIVO' && apocOverrideMotivo.trim().length >= 10)
         ? apocOverrideMotivo.trim() : undefined,
@@ -299,6 +302,34 @@ export function FacturaCompraManualPage() {
               Mismo modelo que las importadas (<code>origen=MANUAL</code>). Si el contador después
               importa el mismo período, se detecta el match y se reporta como conflicto en el resumen.
             </div>
+          </div>
+
+          {/* v1.37 — Tipo de operación (FACTURA default / EFECTIVO gestión). */}
+          <div className="border border-line rounded p-2 bg-surface-row">
+            <div className="text-[11px] text-ink-muted mb-1">Tipo de operación</div>
+            <div className="flex gap-2 text-[11.5px]">
+              <label className={`flex-1 border rounded p-2 cursor-pointer ${
+                form.categoria === 'FACTURA' ? 'border-azure bg-azure-soft/30' : 'border-line'
+              }`}>
+                <input type="radio" name="cat" checked={form.categoria === 'FACTURA'}
+                  onChange={() => setForm({ ...form, categoria: 'FACTURA' })} className="mr-1.5" />
+                <strong>Operación con factura</strong>
+                <div className="text-[10.5px] text-ink-muted mt-0.5">Aparece en Libro IVA Compras y reportes fiscales.</div>
+              </label>
+              <label className={`flex-1 border rounded p-2 cursor-pointer ${
+                form.categoria === 'EFECTIVO' ? 'border-warning bg-warning-bg/40' : 'border-line'
+              }`}>
+                <input type="radio" name="cat" checked={form.categoria === 'EFECTIVO'}
+                  onChange={() => setForm({ ...form, categoria: 'EFECTIVO' })} className="mr-1.5" />
+                <strong>Operación en efectivo</strong>
+                <div className="text-[10.5px] text-ink-muted mt-0.5">Gestión interna — NO va al Libro IVA Compras ni reportes fiscales.</div>
+              </label>
+            </div>
+            {form.categoria === 'EFECTIVO' && (
+              <div className="mt-2 text-[10.5px] text-warning border-t border-warning/30 pt-1">
+                ⚠ Esta operación no se va a incluir en el Libro IVA Compras. Solo queda en gestión interna.
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">

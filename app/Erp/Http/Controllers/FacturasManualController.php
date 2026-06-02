@@ -102,6 +102,8 @@ class FacturasManualController
             'periodo_trabajado_texto' => ['nullable', 'string', 'max:20'],
             'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
             'concepto_afip' => ['nullable', 'integer', 'min:1', 'max:3'],
+            // v1.37 — FACTURA (default, va al Libro IVA) vs EFECTIVO (gestión).
+            'categoria' => ['nullable', 'in:FACTURA,EFECTIVO'],
             // v1.39 — PDF original (AFIP) opcional. Hasta 8MB.
             'pdf' => ['nullable', 'file', 'mimes:pdf', 'max:8192'],
         ]);
@@ -244,6 +246,7 @@ class FacturasManualController
             'estado' => 'EMITIDA',
             'periodo_trabajado_texto' => $data['periodo_trabajado_texto'] ?? null,
             'jurisdiccion_codigo' => $data['jurisdiccion_codigo'] ?? null,
+            'categoria' => $this->validarCategoria($request, $data['categoria'] ?? null),
             'centro_costo_id' => $ccId,
             'verificada_arca' => 0,
             'created_at' => now(),
@@ -329,6 +332,7 @@ class FacturasManualController
             'observaciones' => ['nullable', 'string'],
             'periodo_trabajado_texto' => ['nullable', 'string', 'max:20'],
             'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
+            'categoria' => ['nullable', 'in:FACTURA,EFECTIVO'],
             // v1.28 — override APOC con motivo (sólo si el CUIT no está ACTIVO).
             'apoc_override_motivo' => ['nullable', 'string', 'min:10', 'max:500'],
         ]);
@@ -512,6 +516,7 @@ class FacturasManualController
             'observaciones' => $data['observaciones'] ?? null,
             'periodo_trabajado_texto' => $data['periodo_trabajado_texto'] ?? null,
             'jurisdiccion_codigo' => $data['jurisdiccion_codigo'] ?? null,
+            'categoria' => $this->validarCategoria($request, $data['categoria'] ?? null),
             'verificada_arca' => 0,
             'created_by_user_id' => $request->user()->id,
             // v1.28 — tracking APOC al momento de cargar.
@@ -703,6 +708,24 @@ class FacturasManualController
     private function permiso(Request $request, string $codigo): bool
     {
         return (bool) ($request->user()?->erpPerfil?->tienePermiso($codigo) ?? false);
+    }
+
+    /**
+     * v1.37 — Resuelve la categoría a guardar:
+     *  - null o ausente → 'FACTURA' (default seguro).
+     *  - 'EFECTIVO'     → exige permiso facturas.crear_efectivo; si no, aborta 403.
+     *  - 'FACTURA'      → directo.
+     */
+    private function validarCategoria(Request $request, ?string $categoria): string
+    {
+        $cat = $categoria ?: 'FACTURA';
+        if ($cat === 'EFECTIVO' && ! $this->permiso($request, 'facturas.crear_efectivo')) {
+            abort(response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO_EFECTIVO',
+                'message' => 'Falta permiso facturas.crear_efectivo para registrar una operación EFECTIVO.',
+            ]], 403));
+        }
+        return $cat;
     }
 
     private function sinPermiso(): JsonResponse

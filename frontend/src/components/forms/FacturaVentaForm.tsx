@@ -69,6 +69,8 @@ export type FacturaVentaFormValues = {
   periodo_trabajado_texto: string;
   jurisdiccion_codigo: string;
   concepto_afip: number;
+  // v1.37 — operación FACTURA (default) vs EFECTIVO (gestión interna, no fiscal).
+  categoria: 'FACTURA' | 'EFECTIVO';
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -95,6 +97,7 @@ export const defaultFormValues: FacturaVentaFormValues = {
   periodo_trabajado_texto: '',
   jurisdiccion_codigo: '',
   concepto_afip: 2,
+  categoria: 'FACTURA',
 };
 
 type PdfExtractResp = {
@@ -371,6 +374,7 @@ export function FacturaVentaForm({
         append('periodo_trabajado_texto', form.periodo_trabajado_texto);
         append('jurisdiccion_codigo', form.jurisdiccion_codigo);
         append('concepto_afip', form.concepto_afip);
+        append('categoria', form.categoria);
         fd.append('pdf', pdfFile);
         return api.post('/api/erp/facturas-venta/manual', fd);
       }
@@ -403,6 +407,7 @@ export function FacturaVentaForm({
         periodo_trabajado_texto: form.periodo_trabajado_texto || undefined,
         jurisdiccion_codigo: form.jurisdiccion_codigo || undefined,
         concepto_afip: form.concepto_afip,
+        categoria: form.categoria,
       });
     },
     onSuccess: (r) => {
@@ -498,6 +503,35 @@ export function FacturaVentaForm({
           </div>
         </div>
       )}
+
+      {/* v1.37 — Toggle FACTURA / EFECTIVO. FACTURA es el default. */}
+      <div className="border border-line rounded p-2 bg-surface-row">
+        <div className="text-[11px] text-ink-muted mb-1">Tipo de operación</div>
+        <div className="flex gap-2 text-[11.5px]">
+          <label className={`flex-1 border rounded p-2 cursor-pointer ${
+            form.categoria === 'FACTURA' ? 'border-azure bg-azure-soft/30' : 'border-line'
+          }`}>
+            <input type="radio" name="cat" checked={form.categoria === 'FACTURA'}
+              onChange={() => setForm({ ...form, categoria: 'FACTURA' })} className="mr-1.5" />
+            <strong>Operación con factura</strong>
+            <div className="text-[10.5px] text-ink-muted mt-0.5">Aparece en Libro IVA y reportes fiscales (F.8001, F.2002).</div>
+          </label>
+          <label className={`flex-1 border rounded p-2 cursor-pointer ${
+            form.categoria === 'EFECTIVO' ? 'border-warning bg-warning-bg/40' : 'border-line'
+          }`}>
+            <input type="radio" name="cat" checked={form.categoria === 'EFECTIVO'}
+              onChange={() => setForm({ ...form, categoria: 'EFECTIVO' })} className="mr-1.5" />
+            <strong>Operación en efectivo</strong>
+            <div className="text-[10.5px] text-ink-muted mt-0.5">Gestión interna — NO va al Libro IVA ni reportes fiscales.</div>
+          </label>
+        </div>
+        {form.categoria === 'EFECTIVO' && (
+          <div className="mt-2 text-[10.5px] text-warning border-t border-warning/30 pt-1">
+            ⚠ Esta operación no se va a incluir en el Libro IVA Ventas ni en F.8001/F.2002.
+            Solo queda registrada en gestión interna.
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-3 gap-3">
         <SelectField label="Tipo *" value={String(form.tipo_comprobante_id)}

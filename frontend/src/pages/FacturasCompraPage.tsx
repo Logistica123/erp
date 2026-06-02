@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factura/PeriodoTrabajado';
 import { OpExternaCell, FechaPagoCell } from '@/components/factura/PagoInfoCells';
+import { CategoriaModal } from '@/components/factura/CategoriaModal';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange, FileDown } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -199,6 +200,8 @@ export function FacturasCompraPage() {
   // v1.22 §13 — bulk select.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [borrarMasivoOpen, setBorrarMasivoOpen] = useState(false);
+  // v1.37 — modal cambio de categoría.
+  const [categoriaFC, setCategoriaFC] = useState<FacturaCompra | null>(null);
 
   // v1.22 §13 + v1.27 — chequeo de permisos.
   const { data: misPermisos } = useApi<Array<{ codigo: string; sensible: boolean }>>(
@@ -207,6 +210,9 @@ export function FacturasCompraPage() {
   );
   const puedeBorrarMasivo = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.borrar_masivo');
   const puedeEditarPeriodo = !!misPermisos?.some((p) => p.codigo === 'compras.facturas.editar');
+  // v1.37 — permisos categoría.
+  const puedeEditarCategoria = !!misPermisos?.some((p) => p.codigo === 'facturas.editar_categoria');
+  const puedeCrearEfectivo = !!misPermisos?.some((p) => p.codigo === 'facturas.crear_efectivo');
 
   // v1.27 — dropdown del filtro: períodos distinct cargados de la BD.
   const { data: periodosDistinct } = useApi<string[]>(
@@ -273,7 +279,22 @@ export function FacturasCompraPage() {
           <div className="font-medium">
             {r.letra} {r.tipo_codigo} — {String(r.punto_venta).padStart(5, '0')}-{String(r.numero).padStart(8, '0')}
             {r.categoria === 'EFECTIVO' && (
-              <Badge variant="warning" className="ml-1.5">EFECTIVO</Badge>
+              puedeEditarCategoria ? (
+                <button onClick={() => setCategoriaFC(r)}
+                        title="Cambiar categoría"
+                        className="ml-1.5 cursor-pointer">
+                  <Badge variant="warning">EFECTIVO</Badge>
+                </button>
+              ) : (
+                <Badge variant="warning" className="ml-1.5">EFECTIVO</Badge>
+              )
+            )}
+            {r.categoria !== 'EFECTIVO' && puedeEditarCategoria && (
+              <button onClick={() => setCategoriaFC(r)}
+                      title="Marcar como EFECTIVO"
+                      className="ml-1.5 text-[10px] text-azure opacity-50 hover:opacity-100 cursor-pointer">
+                ⓘ
+              </button>
             )}
           </div>
           {r.cae && <div className="text-[10.5px] text-ink-muted">CAE {r.cae}</div>}
@@ -489,6 +510,18 @@ export function FacturasCompraPage() {
       {controlOpen && <ControlarConfirm factura={controlOpen} onClose={() => setControlOpen(null)} />}
       {observarOpen && <MotivoModal factura={observarOpen} action="observar" onClose={() => setObservarOpen(null)} />}
       {rechazarOpen && <MotivoModal factura={rechazarOpen} action="rechazar" onClose={() => setRechazarOpen(null)} />}
+      <CategoriaModal
+        factura={categoriaFC}
+        tipo="compra"
+        puedeCrearEfectivo={puedeCrearEfectivo}
+        onClose={() => setCategoriaFC(null)}
+        onSuccess={() => {
+          setCategoriaFC(null);
+          // Invalida listado + reporte consolidado.
+          // Si hay un useInvalidate global lo invalidamos; si no, react-query
+          // refetcha al volver a montar.
+        }}
+      />
       {borrarMasivoOpen && (
         <BorrarMasivoModal
           facturas={seleccionadasObj}

@@ -582,6 +582,15 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/reportes/gastos-por-jurisdiccion', [ReportesV14Controller::class, 'gastosPorJurisdiccion'])
             ->name('erp.reportes.gastos-por-jurisdiccion');
 
+        // v1.37 — Reporte de saldos consolidados (deudores ventas + deuda compras
+        // + aging + top deudores/acreedores + drill-down por auxiliar).
+        Route::get('/reportes/saldos-consolidados',
+            [\App\Erp\Http\Controllers\Reportes\SaldosConsolidadosController::class, 'index'])
+            ->name('erp.reportes.saldos-consolidados');
+        Route::get('/reportes/saldos-consolidados/auxiliar/{id}',
+            [\App\Erp\Http\Controllers\Reportes\SaldosConsolidadosController::class, 'auxiliar'])
+            ->whereNumber('id')->name('erp.reportes.saldos-consolidados.auxiliar');
+
         // ARCA — emisión (fachada sobre factura venta) — SPEC 03 §6.6
         Route::get('/facturas-venta/{id}/emision-status', [ArcaController::class, 'emisionStatus'])
             ->whereNumber('id')->name('erp.fv.emision-status');

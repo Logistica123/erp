@@ -485,6 +485,7 @@ class FacturasVentaController extends Controller
                 'f.imp_total',
                 'f.estado', 'f.origen', 'f.verificada_arca',
                 'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo',
+                'f.categoria',
                 'asi.numero as asiento_numero',
             ]);
 
@@ -571,7 +572,7 @@ class FacturasVentaController extends Controller
                 'f.id', 'f.numero', 'f.cae', 'f.fecha_vto_cae', 'f.fecha_emision',
                 'f.imp_neto_gravado', 'f.imp_iva', 'f.imp_total', 'f.origen', 'f.estado',
                 'f.verificada_arca', 'f.es_fce', 'f.created_at',
-                'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo',
+                'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo', 'f.categoria',
                 'tc.codigo_interno as tipo_codigo', 'tc.nombre as tipo_nombre', 'tc.letra',
                 'tc.clase as tipo_clase', 'tc.signo as tipo_signo',
                 'pv.numero as pto_vta',
@@ -902,6 +903,72 @@ class FacturasVentaController extends Controller
             'distribucion' => FacturaVentaJurisdiccion::where('factura_venta_id', $factura->id)
                 ->orderByDesc('base_imponible')->get(['id', 'jurisdiccion_codigo', 'base_imponible']),
         ]]);
+    }
+
+    /**
+     * v1.37 — PATCH categoria de una factura venta (FACTURA ⇄ EFECTIVO).
+     * Bloqueos: asiento CONTABILIZADO o recibos NO ANULADOS imputados.
+     * Para pasar a EFECTIVO requiere ADEMAS permiso facturas.crear_efectivo.
+     */
+    public function patchCategoria(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'facturas.editar_categoria');
+        $data = $request->validate([
+            'categoria' => ['required', 'in:FACTURA,EFECTIVO'],
+            'motivo' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $factura = FacturaVenta::where('empresa_id', $empresaId)->findOrFail($id);
+        $old = $factura->categoria;
+        $new = $data['categoria'];
+
+        if ($old === $new) {
+            return response()->json(['ok' => true, 'data' => $factura]);
+        }
+
+        // Bloqueo 1: asiento CONTABILIZADO firme.
+        if ($factura->asiento_id) {
+            $estadoAs = DB::table('erp_asientos')->where('id', $factura->asiento_id)->value('estado');
+            if ($estadoAs === 'CONTABILIZADO') {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'ASIENTO_CONTABILIZADO',
+                    'message' => "La factura tiene asiento #{$factura->asiento_id} CONTABILIZADO. Anular (reversa) antes de cambiar la categoría.",
+                ]], 409);
+            }
+        }
+
+        // Bloqueo 2: recibos NO ANULADOS imputados a esta factura.
+        $imputado = DB::table('erp_recibos_comprobantes_imputados as rci')
+            ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
+            ->where('rci.factura_venta_id', $id)
+            ->where('r.estado', '<>', 'ANULADO')
+            ->exists();
+        if ($imputado) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'TIENE_RECIBOS',
+                'message' => 'La factura tiene recibos imputados activos. Anular los recibos antes de cambiar la categoría.',
+            ]], 409);
+        }
+
+        // Para marcar como EFECTIVO requiere permiso extra.
+        if ($new === 'EFECTIVO'
+            && ! ($request->user()?->erpPerfil?->tienePermiso('facturas.crear_efectivo'))) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO_EFECTIVO',
+                'message' => 'Falta permiso facturas.crear_efectivo para marcar la factura como EFECTIVO.',
+            ]], 403);
+        }
+
+        $factura->update(['categoria' => $new]);
+        $this->audit->log('categoria_editada', $factura,
+            ['categoria' => $old],
+            ['categoria' => $new],
+            sprintf('Factura venta #%d: categoría %s → %s%s',
+                $id, $old, $new, isset($data['motivo']) ? " (motivo: {$data['motivo']})" : ''),
+        );
+
+        return response()->json(['ok' => true, 'data' => $factura->fresh()]);
     }
 
     private function mustHave(Request $request, string $codigo): void

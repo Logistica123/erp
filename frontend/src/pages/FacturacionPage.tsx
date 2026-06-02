@@ -41,6 +41,8 @@ type Factura = {
   // v1.27 — exposed by backend listing
   periodo_trabajado_texto?: string | null;
   jurisdiccion_codigo?: string | null;
+  // v1.37 — operacion FACTURA (default, sin badge) vs EFECTIVO (badge ambar).
+  categoria?: 'FACTURA' | 'EFECTIVO';
 };
 
 type Resp = { data: Factura[] };
@@ -376,6 +378,9 @@ export function FacturacionPage() {
                       </td>
                       <td className="px-4 py-3 font-mono text-[12px] text-gray-800 whitespace-nowrap">
                         {formatNro(f.tipo_codigo, f.letra, f.pto_vta, f.numero)}
+                        {f.categoria === 'EFECTIVO' && (
+                          <Badge variant="warning" className="ml-1.5">EFECTIVO</Badge>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{f.cliente_nombre}</div>

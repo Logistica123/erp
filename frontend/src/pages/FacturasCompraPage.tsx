@@ -53,6 +53,8 @@ type FacturaCompra = {
   periodo_trabajado_texto: string | null;
   jurisdiccion_codigo: string | null;
   centro_costo_id: number | null;
+  // v1.37 — FACTURA (default, sin badge) vs EFECTIVO (badge ámbar).
+  categoria?: 'FACTURA' | 'EFECTIVO';
   // v1.40 — OP externa + fecha de pago (referenciales, opcionales).
   op_externa: string | null;
   fecha_pago: string | null;
@@ -268,7 +270,12 @@ export function FacturasCompraPage() {
     { key: 'comprobante', header: 'Comprobante', width: '180px',
       render: (r) => (
         <div>
-          <div className="font-medium">{r.letra} {r.tipo_codigo} — {String(r.punto_venta).padStart(5, '0')}-{String(r.numero).padStart(8, '0')}</div>
+          <div className="font-medium">
+            {r.letra} {r.tipo_codigo} — {String(r.punto_venta).padStart(5, '0')}-{String(r.numero).padStart(8, '0')}
+            {r.categoria === 'EFECTIVO' && (
+              <Badge variant="warning" className="ml-1.5">EFECTIVO</Badge>
+            )}
+          </div>
           {r.cae && <div className="text-[10.5px] text-ink-muted">CAE {r.cae}</div>}
         </div>
       ) },

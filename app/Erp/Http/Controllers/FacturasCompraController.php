@@ -54,6 +54,7 @@ class FacturasCompraController extends Controller
                 // Addendum v1.13 + v1.14 — campos enriquecidos del import
                 'f.no_tomada', 'f.cliente_auxiliar_id', 'f.tipo_gasto',
                 'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo', 'f.centro_costo_id',
+                'f.categoria',
                 // v1.40 — OP externa + fecha de pago (importer + inline edit).
                 'f.op_externa', 'f.fecha_pago',
             ]);
@@ -660,6 +661,7 @@ class FacturasCompraController extends Controller
                 'f.imp_total',
                 'f.estado', 'f.origen', 'f.no_tomada',
                 'f.tipo_gasto', 'f.periodo_trabajado_texto', 'f.jurisdiccion_codigo',
+                'f.categoria',
                 'f.op_externa', 'f.fecha_pago',
                 'f.observaciones', 'asi.numero as asiento_numero',
             ]);
@@ -752,6 +754,69 @@ class FacturasCompraController extends Controller
             return "{$m[3]}/{$m[2]}/{$m[1]}";
         }
         return $iso;
+    }
+
+    /**
+     * v1.37 — PATCH categoria de factura compra (FACTURA ⇄ EFECTIVO).
+     * Bloqueos: asiento CONTABILIZADO firme o imputada por OP no anulada.
+     */
+    public function patchCategoria(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'facturas.editar_categoria');
+        $data = $request->validate([
+            'categoria' => ['required', 'in:FACTURA,EFECTIVO'],
+            'motivo' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        $factura = FacturaCompra::where('empresa_id', $empresaId)->findOrFail($id);
+        $old = $factura->categoria;
+        $new = $data['categoria'];
+
+        if ($old === $new) {
+            return response()->json(['ok' => true, 'data' => $factura]);
+        }
+
+        if ($factura->asiento_id) {
+            $estadoAs = DB::table('erp_asientos')->where('id', $factura->asiento_id)->value('estado');
+            if ($estadoAs === 'CONTABILIZADO') {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'ASIENTO_CONTABILIZADO',
+                    'message' => "La factura tiene asiento #{$factura->asiento_id} CONTABILIZADO. Anular (reversa) antes de cambiar la categoría.",
+                ]], 409);
+            }
+        }
+
+        $imputada = DB::table('erp_op_items as opi')
+            ->join('erp_ordenes_pago as op', 'op.id', '=', 'opi.op_id')
+            ->where('opi.tipo_item', 'FACTURA_COMPRA')
+            ->where('opi.comprobante_id', $id)
+            ->where('op.estado', '<>', 'ANULADA')
+            ->exists();
+        if ($imputada) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'TIENE_PAGOS',
+                'message' => 'La factura está imputada en una OP activa. Anular la OP antes de cambiar la categoría.',
+            ]], 409);
+        }
+
+        if ($new === 'EFECTIVO'
+            && ! ($request->user()?->erpPerfil?->tienePermiso('facturas.crear_efectivo'))) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'NO_AUTORIZADO_EFECTIVO',
+                'message' => 'Falta permiso facturas.crear_efectivo para marcar la factura como EFECTIVO.',
+            ]], 403);
+        }
+
+        $factura->update(['categoria' => $new]);
+        $this->audit->log('categoria_editada', $factura,
+            ['categoria' => $old],
+            ['categoria' => $new],
+            sprintf('Factura compra #%d: categoría %s → %s%s',
+                $id, $old, $new, isset($data['motivo']) ? " (motivo: {$data['motivo']})" : ''),
+        );
+
+        return response()->json(['ok' => true, 'data' => $factura->fresh()]);
     }
 
     private function mustHave(Request $request, string $codigo): void

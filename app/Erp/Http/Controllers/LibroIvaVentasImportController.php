@@ -212,7 +212,8 @@ class LibroIvaVentasImportController
         $protegidasIds = $protegidas->pluck('id')->all();
         $protegidasAsientoIds = $protegidas->pluck('asiento_id')->filter()->unique()->all();
 
-        DB::transaction(function () use ($imp, $motivo, $cascada, $borrables, $protegidasIds, $protegidasAsientoIds, $countBorrables) {
+        try {
+            DB::transaction(function () use ($imp, $motivo, $cascada, $borrables, $protegidasIds, $protegidasAsientoIds, $countBorrables) {
             // 1) Desvincular SIEMPRE las facturas WSFE_ERP del import (sobreviven
             //    como facturas sueltas, conservando su asiento).
             if (! empty($protegidasIds)) {
@@ -233,6 +234,34 @@ class LibroIvaVentasImportController
                 $asientoIds = $borrables->pluck('asiento_id')->filter()->unique()
                     ->reject(fn ($aid) => in_array($aid, $protegidasAsientoIds, true))
                     ->values()->all();
+
+                // Imputaciones en recibos:
+                //  - Si hay imputaciones en recibos EMITIDO/CONCILIADO → abortar
+                //    con error 409 (esos recibos ya tienen valor contable firme;
+                //    el operador debe anular el recibo primero).
+                //  - Si hay imputaciones en recibos BORRADOR → borrarlas (el
+                //    borrador es editable; las líneas a estas facturas pierden
+                //    sentido al borrar las facturas).
+                $imputFirmes = DB::table('erp_recibos_comprobantes_imputados as rci')
+                    ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
+                    ->whereIn('rci.factura_venta_id', $facturaIds)
+                    ->whereNotIn('r.estado', ['BORRADOR', 'ANULADO'])
+                    ->select('r.id', 'r.numero_correlativo', 'r.estado')
+                    ->distinct()
+                    ->get();
+                if ($imputFirmes->isNotEmpty()) {
+                    $detalle = $imputFirmes->map(fn ($r) => "#{$r->id} {$r->numero_correlativo} ({$r->estado})")->implode(', ');
+                    throw new \DomainException(
+                        "IMPUTACIONES_FIRMES: facturas del import están imputadas en recibos firmes: {$detalle}. " .
+                        "Anular esos recibos antes de borrar el import."
+                    );
+                }
+                // Borrar imputaciones de borradores (sin valor contable).
+                DB::table('erp_recibos_comprobantes_imputados as rci')
+                    ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
+                    ->whereIn('rci.factura_venta_id', $facturaIds)
+                    ->where('r.estado', 'BORRADOR')
+                    ->delete();
 
                 DB::table('erp_facturas_venta')
                     ->whereIn('id', $facturaIds)
@@ -255,7 +284,10 @@ class LibroIvaVentasImportController
                 . 'Motivo: ' . ($motivo ?: 'sin motivo')
             );
             $imp->delete();
-        });
+            });
+        } catch (DomainException $e) {
+            return $this->errorDomain($e);
+        }
 
         return response()->json(null, 204);
     }
@@ -276,6 +308,7 @@ class LibroIvaVentasImportController
         $code = explode(':', $e->getMessage(), 2)[0];
         $status = match ($code) {
             'ARCHIVO_DUPLICADO' => 409,
+            'IMPUTACIONES_FIRMES' => 409,
             'PERIODO_CERRADO' => 422,
             'PERIODO_NO_ENCONTRADO' => 404,
             default => 422,

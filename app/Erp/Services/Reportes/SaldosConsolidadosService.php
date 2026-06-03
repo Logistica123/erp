@@ -125,24 +125,42 @@ class SaldosConsolidadosService
     // ------------------------------------------------------------------------
 
     /**
-     * Subquery escalar que devuelve el saldo abierto de una factura venta.
-     * Considera: imp_total - cobros (legacy v1.15) - NC imputadas - recibos
-     * (multi-comprobante v1.32). Lo que NO está ANULADO suma.
+     * Subquery escalar que devuelve el saldo abierto de un comprobante de
+     * venta, ya con SIGNO aplicado: facturas (signo=+1) suman como deuda del
+     * cliente, NC (signo=-1) restan (son créditos del cliente a aplicar).
+     *
+     * Para que el reporte de Deudores cuadre como "facturas pendientes − NC
+     * pendientes" hay que tratar cada tipo distinto:
+     *   - FACTURA (signo=+1): saldo = imp_total − cobros − NC_imputadas_a_ella − recibos.
+     *   - NC      (signo=-1): saldo = imp_total − imputaciones_DESDE_la_NC (uso
+     *     erp_imputaciones_nc.nc_id, no factura_id). Y se multiplica por -1
+     *     para que SUMar deje el efecto de restar.
+     *
+     * El JOIN a erp_tipos_comprobante debe estar disponible en el caller con
+     * el alias `tc`.
      */
-    public function saldoFacturaVentaExpr(string $alias = 'fv'): string
+    public function saldoFacturaVentaExpr(string $alias = 'fv', string $tcAlias = 'tc'): string
     {
-        return "(
-            {$alias}.imp_total
-            - COALESCE((SELECT SUM(ci.importe) FROM erp_cobro_items ci
-                        WHERE ci.factura_id = {$alias}.id AND ci.tipo_item = 'FACTURA_VENTA'), 0)
-            - COALESCE((SELECT SUM(inc.importe) FROM erp_imputaciones_nc inc
-                        WHERE inc.factura_id = {$alias}.id), 0)
-            - COALESCE((SELECT SUM(rci.monto_imputado)
-                        FROM erp_recibos_comprobantes_imputados rci
-                        JOIN erp_recibos r ON r.id = rci.recibo_id
-                        WHERE rci.factura_venta_id = {$alias}.id
-                          AND r.estado <> 'ANULADO'), 0)
-        )";
+        return "(CASE WHEN {$tcAlias}.signo > 0 THEN
+            (
+                {$alias}.imp_total
+                - COALESCE((SELECT SUM(ci.importe) FROM erp_cobro_items ci
+                            WHERE ci.factura_id = {$alias}.id AND ci.tipo_item = 'FACTURA_VENTA'), 0)
+                - COALESCE((SELECT SUM(inc.importe) FROM erp_imputaciones_nc inc
+                            WHERE inc.factura_id = {$alias}.id), 0)
+                - COALESCE((SELECT SUM(rci.monto_imputado)
+                            FROM erp_recibos_comprobantes_imputados rci
+                            JOIN erp_recibos r ON r.id = rci.recibo_id
+                            WHERE rci.factura_venta_id = {$alias}.id
+                              AND r.estado <> 'ANULADO'), 0)
+            )
+        ELSE
+            -1 * (
+                {$alias}.imp_total
+                - COALESCE((SELECT SUM(inc2.importe) FROM erp_imputaciones_nc inc2
+                            WHERE inc2.nc_id = {$alias}.id), 0)
+            )
+        END)";
     }
 
     /**
@@ -170,9 +188,12 @@ class SaldosConsolidadosService
 
     private function widgetVentas(int $empresaId, Carbon $fechaCorte, int $monedaId, bool $incluirEfectivo): array
     {
-        $saldoExpr = $this->saldoFacturaVentaExpr('fv');
+        // JOIN a tipos_comprobante para que saldoFacturaVentaExpr pueda
+        // aplicar el signo (NC restan).
+        $saldoExpr = $this->saldoFacturaVentaExpr('fv', 'tc');
 
         $rows = DB::table('erp_facturas_venta as fv')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
             ->where('fv.empresa_id', $empresaId)
             ->where('fv.moneda_id', $monedaId)
             ->whereIn('fv.estado', self::ESTADOS_VENTA_ABIERTA)
@@ -185,7 +206,7 @@ class SaldosConsolidadosService
             ])
             ->get();
 
-        return $this->resumirPorCategoria($rows);
+        return $this->resumirPorCategoria($rows, true);
     }
 
     private function widgetCompras(int $empresaId, Carbon $fechaCorte, int $monedaId, bool $incluirEfectivo): array
@@ -209,20 +230,27 @@ class SaldosConsolidadosService
     }
 
     /**
-     * Acumula filas con (categoria, saldo) en totales global / efectivo y
-     * cuenta de operaciones con saldo > 0.
+     * Acumula filas con (categoria, saldo) en totales global / efectivo.
+     *
+     * Si `permitirNegativos=true` (caso ventas, donde NC vienen con saldo
+     * negativo por signo), suma todo incluyendo restos. La cantidad cuenta
+     * solo operaciones con saldo > 0 (facturas/comprobantes con deuda real,
+     * no NC que ya restaron).
+     *
+     * Si false (caso compras, sin NC con signo), solo suma saldos > 0.
      */
-    private function resumirPorCategoria(Collection $rows): array
+    private function resumirPorCategoria(Collection $rows, bool $permitirNegativos = false): array
     {
         $total = 0.0;
         $efectivo = 0.0;
         $cantidad = 0;
         foreach ($rows as $r) {
             $saldo = round((float) $r->saldo, 2);
-            if ($saldo <= 0.0) continue; // pueden venir con saldo 0 (totalmente imputadas)
+            if (! $permitirNegativos && $saldo <= 0.0) continue;
+            if ($permitirNegativos && abs($saldo) < 0.005) continue;
             $total += $saldo;
             if ($r->categoria === 'EFECTIVO') $efectivo += $saldo;
-            $cantidad++;
+            if ($saldo > 0.0) $cantidad++;
         }
         return [
             'total'                 => round($total, 2),
@@ -238,9 +266,10 @@ class SaldosConsolidadosService
      */
     private function aging(string $tipo, int $empresaId, Carbon $fechaCorte, int $monedaId, bool $incluirEfectivo): array
     {
-        if ($tipo === 'venta') {
+        $esVenta = $tipo === 'venta';
+        if ($esVenta) {
             $tabla = 'erp_facturas_venta'; $alias = 'fv';
-            $saldoExpr = $this->saldoFacturaVentaExpr($alias);
+            $saldoExpr = $this->saldoFacturaVentaExpr($alias, 'tc');
             $estados = self::ESTADOS_VENTA_ABIERTA;
         } else {
             $tabla = 'erp_facturas_compra'; $alias = 'fc';
@@ -249,6 +278,7 @@ class SaldosConsolidadosService
         }
 
         $rows = DB::table("{$tabla} as {$alias}")
+            ->when($esVenta, fn ($q) => $q->join('erp_tipos_comprobante as tc', 'tc.id', '=', "{$alias}.tipo_comprobante_id"))
             ->where("{$alias}.empresa_id", $empresaId)
             ->where("{$alias}.moneda_id", $monedaId)
             ->whereIn("{$alias}.estado", $estados)
@@ -262,7 +292,8 @@ class SaldosConsolidadosService
             ])
             ->get();
 
-        // Acumulamos por bucket.
+        // Acumulamos por bucket. Para ventas el saldo puede ser negativo (NC)
+        // y se acepta como resta del bucket. Para compras todo > 0.
         $buckets = array_fill_keys(array_keys(self::BUCKETS), [
             'total' => 0.0, 'efectivo' => 0.0, 'cantidad' => 0,
         ]);
@@ -270,7 +301,11 @@ class SaldosConsolidadosService
 
         foreach ($rows as $r) {
             $saldo = round((float) $r->saldo, 2);
-            if ($saldo <= 0.0) continue;
+            if ($esVenta) {
+                if (abs($saldo) < 0.005) continue;
+            } else {
+                if ($saldo <= 0.0) continue;
+            }
 
             $diasVenc = $r->fecha_vencimiento
                 ? $fechaCorte->diffInDays(Carbon::parse($r->fecha_vencimiento), false) * -1
@@ -279,7 +314,7 @@ class SaldosConsolidadosService
 
             $bucket = $this->bucketDe($diasVenc);
             $buckets[$bucket]['total'] += $saldo;
-            $buckets[$bucket]['cantidad']++;
+            if ($saldo > 0) $buckets[$bucket]['cantidad']++;
             if ($r->categoria === 'EFECTIVO') $buckets[$bucket]['efectivo'] += $saldo;
             $totalGeneral += $saldo;
         }
@@ -309,9 +344,10 @@ class SaldosConsolidadosService
      */
     private function topAuxiliares(string $tipo, int $empresaId, Carbon $fechaCorte, int $monedaId, bool $incluirEfectivo, int $topN): array
     {
-        if ($tipo === 'venta') {
+        $esVenta = $tipo === 'venta';
+        if ($esVenta) {
             $tabla = 'erp_facturas_venta'; $alias = 'fv';
-            $saldoExpr = $this->saldoFacturaVentaExpr($alias);
+            $saldoExpr = $this->saldoFacturaVentaExpr($alias, 'tc');
             $estados = self::ESTADOS_VENTA_ABIERTA;
         } else {
             $tabla = 'erp_facturas_compra'; $alias = 'fc';
@@ -319,9 +355,10 @@ class SaldosConsolidadosService
             $estados = self::ESTADOS_COMPRA_ABIERTA;
         }
 
-        // Subquery: una fila por factura con saldo > 0 + flags.
+        // Subquery: una fila por factura con saldo (puede ser negativo si es NC).
         $sub = DB::table("{$tabla} as {$alias}")
             ->join('erp_auxiliares as a', "a.id", '=', "{$alias}.auxiliar_id")
+            ->when($esVenta, fn ($q) => $q->join('erp_tipos_comprobante as tc', 'tc.id', '=', "{$alias}.tipo_comprobante_id"))
             ->where("{$alias}.empresa_id", $empresaId)
             ->where("{$alias}.moneda_id", $monedaId)
             ->whereIn("{$alias}.estado", $estados)
@@ -338,13 +375,18 @@ class SaldosConsolidadosService
                 DB::raw("{$saldoExpr} AS saldo"),
             ]);
 
-        // Agrupamos en PHP en lugar de SQL para no tener que repetir el subquery
-        // del saldo dentro de HAVING (más portable y debuggeable).
+        // Agrupamos en PHP. Para ventas, las NC vienen con saldo negativo y
+        // restan del saldo neto del cliente. Al final filtramos auxiliares
+        // con saldo_total > 0 (los que efectivamente deben algo neto).
         $rows = $sub->get();
         $agrup = [];
         foreach ($rows as $r) {
             $saldo = round((float) $r->saldo, 2);
-            if ($saldo <= 0.0) continue;
+            if ($esVenta) {
+                if (abs($saldo) < 0.005) continue;
+            } else {
+                if ($saldo <= 0.0) continue;
+            }
             $aid = (int) $r->auxiliar_id;
             if (! isset($agrup[$aid])) {
                 $agrup[$aid] = [
@@ -359,7 +401,7 @@ class SaldosConsolidadosService
                 ];
             }
             $agrup[$aid]['saldo_total'] += $saldo;
-            $agrup[$aid]['cantidad']++;
+            if ($saldo > 0) $agrup[$aid]['cantidad']++;
             if ($r->categoria === 'EFECTIVO') {
                 $agrup[$aid]['saldo_efectivo'] += $saldo;
             }
@@ -368,6 +410,11 @@ class SaldosConsolidadosService
                 $agrup[$aid]['saldo_vencido'] += $saldo;
             }
         }
+
+        // Solo nos quedamos con auxiliares con saldo neto > 0 (los que
+        // efectivamente deben/nos deben algo). Si las NC ya cancelaron toda
+        // la deuda del cliente, no figura en el top.
+        $agrup = array_values(array_filter($agrup, fn ($a) => $a['saldo_total'] > 0.005));
 
         // Ordenar desc por saldo_total y tomar top N.
         usort($agrup, fn ($a, $b) => $b['saldo_total'] <=> $a['saldo_total']);
@@ -387,7 +434,8 @@ class SaldosConsolidadosService
      */
     private function detalleVentasAuxiliar(int $empresaId, int $auxiliarId, Carbon $fechaCorte, int $monedaId, bool $incluirEfectivo): array
     {
-        $saldoExpr = $this->saldoFacturaVentaExpr('fv');
+        // tc alias coincide con saldoFacturaVentaExpr (signo aplicado: NC restan).
+        $saldoExpr = $this->saldoFacturaVentaExpr('fv', 'tc');
 
         $rows = DB::table('erp_facturas_venta as fv')
             ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
@@ -409,13 +457,17 @@ class SaldosConsolidadosService
                 'fv.origen',
                 'tc.nombre as tipo_comprobante',
                 'tc.letra',
+                'tc.signo as tc_signo',
                 'pv.numero as pv_numero',
                 'fv.numero',
                 DB::raw("{$saldoExpr} AS saldo"),
             ])
             ->orderBy('fv.fecha_emision')
             ->get()
-            ->filter(fn ($r) => round((float) $r->saldo, 2) > 0)
+            // Mostrar todas las operaciones con saldo no-cero (NC con saldo
+            // negativo deben verse en el drill-down para que el usuario
+            // entienda por qué el neto del cliente es ese).
+            ->filter(fn ($r) => abs(round((float) $r->saldo, 2)) > 0.005)
             ->map(function ($r) use ($fechaCorte) {
                 $r->dias_vencido = $r->fecha_vencimiento
                     ? $fechaCorte->diffInDays(Carbon::parse($r->fecha_vencimiento), false) * -1

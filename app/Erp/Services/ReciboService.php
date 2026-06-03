@@ -532,6 +532,42 @@ class ReciboService
                 ];
             }
 
+            // v1.32 — Débito por retenciones SIMPLES (totales por tipo en
+            // erp_recibos.retencion_*_total). Estas no se persisten como filas
+            // detalladas en erp_recibos_retenciones, así que el foreach de
+            // arriba no las cubre y el asiento queda desbalanceado por la
+            // diferencia exacta del total simple no acreditado. Mapeo:
+            //   IVA  -> 1.1.6.05 Retenciones IVA Sufridas
+            //   IIBB -> 1.1.6.10 Retenciones IIBB Sufridas
+            //   GAN  -> 1.1.6.06 Retenciones Ganancias Sufridas
+            // Las simples y detalladas son aditivas (igual que en crear()).
+            $cuentaPorCodigoRet = function (string $codigo) use ($empresaId): int {
+                $id = (int) DB::table('erp_cuentas_contables')
+                    ->where('empresa_id', $empresaId)->where('codigo', $codigo)
+                    ->value('id');
+                if (! $id) {
+                    throw new RuntimeException("Cuenta {$codigo} no existe en el plan de cuentas.");
+                }
+                return $id;
+            };
+            $retSimples = [
+                ['monto' => (float) $recibo->retencion_iva_total, 'codigo' => '1.1.6.05', 'tipo' => 'IVA'],
+                ['monto' => (float) $recibo->retencion_iibb_total, 'codigo' => '1.1.6.10', 'tipo' => 'IIBB'],
+                ['monto' => (float) $recibo->retencion_ganancias_total, 'codigo' => '1.1.6.06', 'tipo' => 'GANANCIAS'],
+            ];
+            foreach ($retSimples as $r) {
+                if ($r['monto'] <= 0) continue;
+                $cuentaId = $cuentaPorCodigoRet($r['codigo']);
+                $movimientos[] = [
+                    'cuenta_id' => $cuentaId,
+                    'centro_costo_id' => $this->admiteCc($cuentaId) ? $ccGeneral : null,
+                    'auxiliar_id' => null,
+                    'debe' => round($r['monto'], 2),
+                    'haber' => 0,
+                    'glosa' => sprintf('Retención %s — recibo %s', $r['tipo'], $recibo->numero_correlativo),
+                ];
+            }
+
             // Débito: NC aplicadas — la NC reduce el saldo del cliente
             // (es como un cobro). Se asienta como débito a "Notas de Crédito
             // a aplicar" o directamente cancelando deudor. Patrón: el NC ya

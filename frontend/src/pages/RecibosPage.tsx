@@ -974,12 +974,20 @@ function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, on
   const [busq, setBusq] = useState('');
 
   const q = busq.trim().toLowerCase();
-  const facturasFilt = useMemo(() => !q ? facturasDisp
-    : facturasDisp.filter((f) => f.numero_completo.toLowerCase().includes(q) || String(f.fecha_emision).includes(q)),
-    [facturasDisp, q]);
-  const ncsFilt = useMemo(() => !q ? ncsDisp
-    : ncsDisp.filter((n) => n.numero_completo.toLowerCase().includes(q) || String(n.fecha_emision).includes(q)),
-    [ncsDisp, q]);
+  // Orden descendente por numero_completo (las más nuevas primero).
+  // Uso localeCompare con `numeric:true` para que "0002-00000600" > "0002-00000099".
+  const ordenDesc = <T extends { numero_completo: string }>(arr: T[]) =>
+    [...arr].sort((a, b) => b.numero_completo.localeCompare(a.numero_completo, undefined, { numeric: true }));
+  const facturasFilt = useMemo(() => {
+    const base = !q ? facturasDisp
+      : facturasDisp.filter((f) => f.numero_completo.toLowerCase().includes(q) || String(f.fecha_emision).includes(q));
+    return ordenDesc(base);
+  }, [facturasDisp, q]);
+  const ncsFilt = useMemo(() => {
+    const base = !q ? ncsDisp
+      : ncsDisp.filter((n) => n.numero_completo.toLowerCase().includes(q) || String(n.fecha_emision).includes(q));
+    return ordenDesc(base);
+  }, [ncsDisp, q]);
 
   const toggleFact = (id: number) => {
     const s = new Set(selFact); s.has(id) ? s.delete(id) : s.add(id); setSelFact(s);
@@ -1043,7 +1051,7 @@ function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, on
                     <tr key={f.id} className={`border-t border-line cursor-pointer ${selFact.has(f.id) ? 'bg-azure-soft/30' : 'hover:bg-azure-soft/10'}`}
                       onClick={() => toggleFact(f.id)}>
                       <td className="px-2 py-0.5"><input type="checkbox" checked={selFact.has(f.id)} readOnly /></td>
-                      <td className="font-mono">{f.tipo} {f.numero_completo}</td>
+                      <td className="font-mono text-[13px] font-semibold">{f.tipo} {f.numero_completo}</td>
                       <td>{fmtFecha(f.fecha_emision)}</td>
                       <td className="text-right tabular">${fmtMoney(f.imp_total)}</td>
                       <td className="text-right tabular font-semibold">${fmtMoney(f.saldo)}</td>
@@ -1075,7 +1083,7 @@ function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, on
                     <tr key={n.id} className={`border-t border-success/10 cursor-pointer ${selNc.has(n.id) ? 'bg-success-bg/30' : 'hover:bg-success-bg/10'}`}
                       onClick={() => toggleNc(n.id)}>
                       <td className="px-2 py-0.5"><input type="checkbox" checked={selNc.has(n.id)} readOnly /></td>
-                      <td className="font-mono">{n.tipo} {n.numero_completo}</td>
+                      <td className="font-mono text-[13px] font-semibold">{n.tipo} {n.numero_completo}</td>
                       <td>{fmtFecha(n.fecha_emision)}</td>
                       <td className="text-right tabular">${fmtMoney(n.imp_total)}</td>
                       <td className="text-right tabular font-semibold text-success">${fmtMoney(n.saldo_imputable)}</td>

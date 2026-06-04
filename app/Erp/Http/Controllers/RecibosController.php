@@ -223,9 +223,11 @@ class RecibosController
     public function proximoNumero(Request $request): JsonResponse
     {
         $pv = (string) $request->query('pv', ReciboService::PV_DEFAULT);
-        if (! preg_match('/^\d{4}$/', $pv)) {
+        // AFIP transitó de PV 4 dígitos (histórico) a 5 dígitos. Aceptamos
+        // ambos largos para tolerar comprobantes legados y los nuevos.
+        if (! preg_match('/^\d{4,5}$/', $pv)) {
             return response()->json(['ok' => false, 'error' => [
-                'code' => 'PV_INVALIDO', 'message' => 'PV debe tener 4 dígitos',
+                'code' => 'PV_INVALIDO', 'message' => 'PV debe tener 4 o 5 dígitos',
             ]], 422);
         }
 

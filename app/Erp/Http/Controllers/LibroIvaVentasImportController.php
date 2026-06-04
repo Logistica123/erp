@@ -235,33 +235,42 @@ class LibroIvaVentasImportController
                     ->reject(fn ($aid) => in_array($aid, $protegidasAsientoIds, true))
                     ->values()->all();
 
-                // Imputaciones en recibos:
-                //  - Si hay imputaciones en recibos EMITIDO/CONCILIADO → abortar
-                //    con error 409 (esos recibos ya tienen valor contable firme;
-                //    el operador debe anular el recibo primero).
-                //  - Si hay imputaciones en recibos BORRADOR → borrarlas (el
-                //    borrador es editable; las líneas a estas facturas pierden
-                //    sentido al borrar las facturas).
-                $imputFirmes = DB::table('erp_recibos_comprobantes_imputados as rci')
-                    ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
-                    ->whereIn('rci.factura_venta_id', $facturaIds)
-                    ->whereNotIn('r.estado', ['BORRADOR', 'ANULADO'])
-                    ->select('r.id', 'r.numero_correlativo', 'r.estado')
-                    ->distinct()
-                    ->get();
-                if ($imputFirmes->isNotEmpty()) {
-                    $detalle = $imputFirmes->map(fn ($r) => "#{$r->id} {$r->numero_correlativo} ({$r->estado})")->implode(', ');
-                    throw new \DomainException(
-                        "IMPUTACIONES_FIRMES: facturas del import están imputadas en recibos firmes: {$detalle}. " .
-                        "Anular esos recibos antes de borrar el import."
-                    );
+                // Recibos asociados a facturas del import (2 caminos):
+                //   (1) erp_recibos_comprobantes_imputados.factura_venta_id (v1.32).
+                //   (2) erp_recibos.factura_venta_id (legacy v1.31, back-compat,
+                //       campo NOT NULL que apunta al "primer comprobante").
+                // Union de los recibo_id afectados por cualquiera de los 2 caminos.
+                $reciboIdsImputados = DB::table('erp_recibos_comprobantes_imputados')
+                    ->whereIn('factura_venta_id', $facturaIds)
+                    ->distinct()->pluck('recibo_id')->all();
+                $reciboIdsLegacy = DB::table('erp_recibos')
+                    ->whereIn('factura_venta_id', $facturaIds)
+                    ->pluck('id')->all();
+                $reciboIdsAfectados = array_values(array_unique(array_merge($reciboIdsImputados, $reciboIdsLegacy)));
+
+                if (! empty($reciboIdsAfectados)) {
+                    $recibosAfectados = DB::table('erp_recibos')
+                        ->whereIn('id', $reciboIdsAfectados)
+                        ->get(['id', 'numero_correlativo', 'estado']);
+                    $firmes = $recibosAfectados->whereNotIn('estado', ['BORRADOR', 'ANULADO']);
+                    if ($firmes->isNotEmpty()) {
+                        $detalle = $firmes->map(fn ($r) => "#{$r->id} {$r->numero_correlativo} ({$r->estado})")->implode(', ');
+                        throw new \DomainException(
+                            "IMPUTACIONES_FIRMES: facturas del import están imputadas en recibos firmes: {$detalle}. " .
+                            "Anular esos recibos antes de borrar el import."
+                        );
+                    }
+                    // Borradores: se borran completos (no tienen valor contable
+                    // firme y se basan en facturas que están desapareciendo).
+                    // Orden: hijas primero por las FKs.
+                    $borradoresIds = $recibosAfectados->where('estado', 'BORRADOR')->pluck('id')->all();
+                    if (! empty($borradoresIds)) {
+                        DB::table('erp_recibos_comprobantes_imputados')->whereIn('recibo_id', $borradoresIds)->delete();
+                        DB::table('erp_recibos_nc_aplicadas')->whereIn('recibo_id', $borradoresIds)->delete();
+                        DB::table('erp_recibos_retenciones')->whereIn('recibo_id', $borradoresIds)->delete();
+                        DB::table('erp_recibos')->whereIn('id', $borradoresIds)->delete();
+                    }
                 }
-                // Borrar imputaciones de borradores (sin valor contable).
-                DB::table('erp_recibos_comprobantes_imputados as rci')
-                    ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
-                    ->whereIn('rci.factura_venta_id', $facturaIds)
-                    ->where('r.estado', 'BORRADOR')
-                    ->delete();
 
                 DB::table('erp_facturas_venta')
                     ->whereIn('id', $facturaIds)

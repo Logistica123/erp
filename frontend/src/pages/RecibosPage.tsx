@@ -434,7 +434,7 @@ export function RecibosPage() {
     }
     if (!cobroCuadra) {
       toast.error('El cobro no cuadra',
-        `Diferencia ${diferenciaCobro >= 0 ? '+' : ''}$${fmtMoney(diferenciaCobro)} — ajustá importe recibido o retenciones para que el total cobro = monto cobrable.`);
+        `Diferencia ${diferenciaCobro >= 0 ? '+' : ''}${fmtMoney(diferenciaCobro)} — ajustá importe recibido o retenciones para que el total cobro = monto cobrable.`);
       return;
     }
     try {
@@ -496,7 +496,7 @@ export function RecibosPage() {
               </div>
               <div className="text-ink-muted truncate">{r.cliente?.nombre ?? `#${r.cliente_auxiliar_id}`}</div>
               <div className="text-[10px] text-ink-muted">
-                {fmtFecha(r.fecha_emision)} · ${fmtMoney(r.monto_cobrado)}
+                {fmtFecha(r.fecha_emision)} · {fmtMoney(r.monto_cobrado)}
               </div>
             </button>
           ))}
@@ -530,7 +530,7 @@ export function RecibosPage() {
             {esEditable && (
               <Button variant="primary" size="sm" onClick={handleEmitirEImprimir}
                 disabled={crearMut.isPending || !cobroCuadra}
-                title={cobroCuadra ? '' : `Falta cuadrar el cobro: diferencia ${diferenciaCobro >= 0 ? '+' : ''}$${fmtMoney(diferenciaCobro)}`}>
+                title={cobroCuadra ? '' : `Falta cuadrar el cobro: diferencia ${diferenciaCobro >= 0 ? '+' : ''}${fmtMoney(diferenciaCobro)}`}>
                 <Printer className="w-3 h-3" /> Emitir e imprimir
               </Button>
             )}
@@ -625,19 +625,24 @@ export function RecibosPage() {
                       {esEditable && <th></th>}
                     </tr></thead>
                     <tbody>
-                      {draft.comprobantes.map((c, i) => {
+                      {draft.comprobantes
+                        // Orden desc por numeroFactura (numeric:true → 0002-00000600 > 0002-00000099).
+                        // Mantengo el `originalIdx` para que delete/edit apunten al item real.
+                        .map((c, originalIdx) => ({ c, i: originalIdx }))
+                        .sort((a, b) => b.c.numeroFactura.localeCompare(a.c.numeroFactura, undefined, { numeric: true }))
+                        .map(({ c, i }) => {
                         const imputadoInvalido = c.imputado <= 0 || c.imputado > c.totalFactura + 0.01;
                         return (
                         <tr key={i} className="border-t border-line">
                           <td className="px-1">{fmtFecha(c.fecha)}</td>
-                          <td className="font-mono">{c.numeroFactura}</td>
-                          <td className="text-right tabular">${fmtMoney(c.totalFactura)}</td>
+                          <td className="font-mono text-[13px] font-semibold">{c.numeroFactura}</td>
+                          <td className="text-right tabular">{fmtMoney(c.totalFactura)}</td>
                           <td className="text-right tabular font-semibold">
                             {esEditable ? (
                               <div className="inline-flex items-center gap-1 justify-end">
                                 <input
                                   type="text" inputMode="decimal"
-                                  value={c.imputado}
+                                  value={Number.isFinite(c.imputado) ? c.imputado.toFixed(2) : ''}
                                   onChange={(e) => {
                                     const v = parseMontoEs(e.target.value);
                                     setDraft({
@@ -647,9 +652,9 @@ export function RecibosPage() {
                                     });
                                   }}
                                   title={imputadoInvalido
-                                    ? `Debe ser > 0 y ≤ $${fmtMoney(c.totalFactura)}`
+                                    ? `Debe ser > 0 y ≤ ${fmtMoney(c.totalFactura)}`
                                     : ''}
-                                  className={`w-[120px] px-1.5 py-0.5 text-right tabular border rounded focus:outline-none ${
+                                  className={`w-[140px] px-1.5 py-0.5 text-right tabular border rounded focus:outline-none ${
                                     imputadoInvalido
                                       ? 'border-danger text-danger focus:border-danger'
                                       : 'border-azure-soft focus:border-azure'}`} />
@@ -666,7 +671,7 @@ export function RecibosPage() {
                                 </button>
                               </div>
                             ) : (
-                              <>${fmtMoney(c.imputado)}</>
+                              <>{fmtMoney(c.imputado)}</>
                             )}
                           </td>
                           {esEditable && (
@@ -681,7 +686,7 @@ export function RecibosPage() {
                       })}
                       <tr className="font-semibold border-t border-line bg-azure-soft/10">
                         <td colSpan={3} className="text-right px-1">Total imputado</td>
-                        <td className="text-right tabular">${fmtMoney(totalImputado)}</td>
+                        <td className="text-right tabular">{fmtMoney(totalImputado)}</td>
                         {esEditable && <td></td>}
                       </tr>
                     </tbody>
@@ -716,8 +721,8 @@ export function RecibosPage() {
                       {draft.ncAplicadas.map((n, i) => (
                         <tr key={i} className="border-t border-line bg-success-bg/10">
                           <td className="px-1 font-mono">{n.numeroNc}</td>
-                          <td className="text-right tabular">${fmtMoney(n.saldo)}</td>
-                          <td className="text-right tabular font-semibold text-success">−${fmtMoney(n.monto)}</td>
+                          <td className="text-right tabular">{fmtMoney(n.saldo)}</td>
+                          <td className="text-right tabular font-semibold text-success">−{fmtMoney(n.monto)}</td>
                           {esEditable && (
                             <td className="text-right">
                               <button onClick={() => setDraft({ ...draft, ncAplicadas: draft.ncAplicadas.filter((_, idx) => idx !== i) })}>
@@ -729,7 +734,7 @@ export function RecibosPage() {
                       ))}
                       <tr className="font-semibold border-t border-line bg-success-bg/20">
                         <td colSpan={2} className="text-right px-1">Total NC</td>
-                        <td className="text-right tabular text-success">−${fmtMoney(totalNc)}</td>
+                        <td className="text-right tabular text-success">−{fmtMoney(totalNc)}</td>
                         {esEditable && <td></td>}
                       </tr>
                     </tbody>
@@ -775,19 +780,19 @@ export function RecibosPage() {
                     disabled={!esEditable} />
                 </div>
                 <div className="text-[11.5px] space-y-0.5 bg-azure-soft/10 border border-azure-soft rounded p-2">
-                  <div className="flex justify-between"><span>Total imputado (facturas):</span><span className="tabular">${fmtMoney(totalImputado)}</span></div>
-                  {totalNc > 0 && <div className="flex justify-between text-success"><span>− NC aplicadas:</span><span className="tabular">−${fmtMoney(totalNc)}</span></div>}
+                  <div className="flex justify-between"><span>Total imputado (facturas):</span><span className="tabular">{fmtMoney(totalImputado)}</span></div>
+                  {totalNc > 0 && <div className="flex justify-between text-success"><span>− NC aplicadas:</span><span className="tabular">−{fmtMoney(totalNc)}</span></div>}
                   <div className="flex justify-between font-semibold border-t border-azure-soft pt-0.5">
-                    <span>Monto cobrable:</span><span className="tabular">${fmtMoney(montoCobrable)}</span>
+                    <span>Monto cobrable:</span><span className="tabular">{fmtMoney(montoCobrable)}</span>
                   </div>
                   {totalRet > 0 && (
                     <div className="flex justify-between text-ink-muted text-[11px]">
                       <span>Retenciones (las paga el cliente al fisco):</span>
-                      <span className="tabular">${fmtMoney(totalRet)}</span>
+                      <span className="tabular">{fmtMoney(totalRet)}</span>
                     </div>
                   )}
                   <div className="flex justify-between font-bold">
-                    <span>Total cobro (recibido + ret):</span><span className="tabular">${fmtMoney(totalCobro)}</span>
+                    <span>Total cobro (recibido + ret):</span><span className="tabular">{fmtMoney(totalCobro)}</span>
                   </div>
                   {!cobroCuadra && (
                     <div className="mt-1 -mx-2 -mb-2 px-2 py-1.5 border-t border-danger/40 bg-danger-bg/60 text-danger flex justify-between items-center font-semibold">
@@ -796,7 +801,7 @@ export function RecibosPage() {
                           ? '⚠ Sobra (recibido + ret > cobrable):'
                           : '⚠ Falta cargar (recibido + ret < cobrable):'}
                       </span>
-                      <span className="tabular">${fmtMoney(Math.abs(diferenciaCobro))}</span>
+                      <span className="tabular">{fmtMoney(Math.abs(diferenciaCobro))}</span>
                     </div>
                   )}
                 </div>
@@ -900,17 +905,17 @@ function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
           <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 max-w-md">
             <span className="font-bold">FECHA DEL COBRO</span><span className="text-right">{fmtFecha(draft.fechaCobro)}</span>
             <span className="font-bold">DETALLE DEL COBRO</span><span className="text-right">{draft.detalleCobro || '—'}</span>
-            <span className="font-bold">IMPORTE RECIBIDO</span><span className="text-right">${fmtMoney(parseMontoEs(draft.importeRecibido))}</span>
+            <span className="font-bold">IMPORTE RECIBIDO</span><span className="text-right">{fmtMoney(parseMontoEs(draft.importeRecibido))}</span>
             {draft.ncAplicadas.length > 0 && (
               <>
                 <span className="font-bold">NOTAS DE CRÉDITO</span>
-                <span className="text-right">−${fmtMoney(draft.ncAplicadas.reduce((s, n) => s + n.monto, 0))}</span>
+                <span className="text-right">−{fmtMoney(draft.ncAplicadas.reduce((s, n) => s + n.monto, 0))}</span>
               </>
             )}
-            <span className="font-bold">RETENCIONES IVA</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionIva))}</span>
-            <span className="font-bold">RETENCIONES IIBB</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionIibb))}</span>
-            <span className="font-bold">RETENCIONES GANANCIAS</span><span className="text-right">${fmtMoney(parseMontoEs(draft.retencionGanancias))}</span>
-            <span className="font-extrabold">TOTAL COBRO</span><span className="text-right font-extrabold">${fmtMoney(totalCobro)}</span>
+            <span className="font-bold">RETENCIONES IVA</span><span className="text-right">{fmtMoney(parseMontoEs(draft.retencionIva))}</span>
+            <span className="font-bold">RETENCIONES IIBB</span><span className="text-right">{fmtMoney(parseMontoEs(draft.retencionIibb))}</span>
+            <span className="font-bold">RETENCIONES GANANCIAS</span><span className="text-right">{fmtMoney(parseMontoEs(draft.retencionGanancias))}</span>
+            <span className="font-extrabold">TOTAL COBRO</span><span className="text-right font-extrabold">{fmtMoney(totalCobro)}</span>
           </div>
         </div>
         {/* Tabla comprobantes */}
@@ -932,16 +937,16 @@ function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
                     <tr key={`f${i}`}>
                       <td className="border border-black px-1">{fmtFecha(c.fecha)}</td>
                       <td className="border border-black px-1 font-mono">{c.numeroFactura}</td>
-                      <td className="border border-black px-1 text-right">${fmtMoney(c.totalFactura)}</td>
-                      <td className="border border-black px-1 text-right">${fmtMoney(c.imputado)}</td>
+                      <td className="border border-black px-1 text-right">{fmtMoney(c.totalFactura)}</td>
+                      <td className="border border-black px-1 text-right">{fmtMoney(c.imputado)}</td>
                     </tr>
                   ))}
                   {draft.ncAplicadas.map((n, i) => (
                     <tr key={`n${i}`}>
                       <td className="border border-black px-1">{fmtFecha(n.fecha)}</td>
                       <td className="border border-black px-1 font-mono">{n.numeroNc}</td>
-                      <td className="border border-black px-1 text-right">−${fmtMoney(n.saldo)}</td>
-                      <td className="border border-black px-1 text-right">−${fmtMoney(n.monto)}</td>
+                      <td className="border border-black px-1 text-right">−{fmtMoney(n.saldo)}</td>
+                      <td className="border border-black px-1 text-right">−{fmtMoney(n.monto)}</td>
                     </tr>
                   ))}
                 </>
@@ -952,7 +957,7 @@ function ReciboPreview({ draft, totalCobro, totalImputado, watermark }: {
         {/* Footer */}
         <div className="border-t border-black p-2 flex justify-end gap-3 font-extrabold text-[12px]">
           <span>TOTAL IMPUTADO</span>
-          <span>${fmtMoney(totalImputado - draft.ncAplicadas.reduce((s, n) => s + n.monto, 0))}</span>
+          <span>{fmtMoney(totalImputado - draft.ncAplicadas.reduce((s, n) => s + n.monto, 0))}</span>
         </div>
       </div>
     </div>
@@ -1038,7 +1043,7 @@ function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, on
                   onChange={toggleAllFact} />
                 Facturas ({facturasFilt.length})
               </label>
-              <span className="text-[11.5px] text-ink-muted">Seleccionadas: <strong>${fmtMoney(totalFact)}</strong></span>
+              <span className="text-[11.5px] text-ink-muted">Seleccionadas: <strong>{fmtMoney(totalFact)}</strong></span>
             </div>
             <div className="max-h-56 overflow-auto border border-line rounded">
               <table className="w-full text-[11px]">
@@ -1053,8 +1058,8 @@ function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, on
                       <td className="px-2 py-0.5"><input type="checkbox" checked={selFact.has(f.id)} readOnly /></td>
                       <td className="font-mono text-[13px] font-semibold">{f.tipo} {f.numero_completo}</td>
                       <td>{fmtFecha(f.fecha_emision)}</td>
-                      <td className="text-right tabular">${fmtMoney(f.imp_total)}</td>
-                      <td className="text-right tabular font-semibold">${fmtMoney(f.saldo)}</td>
+                      <td className="text-right tabular">{fmtMoney(f.imp_total)}</td>
+                      <td className="text-right tabular font-semibold">{fmtMoney(f.saldo)}</td>
                       <td><span className="text-[9.5px] px-1 py-0.5 rounded bg-azure-soft/40 text-azure">{f.origen}</span></td>
                     </tr>
                   ))}
@@ -1069,7 +1074,7 @@ function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, on
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-success">Notas de crédito disponibles ({ncsFilt.length})</span>
-              <span className="text-[11.5px] text-ink-muted">Seleccionadas: <strong className="text-success">−${fmtMoney(totalNc)}</strong></span>
+              <span className="text-[11.5px] text-ink-muted">Seleccionadas: <strong className="text-success">−{fmtMoney(totalNc)}</strong></span>
             </div>
             <div className="text-[10px] text-ink-muted">Se imputan al recibo reduciendo el monto cobrable.</div>
             <div className="max-h-44 overflow-auto border border-success/30 rounded">
@@ -1085,8 +1090,8 @@ function AgregarComprobanteModal({ facturas, ncs, yaAgregadas, ncYaAgregadas, on
                       <td className="px-2 py-0.5"><input type="checkbox" checked={selNc.has(n.id)} readOnly /></td>
                       <td className="font-mono text-[13px] font-semibold">{n.tipo} {n.numero_completo}</td>
                       <td>{fmtFecha(n.fecha_emision)}</td>
-                      <td className="text-right tabular">${fmtMoney(n.imp_total)}</td>
-                      <td className="text-right tabular font-semibold text-success">${fmtMoney(n.saldo_imputable)}</td>
+                      <td className="text-right tabular">{fmtMoney(n.imp_total)}</td>
+                      <td className="text-right tabular font-semibold text-success">{fmtMoney(n.saldo_imputable)}</td>
                     </tr>
                   ))}
                 </tbody>

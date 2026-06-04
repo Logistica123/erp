@@ -149,6 +149,11 @@ class RecibosController
     public function facturasImputablesCliente(Request $request, int $clienteId): JsonResponse
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        // Si el cliente está editando un borrador, el frontend pasa el id del
+        // recibo para que saldoFactura excluya las imputaciones de ESE borrador
+        // del cálculo. Sin eso, las facturas imputadas en el borrador aparecen
+        // con saldo 0 y no se pueden re-agregar tras quitarlas del listado.
+        $excludeReciboId = (int) $request->query('exclude_recibo_id', 0) ?: null;
 
         $auxIds = $this->auxiliaresHermanos($clienteId, $empresaId);
 
@@ -168,8 +173,8 @@ class RecibosController
                 'fv.imp_total', 'fv.estado', 'fv.origen',
             ]);
 
-        $resultado = $facturas->map(function ($f) use ($empresaId) {
-            $saldo = $this->svc->saldoFactura((int) $f->id, $empresaId);
+        $resultado = $facturas->map(function ($f) use ($empresaId, $excludeReciboId) {
+            $saldo = $this->svc->saldoFactura((int) $f->id, $empresaId, $excludeReciboId);
             return [
                 'id' => $f->id,
                 'tipo' => $f->codigo_interno . ($f->letra ? ' ' . $f->letra : ''),

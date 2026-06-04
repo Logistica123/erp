@@ -249,10 +249,15 @@ export function RecibosPage() {
     ['cuentas-bancarias'], '/api/erp/cuentas-bancarias',
   );
 
-  // Cargar facturas del cliente seleccionado.
+  // Cargar facturas del cliente seleccionado. Si estamos editando un borrador
+  // existente pasamos exclude_recibo_id para que saldoFactura ignore las
+  // imputaciones de ESE borrador (sino las facturas ya imputadas no aparecen
+  // como disponibles al re-agregarlas tras quitarlas del listado).
+  const excludeRecibo = selectedReciboId && reciboDetalle?.estado === 'BORRADOR' ? selectedReciboId : null;
   const { data: facturasResp } = useApi<FacturaImputable[]>(
-    ['facturas-imputables', draft.clienteId],
-    `/api/erp/clientes/${draft.clienteId}/facturas-imputables-recibo`,
+    ['facturas-imputables', draft.clienteId, excludeRecibo],
+    `/api/erp/clientes/${draft.clienteId}/facturas-imputables-recibo${
+      excludeRecibo ? `?exclude_recibo_id=${excludeRecibo}` : ''}`,
     { enabled: !!draft.clienteId },
   );
   const facturasDelCliente = facturasResp ?? [];

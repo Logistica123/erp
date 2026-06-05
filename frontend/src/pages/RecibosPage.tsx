@@ -370,6 +370,29 @@ export function RecibosPage() {
   const diferenciaCobro = Math.round((totalCobro - montoCobrable) * 100) / 100;
   const cobroCuadra = Math.abs(diferenciaCobro) < 0.01;
 
+  // v1.32 — Modo COMPENSACIÓN: NC neutralizan facturas sin movimiento de
+  // dinero. Detectamos por código del banco de la cuenta seleccionada
+  // (COMPENSACION). En este modo: importe = 0, retenciones = 0, deben haber
+  // facturas Y NC, y el total cuadra (totalImputado === totalNc).
+  const medioActual = bancos.find((b) => String(b.id) === draft.medioCobroId);
+  const esCompensacion = medioActual?.codigo === 'COMP_CC';
+  // Cuando el usuario elige Compensación, forzamos los importes a 0.
+  useEffect(() => {
+    if (! esCompensacion) return;
+    const cambios: Partial<Draft> = {};
+    if (draft.importeRecibido && parseMontoEs(draft.importeRecibido) !== 0) cambios.importeRecibido = '0';
+    if (draft.retencionIva && parseMontoEs(draft.retencionIva) !== 0) cambios.retencionIva = '';
+    if (draft.retencionIibb && parseMontoEs(draft.retencionIibb) !== 0) cambios.retencionIibb = '';
+    if (draft.retencionGanancias && parseMontoEs(draft.retencionGanancias) !== 0) cambios.retencionGanancias = '';
+    if (Object.keys(cambios).length) setDraft({ ...draft, ...cambios });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esCompensacion]);
+  // Validación específica de compensación: debe haber NC + facturas con totales iguales.
+  const compensacionValida = esCompensacion
+    ? (draft.comprobantes.length > 0 && draft.ncAplicadas.length > 0
+       && Math.abs(totalImputado - totalNc) < 0.01)
+    : true;
+
   const crearMut = useApiMutation<{ data: Recibo }, Record<string, unknown>>(
     (body) => api.post('/api/erp/tesoreria/recibos', body),
     {
@@ -441,6 +464,11 @@ export function RecibosPage() {
     if (!cobroCuadra) {
       toast.error('El cobro no cuadra',
         `Diferencia ${diferenciaCobro >= 0 ? '+' : ''}${fmtMoney(diferenciaCobro)} — ajustá importe recibido o retenciones para que el total cobro = monto cobrable.`);
+      return;
+    }
+    if (esCompensacion && !compensacionValida) {
+      toast.error('Compensación inválida',
+        'En compensación el recibo debe tener al menos una factura y una NC, y la suma de NC debe igualar la suma de facturas (saldo cobrable = 0).');
       return;
     }
     try {
@@ -773,8 +801,9 @@ export function RecibosPage() {
                   <Field label="Importe recibido" type="text" inputMode="decimal"
                     value={draft.importeRecibido}
                     onChange={(e) => setDraft({ ...draft, importeRecibido: e.target.value })}
-                    placeholder="0,00 o 13.000,26"
-                    disabled={!esEditable} />
+                    placeholder={esCompensacion ? '0,00 (compensación)' : '0,00 o 13.000,26'}
+                    disabled={!esEditable || esCompensacion}
+                    hint={esCompensacion ? 'No aplica: se compensa NC contra facturas.' : undefined} />
                   <SelectField label="Medio de cobro" value={draft.medioCobroId}
                     onChange={(e) => setDraft({ ...draft, medioCobroId: e.target.value })}
                     disabled={!esEditable}
@@ -785,15 +814,15 @@ export function RecibosPage() {
                   <Field label="Ret IVA" type="text" inputMode="decimal"
                     value={draft.retencionIva}
                     onChange={(e) => setDraft({ ...draft, retencionIva: e.target.value })}
-                    disabled={!esEditable} />
+                    disabled={!esEditable || esCompensacion} />
                   <Field label="Ret IIBB" type="text" inputMode="decimal"
                     value={draft.retencionIibb}
                     onChange={(e) => setDraft({ ...draft, retencionIibb: e.target.value })}
-                    disabled={!esEditable} />
+                    disabled={!esEditable || esCompensacion} />
                   <Field label="Ret Ganancias" type="text" inputMode="decimal"
                     value={draft.retencionGanancias}
                     onChange={(e) => setDraft({ ...draft, retencionGanancias: e.target.value })}
-                    disabled={!esEditable} />
+                    disabled={!esEditable || esCompensacion} />
                 </div>
                 <div className="text-[11.5px] space-y-0.5 bg-azure-soft/10 border border-azure-soft rounded p-2">
                   <div className="flex justify-between"><span>Total imputado (facturas):</span><span className="tabular">{fmtMoney(totalImputado)}</span></div>

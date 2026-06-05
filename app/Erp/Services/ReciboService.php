@@ -29,7 +29,7 @@ class ReciboService
         private readonly DistriAppBridge $distri, // v1.32 — sync numeración cross-platform.
     ) {}
 
-    public const PV_DEFAULT = '0001';
+    public const PV_DEFAULT = '00001';
 
     /**
      * v1.32 — Crea un recibo en estado BORRADOR con múltiples comprobantes

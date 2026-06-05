@@ -456,9 +456,19 @@ export function RecibosPage() {
         reciboId = created.data.id;
       }
       const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${reciboId}/emitir`, {});
-      toast.success('Recibo emitido', `Recibo ${padPv(draft.puntoVenta)}-${padNumero(draft.numero)}`);
+      // Leo el recibo REAL persistido (puede haber asignado un número distinto
+      // al del draft si el contador estaba desfasado). El PDF y el toast deben
+      // mostrar el numero real, no el del state local.
+      // api.get devuelve el body {ok, data}; el recibo está en .data.
+      const realResp = await api.get<{ data: { punto_venta: string | null; numero: string | null } }>(
+        `/api/erp/tesoreria/recibos/${emitido.data.recibo_id}`,
+      );
+      const pvReal = padPv(realResp.data?.punto_venta ?? draft.puntoVenta);
+      const numReal = padNumero(realResp.data?.numero ?? draft.numero);
+      toast.success('Recibo emitido', `Recibo ${pvReal}-${numReal}`);
       invalidate();
-      printRecibo(draft, { total_cobro: totalCobro, total_imputado: totalImputado - totalNc, watermark: null });
+      printRecibo({ ...draft, puntoVenta: pvReal, numero: numReal },
+        { total_cobro: totalCobro, total_imputado: totalImputado - totalNc, watermark: null });
       if (draft.autoIncrementar) {
         const next = await api.get<ProximoNumero>(`/api/erp/tesoreria/recibos/proximo-numero?pv=${draft.puntoVenta}`);
         setSelectedReciboId(null);

@@ -80,6 +80,14 @@ class ReciboService
             // el mismo CUIT; aceptamos facturas de cualquiera de ellos.
             $hermanos = $this->auxiliaresHermanos($clienteId, $empresaId);
 
+            // v1.32 — Si el medio es Compensación (codigo COMP_CC), saltamos
+            // las validaciones de saldo: el recibo es contablemente neutro
+            // (D=H sobre Deudores por Ventas) y puede tocar facturas/NC ya
+            // imputadas para dejar registro del evento.
+            $esCompCrear = $this->esCompensacion(
+                isset($data['medio_cobro_id']) ? (int) $data['medio_cobro_id'] : null
+            );
+
             // Cargar y validar facturas (con lock).
             $facturasCache = [];
             $totalImputado = 0.0;
@@ -100,7 +108,8 @@ class ReciboService
                     ));
                 }
                 $saldo = $this->saldoFactura($fv->id, $empresaId);
-                if ($monto > $saldo + 0.01) {
+                // En compensación se permiten facturas con saldo 0 (recibo neutro D=H).
+                if (! $esCompCrear && $monto > $saldo + 0.01) {
                     throw new DomainException(sprintf(
                         'FACTURA_SOBRE_IMPUTADA: factura #%d tiene saldo $%.2f, se intenta imputar $%.2f',
                         $fv->id, $saldo, $monto,
@@ -122,7 +131,7 @@ class ReciboService
             }
             foreach ($ncAplicadas as $nc) {
                 $saldo = $this->saldoImputableNc((int) $nc['nc_factura_id'], $empresaId);
-                if ((float) $nc['monto_aplicado'] > $saldo + 0.01) {
+                if (! $esCompCrear && (float) $nc['monto_aplicado'] > $saldo + 0.01) {
                     throw new DomainException(sprintf(
                         'NC_SOBRE_IMPUTADA: NC #%d tiene saldo imputable $%.2f pero se intenta aplicar $%.2f',
                         $nc['nc_factura_id'], $saldo, $nc['monto_aplicado'],
@@ -283,6 +292,10 @@ class ReciboService
             }
             $clienteId = (int) $data['cliente_auxiliar_id'];
             $hermanos = $this->auxiliaresHermanos($clienteId, $empresaId);
+            // v1.32 — Compensación: skipea validación de saldo (D=H neutro).
+            $esCompAct = $this->esCompensacion(
+                isset($data['medio_cobro_id']) ? (int) $data['medio_cobro_id'] : null
+            );
 
             $facturasCache = [];
             $totalImputado = 0.0;
@@ -303,7 +316,7 @@ class ReciboService
                     ));
                 }
                 $saldo = $this->saldoFactura($fv->id, $empresaId, $recibo->id);
-                if ($monto > $saldo + 0.01) {
+                if (! $esCompAct && $monto > $saldo + 0.01) {
                     throw new DomainException(sprintf(
                         'FACTURA_SOBRE_IMPUTADA: factura #%d tiene saldo $%.2f, se intenta imputar $%.2f',
                         $fv->id, $saldo, $monto,
@@ -316,7 +329,7 @@ class ReciboService
             $ncAplicadas = $data['nc_aplicadas'] ?? [];
             foreach ($ncAplicadas as $nc) {
                 $saldoNc = $this->saldoImputableNc((int) $nc['nc_factura_id'], $empresaId);
-                if ((float) $nc['monto_aplicado'] > $saldoNc + 0.01) {
+                if (! $esCompAct && (float) $nc['monto_aplicado'] > $saldoNc + 0.01) {
                     throw new DomainException(sprintf(
                         'NC_SOBRE_IMPUTADA: NC #%d saldo imputable $%.2f, se aplica $%.2f',
                         $nc['nc_factura_id'], $saldoNc, $nc['monto_aplicado'],
@@ -492,6 +505,37 @@ class ReciboService
 
             $movimientos = [];
 
+            // v1.32 — Si el medio es COMPENSACIÓN, generamos un asiento espejo
+            // (D=H sobre Deudores por Ventas del mismo cliente) por el total
+            // imputado. Contablemente neutro: registra el evento sin tocar
+            // bancos/cajas ni otras cuentas. Skipea la lógica normal de débitos.
+            if ($this->esCompensacion((int) $recibo->medio_cobro_id)) {
+                $totalCompensado = round((float) $recibo->total_factura, 2);
+                if ($totalCompensado > 0) {
+                    $movs = [
+                        [
+                            'cuenta_id' => $cuentaDeudoresId,
+                            'centro_costo_id' => $ccGeneral,
+                            'auxiliar_id' => $recibo->cliente_auxiliar_id,
+                            'debe' => $totalCompensado,
+                            'haber' => 0,
+                            'glosa' => 'Compensación NC vs facturas — ' . $recibo->numero_correlativo,
+                        ],
+                        [
+                            'cuenta_id' => $cuentaDeudoresId,
+                            'centro_costo_id' => $ccGeneral,
+                            'auxiliar_id' => $recibo->cliente_auxiliar_id,
+                            'debe' => 0,
+                            'haber' => $totalCompensado,
+                            'glosa' => 'Compensación NC vs facturas — ' . $recibo->numero_correlativo,
+                        ],
+                    ];
+                    $movimientos = $movs;
+                }
+                // Saltea toda la lógica normal de medio/retenciones/NC.
+                goto compensacionDone;
+            }
+
             // Débito: medio_cobro por monto_cobrado.
             if ((float) $recibo->monto_cobrado > 0) {
                 $cuentaMedioId = DB::table('erp_cuentas_bancarias')
@@ -595,6 +639,7 @@ class ReciboService
                 ];
             }
 
+            compensacionDone:
             if (empty($movimientos)) {
                 throw new DomainException('SIN_MOVIMIENTOS: el recibo no genera asiento (todos los importes en 0).');
             }
@@ -779,6 +824,19 @@ class ReciboService
     /**
      * Saldo imputable de una NC = imp_total - SUM(imputaciones existentes).
      */
+    /**
+     * v1.32 — ¿El medio de cobro es la cuenta especial "Compensación"
+     * (codigo COMP_CC)? En ese caso el recibo es contablemente neutro:
+     * NC y facturas pueden estar incluso con saldo 0 (la operación queda
+     * registrada como D=H sobre Deudores por Ventas, sin tocar saldos).
+     */
+    public function esCompensacion(?int $medioCobroId): bool
+    {
+        if (! $medioCobroId) return false;
+        return DB::table('erp_cuentas_bancarias')
+            ->where('id', $medioCobroId)->value('codigo') === 'COMP_CC';
+    }
+
     public function saldoImputableNc(int $ncId, int $empresaId = 1): float
     {
         $nc = DB::table('erp_facturas_venta')

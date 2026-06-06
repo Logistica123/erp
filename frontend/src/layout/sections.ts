@@ -54,6 +54,7 @@ export const sections: NavSection[] = [
       { to: '/erp/transferencias', label: 'Transferencias int.', icon: Split },
       { to: '/erp/arqueos', label: 'Arqueos de caja', icon: Calculator },
       { to: '/erp/tesoreria/flujo-de-fondos', label: 'Flujo de Fondos', icon: Calculator },
+      { to: '/erp/tesoreria/inversiones', label: 'Inversiones', icon: Coins },
       { to: '/erp/conciliacion', label: 'Conciliación', icon: Split },
       { to: '/erp/conciliacion-reglas', label: 'Reglas conciliación', icon: Split },
       { to: '/erp/cierres-diarios', label: 'Cierres diarios', icon: Lock },

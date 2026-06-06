@@ -314,6 +314,18 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/flujo-fondos/calendario-cobros', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'calendarioCobrosUpsert'])
             ->name('erp.flujo.calendario-cobros.upsert');
 
+        // v1.42 Fase C — Inversiones
+        Route::get('/inversiones', [\App\Erp\Http\Controllers\InversionesController::class, 'index'])
+            ->name('erp.inversiones.index');
+        Route::post('/inversiones', [\App\Erp\Http\Controllers\InversionesController::class, 'store'])
+            ->name('erp.inversiones.store');
+        Route::get('/inversiones/{id}', [\App\Erp\Http\Controllers\InversionesController::class, 'show'])
+            ->whereNumber('id')->name('erp.inversiones.show');
+        Route::get('/inversiones/{id}/movimientos', [\App\Erp\Http\Controllers\InversionesController::class, 'movimientos'])
+            ->whereNumber('id')->name('erp.inversiones.movimientos');
+        Route::post('/inversiones/{id}/movimientos', [\App\Erp\Http\Controllers\InversionesController::class, 'registrarMovimiento'])
+            ->whereNumber('id')->name('erp.inversiones.movimientos.store');
+
         // Tesorería — transferencias internas (SPEC 02 §6.7, RN-20)
         Route::get('/transferencias-internas', [TransferenciasInternasController::class, 'index'])
             ->name('erp.ti.index');

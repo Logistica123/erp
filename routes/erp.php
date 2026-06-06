@@ -326,6 +326,18 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/inversiones/{id}/movimientos', [\App\Erp\Http\Controllers\InversionesController::class, 'registrarMovimiento'])
             ->whereNumber('id')->name('erp.inversiones.movimientos.store');
 
+        // v1.42 Fase D — Préstamos
+        Route::get('/prestamos', [\App\Erp\Http\Controllers\PrestamosController::class, 'index'])
+            ->name('erp.prestamos.index');
+        Route::post('/prestamos', [\App\Erp\Http\Controllers\PrestamosController::class, 'store'])
+            ->name('erp.prestamos.store');
+        Route::get('/prestamos/{id}', [\App\Erp\Http\Controllers\PrestamosController::class, 'show'])
+            ->whereNumber('id')->name('erp.prestamos.show');
+        Route::post('/prestamos/{id}/cuotas/{cuotaId}/pagar', [\App\Erp\Http\Controllers\PrestamosController::class, 'pagarCuota'])
+            ->whereNumber('id')->whereNumber('cuotaId')->name('erp.prestamos.pagar');
+        Route::post('/prestamos/{id}/cancelar', [\App\Erp\Http\Controllers\PrestamosController::class, 'cancelar'])
+            ->whereNumber('id')->name('erp.prestamos.cancelar');
+
         // Tesorería — transferencias internas (SPEC 02 §6.7, RN-20)
         Route::get('/transferencias-internas', [TransferenciasInternasController::class, 'index'])
             ->name('erp.ti.index');

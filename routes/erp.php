@@ -292,6 +292,28 @@ Route::prefix('api/erp')->group(function () {
         Route::delete('/caja/operadores/{id}', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'destroy'])
             ->whereNumber('id')->name('erp.caja.operadores.destroy');
 
+        // v1.42 Fase B — Flujo de Fondos
+        Route::get('/flujo-fondos/escenarios', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'escenariosIndex'])
+            ->name('erp.flujo.escenarios.index');
+        Route::post('/flujo-fondos/escenarios', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'escenariosStore'])
+            ->name('erp.flujo.escenarios.store');
+        Route::post('/flujo-fondos/escenarios/{id}/clonar', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'escenariosClonar'])
+            ->whereNumber('id')->name('erp.flujo.escenarios.clonar');
+        Route::get('/flujo-fondos/{id}/matriz', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'matriz'])
+            ->whereNumber('id')->name('erp.flujo.matriz');
+        Route::patch('/flujo-fondos/{id}/celda', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'overrideCelda'])
+            ->whereNumber('id')->name('erp.flujo.celda.override');
+        Route::post('/flujo-fondos/{id}/recalcular', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'recalcular'])
+            ->whereNumber('id')->name('erp.flujo.recalcular');
+        Route::get('/flujo-fondos/{id}/drill', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'drill'])
+            ->whereNumber('id')->name('erp.flujo.drill');
+        Route::get('/flujo-fondos/categorias', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'categoriasIndex'])
+            ->name('erp.flujo.categorias.index');
+        Route::get('/flujo-fondos/calendario-cobros', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'calendarioCobrosIndex'])
+            ->name('erp.flujo.calendario-cobros.index');
+        Route::post('/flujo-fondos/calendario-cobros', [\App\Erp\Http\Controllers\FlujoFondosController::class, 'calendarioCobrosUpsert'])
+            ->name('erp.flujo.calendario-cobros.upsert');
+
         // Tesorería — transferencias internas (SPEC 02 §6.7, RN-20)
         Route::get('/transferencias-internas', [TransferenciasInternasController::class, 'index'])
             ->name('erp.ti.index');

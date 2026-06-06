@@ -26,6 +26,8 @@ import { RecibosPage } from './pages/RecibosPage';
 import { EcheqPage } from './pages/EcheqPage';
 import { TransferenciasPage } from './pages/TransferenciasPage';
 import { ArqueosPage } from './pages/ArqueosPage';
+import { ArqueosPendientesPage } from './pages/ArqueosPendientesPage';
+import { CajaOperadoresPage } from './pages/CajaOperadoresPage';
 import { FacturasCompraPage } from './pages/FacturasCompraPage';
 import { CCPage } from './pages/CCPage';
 import { FcePage } from './pages/FcePage';
@@ -147,6 +149,8 @@ export default function App() {
               <Route path="/erp/echeq" element={<EcheqPage />} handle={{ crumb: 'eCheq' }} />
               <Route path="/erp/transferencias" element={<TransferenciasPage />} handle={{ crumb: 'Transferencias' }} />
               <Route path="/erp/arqueos" element={<ArqueosPage />} handle={{ crumb: 'Arqueos' }} />
+              <Route path="/erp/tesoreria/caja-efectivo/arqueos-pendientes" element={<ArqueosPendientesPage />} handle={{ crumb: 'Arqueos pendientes' }} />
+              <Route path="/erp/tesoreria/caja-efectivo/operadores" element={<CajaOperadoresPage />} handle={{ crumb: 'Operadores de caja' }} />
 
               {/* F3 — Compras + CC + FCE */}
               <Route path="/erp/facturas-compra" element={<FacturasCompraPage />} handle={{ crumb: 'Facturas de compra' }} />

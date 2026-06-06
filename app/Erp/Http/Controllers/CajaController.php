@@ -67,6 +67,10 @@ class CajaController
             'fecha' => ['required', 'date'],
             'saldo_fisico' => ['required', 'numeric'],
             'motivo' => ['nullable', 'string', 'max:300'],
+            // v1.42 — grilla billete a billete (opcional pero recomendado).
+            'denominaciones' => ['nullable', 'array'],
+            'denominaciones.*.valor' => ['required_with:denominaciones', 'numeric', 'min:0.01'],
+            'denominaciones.*.cantidad' => ['required_with:denominaciones', 'integer', 'min:0'],
         ]);
 
         try {
@@ -78,7 +82,63 @@ class CajaController
             return $this->domainError($e);
         }
 
-        return response()->json(['ok' => true, 'data' => $arqueo->fresh(['caja', 'asientoAjuste'])], 201);
+        return response()->json(['ok' => true, 'data' => $arqueo->fresh(['caja', 'asientoAjuste', 'denominaciones'])], 201);
+    }
+
+    /**
+     * v1.42 — Autorizar un arqueo en PENDIENTE_AUTORIZACION.
+     * POST /api/erp/caja/arqueos/{id}/autorizar
+     *   body: { decision: AJUSTAR|CERRAR_CON_DISCREPANCIA|RECHAZAR, motivo: string }
+     */
+    public function autorizarArqueo(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'decision' => ['required', 'in:AJUSTAR,CERRAR_CON_DISCREPANCIA,RECHAZAR'],
+            'motivo' => ['nullable', 'string', 'max:500'],
+        ]);
+        $arqueo = ArqueoCaja::findOrFail($id);
+
+        try {
+            $arqueo = $this->service->autorizar($arqueo, [
+                ...$data,
+                'usuario_id' => $request->user()->id,
+            ]);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'data' => $arqueo->fresh(['caja', 'asientoAjuste', 'autorizadoPor', 'denominaciones']),
+        ]);
+    }
+
+    /**
+     * v1.42 — Listado de arqueos PENDIENTE_AUTORIZACION.
+     * GET /api/erp/caja/arqueos-pendientes
+     */
+    public function arqueosPendientes(Request $request): JsonResponse
+    {
+        $rows = ArqueoCaja::query()
+            ->with(['caja:id,codigo,nombre', 'realizadoPor:id,name'])
+            ->where('estado', 'PENDIENTE_AUTORIZACION')
+            ->orderByDesc('fecha')->orderByDesc('id')
+            ->get();
+        return response()->json(['ok' => true, 'data' => $rows]);
+    }
+
+    /**
+     * v1.42 — Catálogo de denominaciones activas (para el form del arqueo).
+     * GET /api/erp/caja/denominaciones-catalogo?moneda=ARS
+     */
+    public function denominacionesCatalogo(Request $request): JsonResponse
+    {
+        $moneda = strtoupper((string) $request->query('moneda', 'ARS'));
+        $rows = \Illuminate\Support\Facades\DB::table('erp_caja_denominaciones_catalogo')
+            ->where('moneda', $moneda)->where('activa', 1)
+            ->orderBy('orden_presentacion')
+            ->get(['id', 'moneda', 'valor', 'descripcion']);
+        return response()->json(['ok' => true, 'data' => $rows]);
     }
 
     public function fechasSinArqueo(Request $request): JsonResponse

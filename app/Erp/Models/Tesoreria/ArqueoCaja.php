@@ -21,6 +21,10 @@ class ArqueoCaja extends Model
         'caja_id', 'fecha',
         'saldo_teorico', 'saldo_fisico',
         'motivo', 'asiento_ajuste_id', 'realizado_por_user_id',
+        // v1.42 — estado + autorización (3 caminos).
+        'estado',
+        'autorizado_por_user_id', 'fecha_autorizacion',
+        'decision_autorizacion', 'motivo_autorizacion',
     ];
 
     protected $casts = [
@@ -29,7 +33,18 @@ class ArqueoCaja extends Model
         'saldo_fisico' => 'decimal:2',
         'diferencia' => 'decimal:2',
         'created_at' => 'datetime',
+        'fecha_autorizacion' => 'datetime',
     ];
+
+    public function denominaciones(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(\App\Erp\Models\Tesoreria\ArqueoCajaDenominacion::class, 'arqueo_id');
+    }
+
+    public function autorizadoPor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'autorizado_por_user_id');
+    }
 
     public function caja(): BelongsTo
     {

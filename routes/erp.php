@@ -276,6 +276,21 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/caja/arqueo', [CajaController::class, 'registrarArqueo'])->name('erp.caja.arqueo');
         Route::get('/caja/fechas-sin-arqueo', [CajaController::class, 'fechasSinArqueo'])
             ->name('erp.caja.fechas-sin-arqueo');
+        // v1.42 Fase A — arqueos con autorización + grilla + operadores.
+        Route::get('/caja/arqueos-pendientes', [CajaController::class, 'arqueosPendientes'])
+            ->name('erp.caja.arqueos-pendientes');
+        Route::post('/caja/arqueos/{id}/autorizar', [CajaController::class, 'autorizarArqueo'])
+            ->whereNumber('id')->name('erp.caja.arqueo.autorizar');
+        Route::get('/caja/denominaciones-catalogo', [CajaController::class, 'denominacionesCatalogo'])
+            ->name('erp.caja.denominaciones-catalogo');
+        Route::get('/users-lookup', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'usersLookup'])
+            ->name('erp.users-lookup');
+        Route::get('/caja/operadores', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'index'])
+            ->name('erp.caja.operadores.index');
+        Route::post('/caja/operadores', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'store'])
+            ->name('erp.caja.operadores.store');
+        Route::delete('/caja/operadores/{id}', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.caja.operadores.destroy');
 
         // Tesorería — transferencias internas (SPEC 02 §6.7, RN-20)
         Route::get('/transferencias-internas', [TransferenciasInternasController::class, 'index'])

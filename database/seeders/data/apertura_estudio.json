@@ -1,0 +1,1760 @@
+{
+  "fuente": "Excel del Estudio Contable — 'Datos a ingresar ERP_LA SRL.xlsx'",
+  "fecha_apertura": "2026-01-01",
+  "asiento_apertura": [
+    {
+      "codigo_estudio": "11101",
+      "descripcion_estudio": "Caja en Pesos Argentinos",
+      "debe": 1943088.7700003244,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11103",
+      "descripcion_estudio": "Valores a Depositar",
+      "debe": 1833998.14,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11104",
+      "descripcion_estudio": "Mercado Pago CVU Nro. 0000003100025848454475",
+      "debe": 3539.12,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11105",
+      "descripcion_estudio": "Banco ICBC Cta. Cte Nro. 053502104573/56",
+      "debe": 44486476.73,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11106",
+      "descripcion_estudio": "Banco BRUBANK Cta. Cte Nro. 2503969759001",
+      "debe": 57133.1,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11107",
+      "descripcion_estudio": "Banco GALICIA Cta. Cte Nro. 0013880-6 077-4",
+      "debe": 631.96,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11108",
+      "descripcion_estudio": "Banco BRUBANK Cta. Cte. REMUNERADA",
+      "debe": 158195610.61,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11301",
+      "descripcion_estudio": "Deudores por Ventas",
+      "debe": 630500935.34,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11305",
+      "descripcion_estudio": "Anticipo a Proveedores",
+      "debe": 16330005.93,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11402",
+      "descripcion_estudio": "IVA - Crédito Fiscal",
+      "debe": 290042.47,
+      "haber": 0.0,
+      "cuenta_erp": "1.1.6.01.21",
+      "cuenta_erp_nombre": "IVA Crédito Fiscal 21%"
+    },
+    {
+      "codigo_estudio": "11403",
+      "descripcion_estudio": "IVA - Percepciones",
+      "debe": 19045.19,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11407",
+      "descripcion_estudio": "Ganancias - Retenciones",
+      "debe": 42274033.62,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11408",
+      "descripcion_estudio": "Ganancias - Percepciones",
+      "debe": 4855175.77,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11410",
+      "descripcion_estudio": "Ganancias - Anticipos",
+      "debe": 20493685.17,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11412",
+      "descripcion_estudio": "IIDDYCC Computable Ley 25413",
+      "debe": 28325328.53,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11413",
+      "descripcion_estudio": "IIBB - Percepciones",
+      "debe": 28567.75,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11414",
+      "descripcion_estudio": "IIBB - Retenciones",
+      "debe": 585841.03,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11419",
+      "descripcion_estudio": "IIBB - Saldo a favor",
+      "debe": 222784.85,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "11701",
+      "descripcion_estudio": "Plan de Autoahorro - Mercedes Benz Accelo",
+      "debe": 69335018.45,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "12102",
+      "descripcion_estudio": "Obras en Curso",
+      "debe": 33229131.67,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "12105",
+      "descripcion_estudio": "Rodados",
+      "debe": 27855464.3,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "12106",
+      "descripcion_estudio": "Amortización Acumulada Rodados",
+      "debe": 0.0,
+      "haber": 22284371.46
+    },
+    {
+      "codigo_estudio": "12107",
+      "descripcion_estudio": "Muebles y Utiles",
+      "debe": 29017227.54,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "12108",
+      "descripcion_estudio": "Amortización Acumulada Muebles y Utiles",
+      "debe": 0.0,
+      "haber": 7523389.97
+    },
+    {
+      "codigo_estudio": "12113",
+      "descripcion_estudio": "Equipos de computación",
+      "debe": 36058734.22,
+      "haber": 0.0
+    },
+    {
+      "codigo_estudio": "12114",
+      "descripcion_estudio": "Amortización Acumulada Equipos de computación",
+      "debe": 0.0,
+      "haber": 13945116.4
+    },
+    {
+      "codigo_estudio": "21101",
+      "descripcion_estudio": "Proveedores",
+      "debe": 0.0,
+      "haber": 206695786.36
+    },
+    {
+      "codigo_estudio": "21201",
+      "descripcion_estudio": "Sueldos a Pagar",
+      "debe": 0.0,
+      "haber": 9044705.7
+    },
+    {
+      "codigo_estudio": "21205",
+      "descripcion_estudio": "SUSS (SS)  a pagar",
+      "debe": 0.0,
+      "haber": 2228607.28
+    },
+    {
+      "codigo_estudio": "21206",
+      "descripcion_estudio": "SUSS (OS)  a pagar",
+      "debe": 0.0,
+      "haber": 1747976.39
+    },
+    {
+      "codigo_estudio": "21207",
+      "descripcion_estudio": "ART a Pagar",
+      "debe": 0.0,
+      "haber": 311381.47
+    },
+    {
+      "codigo_estudio": "21208",
+      "descripcion_estudio": "SCVO a pagar",
+      "debe": 0.0,
+      "haber": 6024.24
+    },
+    {
+      "codigo_estudio": "21209",
+      "descripcion_estudio": "Faecys a Pagar",
+      "debe": 0.0,
+      "haber": 122779.21
+    },
+    {
+      "codigo_estudio": "21210",
+      "descripcion_estudio": "Inacap a Pagar",
+      "debe": 0.0,
+      "haber": 148609.44
+    },
+    {
+      "codigo_estudio": "21212",
+      "descripcion_estudio": "OSECAC a Pagar",
+      "debe": 0.0,
+      "haber": 185300.0
+    },
+    {
+      "codigo_estudio": "21213",
+      "descripcion_estudio": "Cuota Sindical FUVA a Pagar",
+      "debe": 0.0,
+      "haber": 541984.38
+    },
+    {
+      "codigo_estudio": "21301",
+      "descripcion_estudio": "IVA - Débito Fiscal",
+      "debe": 0.0,
+      "haber": 0.02
+    },
+    {
+      "codigo_estudio": "21302",
+      "descripcion_estudio": "IVA - Saldo a Pagar",
+      "debe": 0.0,
+      "haber": 196402328.27
+    },
+    {
+      "codigo_estudio": "21303",
+      "descripcion_estudio": "Impuesto a las Ganancias a Pagar",
+      "debe": 0.0,
+      "haber": 53162955.88
+    },
+    {
+      "codigo_estudio": "21311",
+      "descripcion_estudio": "Impuesto a los Ingresos Brutos a Pagar",
+      "debe": 0.0,
+      "haber": 1328545.66
+    },
+    {
+      "codigo_estudio": "21331",
+      "descripcion_estudio": "ARCA - Plan de pagos U957448",
+      "debe": 0.0,
+      "haber": 14925931.77
+    },
+    {
+      "codigo_estudio": "21340",
+      "descripcion_estudio": "AFIP - Plan de pagos V030565",
+      "debe": 0.0,
+      "haber": 19614162.42
+    },
+    {
+      "codigo_estudio": "21341",
+      "descripcion_estudio": "AFIP - Plan de pagos V155995",
+      "debe": 0.0,
+      "haber": 34253226.82
+    },
+    {
+      "codigo_estudio": "21342",
+      "descripcion_estudio": "AFIP - Plan de pagos V245451",
+      "debe": 0.0,
+      "haber": 36094569.57
+    },
+    {
+      "codigo_estudio": "21343",
+      "descripcion_estudio": "AFIP - Plan de pagos V354836",
+      "debe": 0.0,
+      "haber": 53109550.26
+    },
+    {
+      "codigo_estudio": "21501",
+      "descripcion_estudio": "Prestamo Banco ICBC Nro. 204720603",
+      "debe": 0.0,
+      "haber": 52054030.01
+    },
+    {
+      "codigo_estudio": "21516",
+      "descripcion_estudio": "Tarjeta Corporativa Banco AMEX",
+      "debe": 0.0,
+      "haber": 12764367.97
+    },
+    {
+      "codigo_estudio": "21517",
+      "descripcion_estudio": "Tarjeta Corporativa Banco ICBC",
+      "debe": 0.0,
+      "haber": 9558193.53
+    },
+    {
+      "codigo_estudio": "31101",
+      "descripcion_estudio": "Capital Social",
+      "debe": 0.0,
+      "haber": 200000.0
+    },
+    {
+      "codigo_estudio": "31102",
+      "descripcion_estudio": "Ajuste al Capital",
+      "debe": 0.0,
+      "haber": 14783155.25
+    },
+    {
+      "codigo_estudio": "32101",
+      "descripcion_estudio": "Aportes Irrevocables",
+      "debe": 0.0,
+      "haber": 2706875.45
+    },
+    {
+      "codigo_estudio": "33101",
+      "descripcion_estudio": "Reserva Legal",
+      "debe": 0.0,
+      "haber": 2996631.05
+    },
+    {
+      "codigo_estudio": "34101",
+      "descripcion_estudio": "Resultados del Ejercicio Acumulados",
+      "debe": 0.0,
+      "haber": 377200944.03
+    }
+  ],
+  "clientes": [
+    {
+      "cuit": "30677857516",
+      "razon_social": "ENVIO POSTAL SA",
+      "saldo_inicial": 1764932.62
+    },
+    {
+      "cuit": "30687280438",
+      "razon_social": "LOGINTER S.A.",
+      "saldo_inicial": 66316267.93
+    },
+    {
+      "cuit": "30717024393",
+      "razon_social": "OCA LOG  S.A.",
+      "saldo_inicial": 38600161.55
+    },
+    {
+      "cuit": "30662049618",
+      "razon_social": "ORGANIZACION COURIER ARGENTINA SA (OCASA)",
+      "saldo_inicial": 145569787.99
+    },
+    {
+      "cuit": "33586127549",
+      "razon_social": "TRANS BAN  S A",
+      "saldo_inicial": 9686050.0
+    },
+    {
+      "cuit": "30708286431",
+      "razon_social": "URBANO EXPRESS ARGENTINA S.A.",
+      "saldo_inicial": 366736030.25
+    },
+    {
+      "cuit": "33578089239",
+      "razon_social": "HIJOS DE ROBERTO CANCIO DEMONTE SOCIEDAD ANONIMA",
+      "saldo_inicial": 1827705.0
+    }
+  ],
+  "proveedores": [
+    {
+      "cuit": "20142713757",
+      "razon_social": "GUSTAVO ADOLFO CATALDO",
+      "saldo_inicial": 5006809.5
+    },
+    {
+      "cuit": "20148003506",
+      "razon_social": "SERGIO OSCAR PIERDOMINICI",
+      "saldo_inicial": 2235370.0
+    },
+    {
+      "cuit": "20166499608",
+      "razon_social": "ROBERTO JOSE ALVAREZ",
+      "saldo_inicial": 1056775.23
+    },
+    {
+      "cuit": "20166813000",
+      "razon_social": "ADOLFO OMAR LABEGUERE",
+      "saldo_inicial": 1435554.62
+    },
+    {
+      "cuit": "20167931325",
+      "razon_social": "NORBERTO ENRIQUE MORALES",
+      "saldo_inicial": 72656.24
+    },
+    {
+      "cuit": "20180159739",
+      "razon_social": "MARCELO MARIO POZO",
+      "saldo_inicial": 87251.9
+    },
+    {
+      "cuit": "20210484443",
+      "razon_social": "GUSTAVO ANDRES BOSCH",
+      "saldo_inicial": 1244342.66
+    },
+    {
+      "cuit": "20214288584",
+      "razon_social": "HUGO EZEQUIEL GUZMAN",
+      "saldo_inicial": 583462.95
+    },
+    {
+      "cuit": "20218630724",
+      "razon_social": "CARLOS CESAR DINTER",
+      "saldo_inicial": 693526.33
+    },
+    {
+      "cuit": "30716010917",
+      "razon_social": "ALBO DISTRIBUCIONES SRL",
+      "saldo_inicial": 52000076.41
+    },
+    {
+      "cuit": "20236221882",
+      "razon_social": "MARIANO MARTIN LOPEZ",
+      "saldo_inicial": 911908.09
+    },
+    {
+      "cuit": "20251348317",
+      "razon_social": "MARCOS ANTONIO OLIVA RIQUELME",
+      "saldo_inicial": 789431.68
+    },
+    {
+      "cuit": "20257075657",
+      "razon_social": "FEDERICO TOMAS ADORNO",
+      "saldo_inicial": 565634.09
+    },
+    {
+      "cuit": "20257817491",
+      "razon_social": "SANTIAGO GABRIEL EUSEBI",
+      "saldo_inicial": 521169.51
+    },
+    {
+      "cuit": "20259500789",
+      "razon_social": "EDGAR ALBERTO SOSA",
+      "saldo_inicial": 806418.6
+    },
+    {
+      "cuit": "20260726448",
+      "razon_social": "NICOLAS HERZOG",
+      "saldo_inicial": 256850.0
+    },
+    {
+      "cuit": "20261317231",
+      "razon_social": "JAVIER GUSTAVO ROMERO",
+      "saldo_inicial": 783994.33
+    },
+    {
+      "cuit": "20265544755",
+      "razon_social": "RUBEN EDUARDO HEREDIA",
+      "saldo_inicial": 4310838.87
+    },
+    {
+      "cuit": "20265946942",
+      "razon_social": "MATIAS TREJO",
+      "saldo_inicial": 2734304.44
+    },
+    {
+      "cuit": "20274842459",
+      "razon_social": "JUAN GABRIEL GONZALEZ",
+      "saldo_inicial": 736946.65
+    },
+    {
+      "cuit": "20223935835",
+      "razon_social": "OLINIKA JUAN ALEJANDRO",
+      "saldo_inicial": 1234802.29
+    },
+    {
+      "cuit": "20274929775",
+      "razon_social": "CRISTIAN ALFREDO ZEBALLO",
+      "saldo_inicial": 433349.97
+    },
+    {
+      "cuit": "20277706718",
+      "razon_social": "DAMIAN DE JESUS SANCHEZ",
+      "saldo_inicial": 1227773.97
+    },
+    {
+      "cuit": "20278037399",
+      "razon_social": "DIEGO CESAR ZOTES",
+      "saldo_inicial": 695278.95
+    },
+    {
+      "cuit": "20280344622",
+      "razon_social": "CLAUDIO LEONEL DOMINGUEZ",
+      "saldo_inicial": 3833183.2
+    },
+    {
+      "cuit": "20283353444",
+      "razon_social": "GUSTAVO RAUL BORDON",
+      "saldo_inicial": 1415534.19
+    },
+    {
+      "cuit": "20287622237",
+      "razon_social": "RAMON ERNESTO BLOTTA",
+      "saldo_inicial": 583263.0
+    },
+    {
+      "cuit": "20291886044",
+      "razon_social": "ROBERTO ALEJANDRO MARTINEZ",
+      "saldo_inicial": 460572.0
+    },
+    {
+      "cuit": "20294470744",
+      "razon_social": "DANTE ARIEL LENCINA",
+      "saldo_inicial": 1069982.55
+    },
+    {
+      "cuit": "20301020652",
+      "razon_social": "GERMAN RODRIGO BENITEZ",
+      "saldo_inicial": 3395248.5
+    },
+    {
+      "cuit": "20307667410",
+      "razon_social": "DIEGO PABLO BELOTTI",
+      "saldo_inicial": 1406250.0
+    },
+    {
+      "cuit": "20309535228",
+      "razon_social": "ANGEL DAVID VILLEGAS",
+      "saldo_inicial": 1090200.81
+    },
+    {
+      "cuit": "20312439108",
+      "razon_social": "MARIO NICOLAS CASORATI",
+      "saldo_inicial": 3018666.9
+    },
+    {
+      "cuit": "20321256466",
+      "razon_social": "ADRIAN ROBERTO LACORTE",
+      "saldo_inicial": 870339.66
+    },
+    {
+      "cuit": "20321288813",
+      "razon_social": "LEONEL GASTON ARCE",
+      "saldo_inicial": 155590.3
+    },
+    {
+      "cuit": "20321885269",
+      "razon_social": "DIEGO ANTONIO BATTAUZ",
+      "saldo_inicial": 2955450.54
+    },
+    {
+      "cuit": "20325116081",
+      "razon_social": "JORGE LUIS TRIONFINI",
+      "saldo_inicial": 80000.0
+    },
+    {
+      "cuit": "20326651479",
+      "razon_social": "SERGIO ABRAHAM PINTO ROMERO",
+      "saldo_inicial": 922170.51
+    },
+    {
+      "cuit": "20331303179",
+      "razon_social": "NICOLAS ALFREDO LAZZA",
+      "saldo_inicial": 688432.7
+    },
+    {
+      "cuit": "20335254504",
+      "razon_social": "HERNAN DARIO STRAMBI",
+      "saldo_inicial": 1030441.9
+    },
+    {
+      "cuit": "20339390534",
+      "razon_social": "EMILIO JOSE CARAPUTENY",
+      "saldo_inicial": 275371.0
+    },
+    {
+      "cuit": "20343993154",
+      "razon_social": "MARCOS LEONEL MARTOS",
+      "saldo_inicial": 1833740.7
+    },
+    {
+      "cuit": "20345333518",
+      "razon_social": "MATIAS EZEQUIEL ARANIBE",
+      "saldo_inicial": 980410.0
+    },
+    {
+      "cuit": "20345948083",
+      "razon_social": "RICARDO CLAUDIO FABIAN PALAVECINO",
+      "saldo_inicial": 2483736.07
+    },
+    {
+      "cuit": "20351955415",
+      "razon_social": "RUBEN EZEQUIEL AREVALO",
+      "saldo_inicial": 297601.2
+    },
+    {
+      "cuit": "20355479278",
+      "razon_social": "SILVERIO EMMANUEL LIZARRAGA",
+      "saldo_inicial": 529560.4
+    },
+    {
+      "cuit": "20360799175",
+      "razon_social": "JUAN MANUEL RES",
+      "saldo_inicial": 1869701.0
+    },
+    {
+      "cuit": "20373161358",
+      "razon_social": "MAXIMILIANO GALLEGUILLO",
+      "saldo_inicial": 246617.33
+    },
+    {
+      "cuit": "20380399432",
+      "razon_social": "FERNANDO HERNAN SCHRODER",
+      "saldo_inicial": 1201168.9
+    },
+    {
+      "cuit": "20381098878",
+      "razon_social": "MAYCO GUZMAN ALLAIS",
+      "saldo_inicial": 1090568.86
+    },
+    {
+      "cuit": "20388309335",
+      "razon_social": "MAXIMILIANO JOAQUIN VERA",
+      "saldo_inicial": 767901.75
+    },
+    {
+      "cuit": "20396583527",
+      "razon_social": "LUCAS HERNAN SAVI",
+      "saldo_inicial": 1287473.02
+    },
+    {
+      "cuit": "20396897661",
+      "razon_social": "RAMIRO MANUEL CANEVARI GALO",
+      "saldo_inicial": 855265.55
+    },
+    {
+      "cuit": "20397329977",
+      "razon_social": "PABLO AUGUSTO PAREDES",
+      "saldo_inicial": 540856.22
+    },
+    {
+      "cuit": "20414106782",
+      "razon_social": "TOMAS AGUSTIN LENIS",
+      "saldo_inicial": 797060.2
+    },
+    {
+      "cuit": "20427004199",
+      "razon_social": "AXEL DAMIAN PEREZ",
+      "saldo_inicial": 306966.46
+    },
+    {
+      "cuit": "20448728316",
+      "razon_social": "MAXIMO OSCAR PATRON",
+      "saldo_inicial": 1327632.75
+    },
+    {
+      "cuit": "20465869896",
+      "razon_social": "JOSUE ANGEL SANCHEZ",
+      "saldo_inicial": 844347.85
+    },
+    {
+      "cuit": "20468371597",
+      "razon_social": "KEVIN JEREMIAS JAEGGI",
+      "saldo_inicial": 1243056.78
+    },
+    {
+      "cuit": "20923947680",
+      "razon_social": "SERGIO ROBERT PUNALES",
+      "saldo_inicial": 2155200.4
+    },
+    {
+      "cuit": "23204137579",
+      "razon_social": "FERNANDO ESCUDERO",
+      "saldo_inicial": 1641105.59
+    },
+    {
+      "cuit": "23268097279",
+      "razon_social": "JOSE MARIA RUEFLI",
+      "saldo_inicial": 1700998.0
+    },
+    {
+      "cuit": "23283223884",
+      "razon_social": "DANIELA KARINA MOSCA BERJESIO",
+      "saldo_inicial": 89446.7
+    },
+    {
+      "cuit": "23324332804",
+      "razon_social": "DAIANA ABIGAIL KONCIMAL",
+      "saldo_inicial": 893358.0
+    },
+    {
+      "cuit": "23326523879",
+      "razon_social": "EXEQUIEL ORLANDO MONLA PASUT",
+      "saldo_inicial": 950990.18
+    },
+    {
+      "cuit": "27175521726",
+      "razon_social": "NORMA ESTER CASSE",
+      "saldo_inicial": 1487698.75
+    },
+    {
+      "cuit": "27176679706",
+      "razon_social": "MIRIAM GRISELDA BANDERA",
+      "saldo_inicial": 280000.0
+    },
+    {
+      "cuit": "27190655402",
+      "razon_social": "JESSICA KARINA ESCOBAR GODOY",
+      "saldo_inicial": 2188963.5
+    },
+    {
+      "cuit": "27207586175",
+      "razon_social": "SILVIA SUSANA ALVERO",
+      "saldo_inicial": 573816.48
+    },
+    {
+      "cuit": "27213406650",
+      "razon_social": "MIRIAM YOLANDA GONZALEZ",
+      "saldo_inicial": 756450.0
+    },
+    {
+      "cuit": "27230463447",
+      "razon_social": "MARIA MARCELA FLORES",
+      "saldo_inicial": 1720417.34
+    },
+    {
+      "cuit": "27232265448",
+      "razon_social": "ROSANA PATRICIA QUINTEROS",
+      "saldo_inicial": 1114300.47
+    },
+    {
+      "cuit": "27236975415",
+      "razon_social": "LAURA ANDREA BOCHIO",
+      "saldo_inicial": 1480748.0
+    },
+    {
+      "cuit": "27247208130",
+      "razon_social": "LAURA DANIELA ALIOTO",
+      "saldo_inicial": 1682560.03
+    },
+    {
+      "cuit": "27262913835",
+      "razon_social": "JOHANA CAROLINA SOLIS BORDON",
+      "saldo_inicial": 1265897.32
+    },
+    {
+      "cuit": "27272288696",
+      "razon_social": "MELINA BEATRIZ HAAG",
+      "saldo_inicial": 1197428.5
+    },
+    {
+      "cuit": "27277730745",
+      "razon_social": "YANET VIVIAN BREVIS",
+      "saldo_inicial": 154873.5
+    },
+    {
+      "cuit": "27300598981",
+      "razon_social": "SANDRA ELISABET GEREZ",
+      "saldo_inicial": 91637.0
+    },
+    {
+      "cuit": "27312099441",
+      "razon_social": "ELENA ESTHER MEZA",
+      "saldo_inicial": 220737.98
+    },
+    {
+      "cuit": "27321907593",
+      "razon_social": "KARINA ELIZABETH VERA",
+      "saldo_inicial": 930884.97
+    },
+    {
+      "cuit": "27357213571",
+      "razon_social": "ANABEL YOHANA CUELLAR",
+      "saldo_inicial": 390572.0
+    },
+    {
+      "cuit": "27399776649",
+      "razon_social": "NOHAN DEL BUONO",
+      "saldo_inicial": 1202701.0
+    },
+    {
+      "cuit": "30546689979",
+      "razon_social": "YPF SOCIEDAD ANONIMA",
+      "saldo_inicial": 27821446.31
+    },
+    {
+      "cuit": "30715937960",
+      "razon_social": "LOGISTICA RAVIOL S.R.L",
+      "saldo_inicial": 21560000.0
+    },
+    {
+      "cuit": "30716804972",
+      "razon_social": "TRANSPORTES LEILA SAS",
+      "saldo_inicial": 10964664.26
+    }
+  ],
+  "bienes_uso_historicos": [
+    {
+      "descripcion": "PEUGEOT|BOXER PREMIUM 2.2 HDI 435MH 130|FURGON",
+      "rubro": "Rodados",
+      "fecha_incorporacion": "2023-06-28",
+      "anios_uso_al_inicio": 2.0,
+      "criterio_amortizacion": "",
+      "valor_origen_ajustado": 27855464.3,
+      "valor_alta_ajustado": 0.0,
+      "valor_cierre_ajustado": 27855464.3,
+      "amort_acum_inicio": 16713278.6,
+      "pct_amortizacion": 0.2,
+      "amort_ejercicio": 5571092.86,
+      "amort_acum_cierre": 22284371.46,
+      "valor_residual_cierre": 5571092.84
+    },
+    {
+      "descripcion": "EQUIPOS DE COM",
+      "rubro": "Equipos de computación",
+      "fecha_incorporacion": "2023-06-28",
+      "anios_uso_al_inicio": 2.0,
+      "criterio_amortizacion": "",
+      "valor_origen_ajustado": 32419944.12,
+      "valor_alta_ajustado": 0.0,
+      "valor_cierre_ajustado": 32419944.12,
+      "amort_acum_inicio": 6733369.55,
+      "pct_amortizacion": 0.2,
+      "amort_ejercicio": 6483988.82,
+      "amort_acum_cierre": 13217358.37,
+      "valor_residual_cierre": 19202585.75
+    },
+    {
+      "descripcion": "MUY",
+      "rubro": "Muebles y Utiles",
+      "fecha_incorporacion": "2023-06-28",
+      "anios_uso_al_inicio": 2.0,
+      "criterio_amortizacion": "",
+      "valor_origen_ajustado": 22488446.84,
+      "valor_alta_ajustado": 0.0,
+      "valor_cierre_ajustado": 22488446.84,
+      "amort_acum_inicio": 4621667.22,
+      "pct_amortizacion": 0.1,
+      "amort_ejercicio": 2248844.68,
+      "amort_acum_cierre": 6870511.9,
+      "valor_residual_cierre": 15617934.94
+    },
+    {
+      "descripcion": "Muebles y Utiles",
+      "rubro": "Muebles y Utiles",
+      "fecha_incorporacion": "2025-08-31",
+      "anios_uso_al_inicio": 0.0,
+      "criterio_amortizacion": "Año de alta",
+      "valor_origen_ajustado": 0.0,
+      "valor_alta_ajustado": 92049.88,
+      "valor_cierre_ajustado": 92049.88,
+      "amort_acum_inicio": 0.0,
+      "pct_amortizacion": 0.1,
+      "amort_ejercicio": 9204.99,
+      "amort_acum_cierre": 9204.99,
+      "valor_residual_cierre": 82844.89
+    },
+    {
+      "descripcion": "Muebles y Utiles",
+      "rubro": "Muebles y Utiles",
+      "fecha_incorporacion": "2025-09-30",
+      "anios_uso_al_inicio": 0.0,
+      "criterio_amortizacion": "Año de alta",
+      "valor_origen_ajustado": 0.0,
+      "valor_alta_ajustado": 2365043.21,
+      "valor_cierre_ajustado": 2365043.21,
+      "amort_acum_inicio": 0.0,
+      "pct_amortizacion": 0.1,
+      "amort_ejercicio": 236504.32,
+      "amort_acum_cierre": 236504.32,
+      "valor_residual_cierre": 2128538.89
+    },
+    {
+      "descripcion": "Muebles y Utiles",
+      "rubro": "Muebles y Utiles",
+      "fecha_incorporacion": "2025-10-31",
+      "anios_uso_al_inicio": 0.0,
+      "criterio_amortizacion": "Año de alta",
+      "valor_origen_ajustado": 0.0,
+      "valor_alta_ajustado": 1095945.46,
+      "valor_cierre_ajustado": 1095945.46,
+      "amort_acum_inicio": 0.0,
+      "pct_amortizacion": 0.1,
+      "amort_ejercicio": 109594.55,
+      "amort_acum_cierre": 109594.55,
+      "valor_residual_cierre": 986350.91
+    },
+    {
+      "descripcion": "Muebles y Utiles",
+      "rubro": "Muebles y Utiles",
+      "fecha_incorporacion": "2025-11-30",
+      "anios_uso_al_inicio": 0.0,
+      "criterio_amortizacion": "Año de alta",
+      "valor_origen_ajustado": 0.0,
+      "valor_alta_ajustado": 2975742.15,
+      "valor_cierre_ajustado": 2975742.15,
+      "amort_acum_inicio": 0.0,
+      "pct_amortizacion": 0.1,
+      "amort_ejercicio": 297574.21,
+      "amort_acum_cierre": 297574.21,
+      "valor_residual_cierre": 2678167.93
+    },
+    {
+      "descripcion": "Equipos de computación",
+      "rubro": "Equipos de computación",
+      "fecha_incorporacion": "2025-07-31",
+      "anios_uso_al_inicio": 0.0,
+      "criterio_amortizacion": "Año de alta",
+      "valor_origen_ajustado": 0.0,
+      "valor_alta_ajustado": 2399123.17,
+      "valor_cierre_ajustado": 2399123.17,
+      "amort_acum_inicio": 0.0,
+      "pct_amortizacion": 0.2,
+      "amort_ejercicio": 479824.63,
+      "amort_acum_cierre": 479824.63,
+      "valor_residual_cierre": 1919298.54
+    },
+    {
+      "descripcion": "Equipos de computación",
+      "rubro": "Equipos de computación",
+      "fecha_incorporacion": "2025-12-31",
+      "anios_uso_al_inicio": 0.0,
+      "criterio_amortizacion": "Año de alta",
+      "valor_origen_ajustado": 0.0,
+      "valor_alta_ajustado": 1239666.93,
+      "valor_cierre_ajustado": 1239666.93,
+      "amort_acum_inicio": 0.0,
+      "pct_amortizacion": 0.2,
+      "amort_ejercicio": 247933.39,
+      "amort_acum_cierre": 247933.39,
+      "valor_residual_cierre": 991733.54
+    }
+  ],
+  "obras_en_curso": [
+    {
+      "fecha": "2025-01-20",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00001-00000808",
+      "cuit_emisor": "20338000000",
+      "denominacion_emisor": "FARIAS EMILIANO JULIAN",
+      "neto_gravado_21": 1740235.0,
+      "iva_21": 365449.35,
+      "importe_total": 2105684.35
+    },
+    {
+      "fecha": "2025-06-27",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00003-00000742",
+      "cuit_emisor": "20264000000",
+      "denominacion_emisor": "MOSEVICH ADRIAN ALEJANDRO",
+      "neto_gravado_21": 5029752.19,
+      "iva_21": 1056247.96,
+      "importe_total": 6086000.16
+    },
+    {
+      "fecha": "2025-06-27",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00001-00000282",
+      "cuit_emisor": "30718000000",
+      "denominacion_emisor": "DOÃ‘A GERONIMA",
+      "neto_gravado_21": 4884320.81,
+      "iva_21": 1025707.37,
+      "importe_total": 5910028.17
+    },
+    {
+      "fecha": "2025-07-11",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00001-00009246",
+      "cuit_emisor": "30715000000",
+      "denominacion_emisor": "GRUPO ADAL SRL",
+      "neto_gravado_21": 1836479.0,
+      "iva_21": 385660.59,
+      "importe_total": 2222139.59
+    },
+    {
+      "fecha": "2025-07-14",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00001-00009257",
+      "cuit_emisor": "30715000000",
+      "denominacion_emisor": "GRUPO ADAL SRL",
+      "neto_gravado_21": 1836479.0,
+      "iva_21": 385660.59,
+      "importe_total": 2222139.59
+    },
+    {
+      "fecha": "2025-07-28",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00003-00000782",
+      "cuit_emisor": "20264000000",
+      "denominacion_emisor": "MOSEVICH ADRIAN ALEJANDRO",
+      "neto_gravado_21": 4768600.1,
+      "iva_21": 1001406.02,
+      "importe_total": 5770006.1
+    },
+    {
+      "fecha": "2025-07-29",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00001-00000297",
+      "cuit_emisor": "30718000000",
+      "denominacion_emisor": "DOÃ‘A GERONIMA",
+      "neto_gravado_21": 4089961.86,
+      "iva_21": 858891.99,
+      "importe_total": 4948853.85
+    },
+    {
+      "fecha": "2025-08-20",
+      "tipo_comprobante": "FACTURAS A",
+      "numero_comprobante": "00001-00000313",
+      "cuit_emisor": "30718000000",
+      "denominacion_emisor": "DOÃ‘A GERONIMA",
+      "neto_gravado_21": 5088978.62,
+      "iva_21": 1068685.51,
+      "importe_total": 6157664.11
+    }
+  ],
+  "deudas_bancarias": [
+    {
+      "cuit": "30-70944784-6",
+      "entidad": "ICBC",
+      "tipo": "Préstamo",
+      "importe": 52054030.01,
+      "detalle": "16 cuotas pendientes al 31/12/2025"
+    },
+    {
+      "cuit": "30-70944784-6",
+      "entidad": "ICBC",
+      "tipo": "Tarjeta Corporativa",
+      "importe": 9558193.53,
+      "detalle": "$5.275.709,25 U$ 1.131,25 - Cuotas Pendientes 2.608.175,08"
+    },
+    {
+      "cuit": "30-57481687-0",
+      "entidad": "AMEX",
+      "tipo": "Tarjeta Corporativa",
+      "importe": 12764367.97,
+      "detalle": "$ 12.710.792,92 - U$ 36,57"
+    }
+  ],
+  "prestamo_icbc_detalle": {
+    "numero_prestamo": "0204720603",
+    "tipo_doc": "06",
+    "nro_doc_titular": "30717060985",
+    "titular": "LOGISTICA ARGENTINA SRL",
+    "moneda": "ARS",
+    "cuotas_totales": 24,
+    "cuotas_pendientes_al_screenshot": 12,
+    "capital_original": 70000000.0,
+    "tasa_mensual": 3.08333,
+    "saldo_capital_al_31_12_2025": 52054030.01,
+    "cuotas_pendientes_al_31_12_2025": 16,
+    "comisiones_totales": 2478451.76,
+    "iva_comisiones": 297414.2,
+    "proxima_cuota_visible": {
+      "numero": 13,
+      "fecha_vencimiento": "2026-05-07",
+      "estado": "VIGENTE",
+      "capital": 2998716.79,
+      "intereses": 1273647.44,
+      "iva_int_seg": 152837.69,
+      "total_cuota": 4425201.92
+    },
+    "cuenta_contable_apertura": "2.2.1.01",
+    "auxiliar_sugerido": "PRESTAMO-ICBC-0204720603",
+    "nota_pendiente": "Cronograma completo de 16 cuotas pendientes (cuotas 9-24) debe sacarse de la pantalla del ICBC. Para el seeder de apertura basta con el saldo al 2025-12-31. El cronograma detallado entra en una segunda pasada (v1.44) para alimentar erp_prestamos."
+  },
+  "decisiones": {
+    "D-43-1": {
+      "estado": "resuelta",
+      "tema": "Alicuota IVA Credito Fiscal 290.042,47",
+      "resolucion": "TODO_AL_21",
+      "cuenta": "1.1.6.01.21 IVA Credito Fiscal 21%",
+      "nota": "Matias confirma el 2026-06-06 que el saldo total se imputa a alicuota 21%."
+    },
+    "D-43-2": {
+      "estado": "resuelta",
+      "tema": "Prestamo ICBC corto vs largo plazo",
+      "resolucion": "LARGO_PLAZO",
+      "cuenta": "2.2.1.01"
+    },
+    "D-43-3": {
+      "estado": "resuelta",
+      "tema": "Tarjetas AMEX/ICBC",
+      "resolucion": "OPCION_A",
+      "cuenta": "2.1.4.04",
+      "auxiliares": [
+        "TC-AMEX",
+        "TC-ICBC"
+      ]
+    },
+    "D-43-4": {
+      "estado": "resuelta",
+      "tema": "Obras en Curso categoria AF",
+      "resolucion": "NO_CREAR_CATEGORIA",
+      "nota": "Solo cuenta contable 1.2.1.06, no cargar bienes individuales en /erp/af/bienes"
+    },
+    "D-43-5": {
+      "estado": "resuelta",
+      "tema": "Cronograma 5 planes ARCA/AFIP",
+      "resolucion": "DETALLE_COMPLETO_OBTENIDO",
+      "nota": "Matías obtuvo de ARCA el cronograma completo de los 7 planes (5 originales + 2 nuevos V606071 y W099151). Los 2 nuevos NO están en el asiento de apertura del estudio porque son posteriores."
+    }
+  },
+  "planes_pago_arca": {
+    "U957448": {
+      "nro_plan": "U957448",
+      "descripcion": "RG 5321 - Plan Deuda General",
+      "tipo_plan": "1295",
+      "fecha_consolidacion": "2025-08-04",
+      "cuotas_totales": 8,
+      "capital_total_original": 28316966.3,
+      "interes_financiero_total": 3615045.38,
+      "interes_resarcitorio_total_2venc": 292710.08,
+      "saldo_asiento_apertura_2026_01_01": 14925931.77,
+      "cuenta_contable": "2.1.3.13",
+      "auxiliar": "PLAN-U957448",
+      "incluido_asiento_apertura": true,
+      "cuotas": [
+        {
+          "n": 1,
+          "capital": 3212784.89,
+          "int_fin": 778716.57,
+          "fecha_1venc": "2025-09-16",
+          "fecha_2venc": "2025-09-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        },
+        {
+          "n": 2,
+          "capital": 3301136.47,
+          "int_fin": 690364.99,
+          "fecha_1venc": "2025-10-16",
+          "fecha_2venc": "2025-10-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        },
+        {
+          "n": 3,
+          "capital": 3391917.72,
+          "int_fin": 599583.74,
+          "fecha_1venc": "2025-11-16",
+          "fecha_2venc": "2025-11-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        },
+        {
+          "n": 4,
+          "capital": 3485195.45,
+          "int_fin": 506306.01,
+          "fecha_1venc": "2025-12-16",
+          "fecha_2venc": "2025-12-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        },
+        {
+          "n": 5,
+          "capital": 3581038.34,
+          "int_fin": 410463.12,
+          "fecha_1venc": "2026-01-16",
+          "fecha_2venc": "2026-01-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        },
+        {
+          "n": 6,
+          "capital": 3679516.89,
+          "int_fin": 311984.57,
+          "fecha_1venc": "2026-02-16",
+          "fecha_2venc": "2026-02-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        },
+        {
+          "n": 7,
+          "capital": 3780703.62,
+          "int_fin": 210797.84,
+          "fecha_1venc": "2026-03-16",
+          "fecha_2venc": "2026-03-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        },
+        {
+          "n": 8,
+          "capital": 3884672.92,
+          "int_fin": 106828.54,
+          "fecha_1venc": "2026-04-16",
+          "fecha_2venc": "2026-04-26",
+          "int_res_2venc": 36588.76,
+          "total_1venc": 3991501.46,
+          "total_2venc": 4028090.22
+        }
+      ]
+    },
+    "V030565": {
+      "nro_plan": "V030565",
+      "descripcion": "RG 5321 - Plan Deuda General",
+      "tipo_plan": "1295",
+      "fecha_consolidacion": "2025-08-20",
+      "cuotas_totales": 8,
+      "capital_total_original": 37211316.86,
+      "interes_financiero_total": 4750530.02,
+      "interes_resarcitorio_total_2venc": 384650.32,
+      "saldo_asiento_apertura_2026_01_01": 19614162.42,
+      "cuenta_contable": "2.1.3.13",
+      "auxiliar": "PLAN-V030565",
+      "incluido_asiento_apertura": true,
+      "cuotas": [
+        {
+          "n": 1,
+          "capital": 4221919.65,
+          "int_fin": 1023311.21,
+          "fecha_1venc": "2025-09-16",
+          "fecha_2venc": "2025-09-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        },
+        {
+          "n": 2,
+          "capital": 4338022.44,
+          "int_fin": 907208.42,
+          "fecha_1venc": "2025-10-16",
+          "fecha_2venc": "2025-10-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        },
+        {
+          "n": 3,
+          "capital": 4457318.05,
+          "int_fin": 787912.81,
+          "fecha_1venc": "2025-11-16",
+          "fecha_2venc": "2025-11-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        },
+        {
+          "n": 4,
+          "capital": 4579894.3,
+          "int_fin": 665336.56,
+          "fecha_1venc": "2025-12-16",
+          "fecha_2venc": "2025-12-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        },
+        {
+          "n": 5,
+          "capital": 4705841.39,
+          "int_fin": 539389.47,
+          "fecha_1venc": "2026-01-16",
+          "fecha_2venc": "2026-01-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        },
+        {
+          "n": 6,
+          "capital": 4835252.02,
+          "int_fin": 409978.84,
+          "fecha_1venc": "2026-02-16",
+          "fecha_2venc": "2026-02-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        },
+        {
+          "n": 7,
+          "capital": 4968221.47,
+          "int_fin": 277009.39,
+          "fecha_1venc": "2026-03-16",
+          "fecha_2venc": "2026-03-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        },
+        {
+          "n": 8,
+          "capital": 5104847.54,
+          "int_fin": 140383.32,
+          "fecha_1venc": "2026-04-16",
+          "fecha_2venc": "2026-04-26",
+          "int_res_2venc": 48081.29,
+          "total_1venc": 5245230.86,
+          "total_2venc": 5293312.15
+        }
+      ]
+    },
+    "V155995": {
+      "nro_plan": "V155995",
+      "descripcion": "RG 5321 - Plan Deuda General",
+      "tipo_plan": "1295",
+      "fecha_consolidacion": "2025-09-22",
+      "cuotas_totales": 8,
+      "capital_total_original": 52682677.03,
+      "interes_financiero_total": 6725659.29,
+      "interes_resarcitorio_total_2venc": 544576.4,
+      "saldo_asiento_apertura_2026_01_01": 34253226.82,
+      "cuenta_contable": "2.1.3.13",
+      "auxiliar": "PLAN-V155995",
+      "incluido_asiento_apertura": true,
+      "cuotas": [
+        {
+          "n": 1,
+          "capital": 5977268.42,
+          "int_fin": 1448773.62,
+          "fecha_1venc": "2025-10-16",
+          "fecha_2venc": "2025-10-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        },
+        {
+          "n": 2,
+          "capital": 6141643.3,
+          "int_fin": 1284398.74,
+          "fecha_1venc": "2025-11-16",
+          "fecha_2venc": "2025-11-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        },
+        {
+          "n": 3,
+          "capital": 6310538.49,
+          "int_fin": 1115503.55,
+          "fecha_1venc": "2025-12-16",
+          "fecha_2venc": "2025-12-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        },
+        {
+          "n": 4,
+          "capital": 6484078.3,
+          "int_fin": 941963.74,
+          "fecha_1venc": "2026-01-16",
+          "fecha_2venc": "2026-01-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        },
+        {
+          "n": 5,
+          "capital": 6662390.46,
+          "int_fin": 763651.58,
+          "fecha_1venc": "2026-02-16",
+          "fecha_2venc": "2026-02-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        },
+        {
+          "n": 6,
+          "capital": 6845606.19,
+          "int_fin": 580435.85,
+          "fecha_1venc": "2026-03-16",
+          "fecha_2venc": "2026-03-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        },
+        {
+          "n": 7,
+          "capital": 7033860.36,
+          "int_fin": 392181.68,
+          "fecha_1venc": "2026-04-16",
+          "fecha_2venc": "2026-04-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        },
+        {
+          "n": 8,
+          "capital": 7227291.51,
+          "int_fin": 198750.53,
+          "fecha_1venc": "2026-05-16",
+          "fecha_2venc": "2026-05-26",
+          "int_res_2venc": 68072.05,
+          "total_1venc": 7426042.04,
+          "total_2venc": 7494114.09
+        }
+      ]
+    },
+    "V245451": {
+      "nro_plan": "V245451",
+      "descripcion": "RG 5321 - Plan Deuda General",
+      "tipo_plan": "1295",
+      "fecha_consolidacion": "2025-10-21",
+      "cuotas_totales": 8,
+      "capital_total_original": 46878255.43,
+      "interes_financiero_total": 5984646.01,
+      "interes_resarcitorio_total_2venc": 484576.56,
+      "saldo_asiento_apertura_2026_01_01": 36094569.57,
+      "cuenta_contable": "2.1.3.13",
+      "auxiliar": "PLAN-V245451",
+      "incluido_asiento_apertura": true,
+      "cuotas": [
+        {
+          "n": 1,
+          "capital": 5318710.66,
+          "int_fin": 1289152.02,
+          "fecha_1venc": "2025-11-16",
+          "fecha_2venc": "2025-11-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        },
+        {
+          "n": 2,
+          "capital": 5464975.2,
+          "int_fin": 1142887.48,
+          "fecha_1venc": "2025-12-16",
+          "fecha_2venc": "2025-12-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        },
+        {
+          "n": 3,
+          "capital": 5615262.02,
+          "int_fin": 992600.66,
+          "fecha_1venc": "2026-01-16",
+          "fecha_2venc": "2026-01-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        },
+        {
+          "n": 4,
+          "capital": 5769681.72,
+          "int_fin": 838180.96,
+          "fecha_1venc": "2026-02-16",
+          "fecha_2venc": "2026-02-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        },
+        {
+          "n": 5,
+          "capital": 5928347.97,
+          "int_fin": 679514.71,
+          "fecha_1venc": "2026-03-16",
+          "fecha_2venc": "2026-03-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        },
+        {
+          "n": 6,
+          "capital": 6091377.54,
+          "int_fin": 516485.14,
+          "fecha_1venc": "2026-04-16",
+          "fecha_2venc": "2026-04-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        },
+        {
+          "n": 7,
+          "capital": 6258890.42,
+          "int_fin": 348972.26,
+          "fecha_1venc": "2026-05-16",
+          "fecha_2venc": "2026-05-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        },
+        {
+          "n": 8,
+          "capital": 6431009.9,
+          "int_fin": 176852.78,
+          "fecha_1venc": "2026-06-16",
+          "fecha_2venc": "2026-06-26",
+          "int_res_2venc": 60572.07,
+          "total_1venc": 6607862.68,
+          "total_2venc": 6668434.75
+        }
+      ]
+    },
+    "V354836": {
+      "nro_plan": "V354836",
+      "descripcion": "RG 5321 - Plan Deuda General",
+      "tipo_plan": "1295",
+      "fecha_consolidacion": "2025-11-21",
+      "cuotas_totales": 8,
+      "capital_total_original": 59906408.42,
+      "interes_financiero_total": 7647866.7,
+      "interes_resarcitorio_total_2venc": 619247.52,
+      "saldo_asiento_apertura_2026_01_01": 53109550.26,
+      "cuenta_contable": "2.1.3.13",
+      "auxiliar": "PLAN-V354836",
+      "incluido_asiento_apertura": true,
+      "cuotas": [
+        {
+          "n": 1,
+          "capital": 6796858.16,
+          "int_fin": 1647426.23,
+          "fecha_1venc": "2025-12-16",
+          "fecha_2venc": "2025-12-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        },
+        {
+          "n": 2,
+          "capital": 6983771.76,
+          "int_fin": 1460512.63,
+          "fecha_1venc": "2026-01-16",
+          "fecha_2venc": "2026-01-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        },
+        {
+          "n": 3,
+          "capital": 7175825.48,
+          "int_fin": 1268458.91,
+          "fecha_1venc": "2026-02-16",
+          "fecha_2venc": "2026-02-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        },
+        {
+          "n": 4,
+          "capital": 7373160.88,
+          "int_fin": 1071123.71,
+          "fecha_1venc": "2026-03-16",
+          "fecha_2venc": "2026-03-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        },
+        {
+          "n": 5,
+          "capital": 7575922.6,
+          "int_fin": 868381.79,
+          "fecha_1venc": "2026-04-16",
+          "fecha_2venc": "2026-04-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        },
+        {
+          "n": 6,
+          "capital": 7784260.47,
+          "int_fin": 660023.92,
+          "fecha_1venc": "2026-05-16",
+          "fecha_2venc": "2026-05-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        },
+        {
+          "n": 7,
+          "capital": 7998327.64,
+          "int_fin": 445956.75,
+          "fecha_1venc": "2026-06-16",
+          "fecha_2venc": "2026-06-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        },
+        {
+          "n": 8,
+          "capital": 8218281.63,
+          "int_fin": 226002.78,
+          "fecha_1venc": "2026-07-16",
+          "fecha_2venc": "2026-07-26",
+          "int_res_2venc": 77405.94,
+          "total_1venc": 8444284.39,
+          "total_2venc": 8521690.33
+        }
+      ]
+    },
+    "V606071": {
+      "nro_plan": "V606071",
+      "descripcion": "RG 5321 - Plan Deuda General",
+      "tipo_plan": "1295",
+      "fecha_consolidacion": "2026-01-21",
+      "cuotas_totales": 6,
+      "capital_total_original": 76024697.63,
+      "interes_financiero_total": 7482727.69,
+      "interes_resarcitorio_total_2venc": 765484.74,
+      "saldo_asiento_apertura_2026_01_01": 0.0,
+      "cuenta_contable": "2.1.3.13",
+      "auxiliar": "PLAN-V606071",
+      "incluido_asiento_apertura": false,
+      "nota": "Plan NUEVO no incluido en asiento de apertura del estudio. Consolidado el 2026-01-21 (posterior a fecha asiento). Cargar como asiento contable separado en la fecha de consolidación: Debe 2.1.3.X (IVA/Multas/Intereses fiscales según composición original) / Haber 2.1.3.13 Planes de Pago Fiscales — $76.024.697,63. Cronograma de 6 cuotas para alimentar erp_prestamos.",
+      "cuotas": [
+        {
+          "n": 1,
+          "capital": 11827225.04,
+          "int_fin": 2090679.18,
+          "fecha_1venc": "2026-02-16",
+          "fecha_2venc": "2026-02-26",
+          "int_res_2venc": 127580.79,
+          "total_1venc": 13917904.22,
+          "total_2venc": 14045485.01
+        },
+        {
+          "n": 2,
+          "capital": 12152473.72,
+          "int_fin": 1765430.5,
+          "fecha_1venc": "2026-03-16",
+          "fecha_2venc": "2026-03-26",
+          "int_res_2venc": 127580.79,
+          "total_1venc": 13917904.22,
+          "total_2venc": 14045485.01
+        },
+        {
+          "n": 3,
+          "capital": 12488666.75,
+          "int_fin": 1431237.47,
+          "fecha_1venc": "2026-04-16",
+          "fecha_2venc": "2026-04-26",
+          "int_res_2venc": 127580.79,
+          "total_1venc": 13917904.22,
+          "total_2venc": 14045485.01
+        },
+        {
+          "n": 4,
+          "capital": 12830050.09,
+          "int_fin": 1087854.13,
+          "fecha_1venc": "2026-05-16",
+          "fecha_2venc": "2026-05-26",
+          "int_res_2venc": 127580.79,
+          "total_1venc": 13917904.22,
+          "total_2venc": 14045485.01
+        },
+        {
+          "n": 5,
+          "capital": 13182876.46,
+          "int_fin": 735027.76,
+          "fecha_1venc": "2026-06-16",
+          "fecha_2venc": "2026-06-26",
+          "int_res_2venc": 127580.79,
+          "total_1venc": 13917904.22,
+          "total_2venc": 14045485.01
+        },
+        {
+          "n": 6,
+          "capital": 13545405.57,
+          "int_fin": 372498.85,
+          "fecha_1venc": "2026-07-16",
+          "fecha_2venc": "2026-07-26",
+          "int_res_2venc": 127580.79,
+          "total_1venc": 13917904.22,
+          "total_2venc": 14045485.01
+        }
+      ]
+    },
+    "W099151": {
+      "nro_plan": "W099151",
+      "descripcion": "RG 5321 - Plan Deuda General",
+      "tipo_plan": "1295",
+      "fecha_consolidacion": "2026-05-20",
+      "cuotas_totales": 4,
+      "capital_total_original": 52818113.26,
+      "interes_financiero_total": 3680490.45,
+      "interes_resarcitorio_total_2venc": 517903.88,
+      "saldo_asiento_apertura_2026_01_01": 0.0,
+      "cuenta_contable": "2.1.3.13",
+      "auxiliar": "PLAN-W099151",
+      "incluido_asiento_apertura": false,
+      "nota": "Plan NUEVO no incluido en asiento de apertura del estudio. Consolidado el 2026-05-20 (posterior a fecha asiento). Cargar como asiento contable separado en la fecha de consolidación: Debe 2.1.3.X (IVA/Multas/Intereses fiscales según composición original) / Haber 2.1.3.13 Planes de Pago Fiscales — $52.818.113,26. Cronograma de 4 cuotas para alimentar erp_prestamos. Vencimientos en día 18 (no 16 como los demás).",
+      "cuotas": [
+        {
+          "n": 1,
+          "capital": 12672152.81,
+          "int_fin": 1452498.11,
+          "fecha_1venc": "2026-06-18",
+          "fecha_2venc": "2026-06-28",
+          "int_res_2venc": 129475.97,
+          "total_1venc": 14124650.92,
+          "total_2venc": 14254126.89
+        },
+        {
+          "n": 2,
+          "capital": 13020637.02,
+          "int_fin": 1104013.91,
+          "fecha_1venc": "2026-07-18",
+          "fecha_2venc": "2026-07-28",
+          "int_res_2venc": 129475.97,
+          "total_1venc": 14124650.93,
+          "total_2venc": 14254126.9
+        },
+        {
+          "n": 3,
+          "capital": 13378704.54,
+          "int_fin": 745946.39,
+          "fecha_1venc": "2026-08-18",
+          "fecha_2venc": "2026-08-28",
+          "int_res_2venc": 129475.97,
+          "total_1venc": 14124650.93,
+          "total_2venc": 14254126.9
+        },
+        {
+          "n": 4,
+          "capital": 13746618.89,
+          "int_fin": 378032.04,
+          "fecha_1venc": "2026-09-18",
+          "fecha_2venc": "2026-09-28",
+          "int_res_2venc": 129475.97,
+          "total_1venc": 14124650.93,
+          "total_2venc": 14254126.9
+        }
+      ]
+    }
+  },
+  "asientos_post_apertura": [
+    {
+      "id_logico": "CONST-PLAN-V606071",
+      "fecha": "2026-01-21",
+      "tipo_asiento": "REFI01",
+      "concepto": "Constitución Plan AFIP V606071 - RG 5321 - Refinanciamiento deuda fiscal",
+      "glosa": "Constitución Plan AFIP V606071 (6 cuotas) — composición asumida = IVA a Pagar refinanciado. Si el estudio precisa otra composición, ajustar antes de ejecutar.",
+      "lineas": [
+        {
+          "cuenta_erp": "2.1.3.02",
+          "cuenta_nombre": "IVA a Pagar",
+          "debe": 76024697.63,
+          "haber": 0,
+          "auxiliar": null
+        },
+        {
+          "cuenta_erp": "2.1.3.13",
+          "cuenta_nombre": "Planes de Pago Fiscales",
+          "debe": 0,
+          "haber": 76024697.63,
+          "auxiliar": "PLAN-V606071"
+        }
+      ]
+    },
+    {
+      "id_logico": "CONST-PLAN-W099151",
+      "fecha": "2026-05-20",
+      "tipo_asiento": "REFI01",
+      "concepto": "Constitución Plan AFIP W099151 - RG 5321 - Refinanciamiento deuda fiscal",
+      "glosa": "Constitución Plan AFIP W099151 (4 cuotas) — composición asumida = IVA a Pagar refinanciado. Si el estudio precisa otra composición, ajustar antes de ejecutar.",
+      "lineas": [
+        {
+          "cuenta_erp": "2.1.3.02",
+          "cuenta_nombre": "IVA a Pagar",
+          "debe": 52818113.26,
+          "haber": 0,
+          "auxiliar": null
+        },
+        {
+          "cuenta_erp": "2.1.3.13",
+          "cuenta_nombre": "Planes de Pago Fiscales",
+          "debe": 0,
+          "haber": 52818113.26,
+          "auxiliar": "PLAN-W099151"
+        }
+      ]
+    }
+  ]
+}

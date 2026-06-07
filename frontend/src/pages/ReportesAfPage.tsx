@@ -215,19 +215,19 @@ function AltasBajasTab() {
       {error && <FormError error={errorMessage(error)} />}
       {data && (
         <div className="grid grid-cols-2 gap-3">
-          <KpiCard label="Altas" value={`${data.totales.altas} (${fmtMoney(Number(data.totales.total_altas))})`} />
-          <KpiCard label="Bajas" value={`${data.totales.bajas} (${fmtMoney(Number(data.totales.total_bajas))})`} />
+          <KpiCard label="Altas" value={`${data.totales?.altas ?? 0} (${fmtMoney(Number(data.totales?.total_altas ?? 0))})`} />
+          <KpiCard label="Bajas" value={`${data.totales?.bajas ?? 0} (${fmtMoney(Number(data.totales?.total_bajas ?? 0))})`} />
         </div>
       )}
       {data && (
         <div className="space-y-3">
           <div>
             <div className="text-[11.5px] uppercase font-semibold text-ink-muted mb-1">Altas</div>
-            <DataTable columns={cols} rows={data.altas} loading={isLoading} empty="Sin altas" />
+            <DataTable columns={cols} rows={Array.isArray(data.altas) ? data.altas : []} loading={isLoading} empty="Sin altas" />
           </div>
           <div>
             <div className="text-[11.5px] uppercase font-semibold text-ink-muted mb-1">Bajas</div>
-            <DataTable columns={cols} rows={data.bajas} loading={isLoading} empty="Sin bajas" />
+            <DataTable columns={cols} rows={Array.isArray(data.bajas) ? data.bajas : []} loading={isLoading} empty="Sin bajas" />
           </div>
         </div>
       )}

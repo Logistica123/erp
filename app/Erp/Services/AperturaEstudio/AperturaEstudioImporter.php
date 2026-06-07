@@ -312,9 +312,25 @@ class AperturaEstudioImporter
         }
     }
 
-    /** Obtiene o crea un auxiliar por código (CLI-/PROV-/PLAN-/TC-/PRESTAMO-). */
+    /**
+     * Obtiene o crea un auxiliar. Convención v1.36: si hay CUIT, prioridad
+     * lookup por (cuit, tipo) — evita duplicados cuando ya existe el mismo
+     * proveedor/cliente con otro código (ej. DA-CLI-* vs CLI-{cuit}).
+     */
     private function obtenerOCrearAuxiliar(string $codigo, string $tipo, string $nombre, ?string $cuit = null, ?int $cuentaDefaultId = null): int
     {
+        if ($cuit) {
+            $auxByCuit = DB::table('erp_auxiliares')
+                ->where('empresa_id', self::EMPRESA_ID)
+                ->where('cuit', $cuit)->where('tipo', $tipo)->first();
+            if ($auxByCuit) {
+                if ($cuentaDefaultId && ! $auxByCuit->cuenta_contable_default_id) {
+                    DB::table('erp_auxiliares')->where('id', $auxByCuit->id)
+                        ->update(['cuenta_contable_default_id' => $cuentaDefaultId, 'updated_at' => now()]);
+                }
+                return $auxByCuit->id;
+            }
+        }
         $aux = DB::table('erp_auxiliares')
             ->where('empresa_id', self::EMPRESA_ID)
             ->where('codigo', $codigo)->first();

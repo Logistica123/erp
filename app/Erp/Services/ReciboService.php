@@ -509,7 +509,18 @@ class ReciboService
             // (D=H sobre Deudores por Ventas del mismo cliente) por el total
             // imputado. Contablemente neutro: registra el evento sin tocar
             // bancos/cajas ni otras cuentas. Skipea la lógica normal de débitos.
-            if ($this->esCompensacion((int) $recibo->medio_cobro_id)) {
+            //
+            // Detección automática: compensación pura cuando no hay efectivo
+            // (monto_cobrado=0) ni retenciones, y las NC aplicadas cancelan el
+            // total — el frontend no siempre setea medio_cobro_id porque visualmente
+            // no hay "medio". Sin esto el asiento sólo tendría 1 línea (crédito
+            // Deudores) y AsientoService rebota ASIENTO_MINIMO.
+            $esCompensacionPura = ((float) $recibo->monto_cobrado <= 0.01)
+                && ((float) $recibo->total_retenciones <= 0.01)
+                && ((float) $recibo->total_nc_aplicadas > 0.01)
+                && ((float) $recibo->total_factura > 0.01);
+
+            if ($this->esCompensacion((int) $recibo->medio_cobro_id) || $esCompensacionPura) {
                 $totalCompensado = round((float) $recibo->total_factura, 2);
                 if ($totalCompensado > 0) {
                     $movs = [
@@ -699,7 +710,7 @@ class ReciboService
                 accion: 'RECIBO_EMITIDO',
                 modulo: 'tesoreria',
                 descripcion: sprintf('Recibo %s emitido (asiento #%d, total cancelado $%.2f)',
-                    $recibo->numero_correlativo, $asiento->id, $totalCancelado),
+                    $recibo->numero_correlativo, $asiento->id, $totalCancelado ?? (float) $recibo->total_factura),
                 empresaId: $empresaId,
             );
 

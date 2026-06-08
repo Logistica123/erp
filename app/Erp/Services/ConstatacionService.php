@@ -57,6 +57,13 @@ class ConstatacionService
             'cae' => (string) $payload['cae'],
             'fecha_cbte' => $payload['fecha_cbte'] ?? null,
             'imp_total' => $payload['imp_total'] ?? null,
+            // El receptor lo pasa el caller (PDF, factura, etc.). Si no viene,
+            // el gateway defaultea al CUIT representado — válido sólo para
+            // facturas emitidas por la propia empresa.
+            'cuit_receptor' => isset($payload['cuit_receptor']) && $payload['cuit_receptor'] !== ''
+                ? preg_replace('/[^0-9]/', '', (string) $payload['cuit_receptor'])
+                : null,
+            'doc_tipo_receptor' => isset($payload['doc_tipo_receptor']) ? (int) $payload['doc_tipo_receptor'] : null,
         ]);
 
         if (! $response->ok()) {

@@ -95,6 +95,11 @@ class ControlFacturaService
                 'cae' => (string) $campos['cae'],
                 'fecha_cbte' => $campos['fecha_emision'],
                 'imp_total' => $campos['importe_total'],
+                // El receptor sale del PDF — puede ser cualquier CUIT,
+                // no necesariamente el de Logística (la factura puede estar
+                // dirigida a otra empresa del grupo o a un cliente).
+                'cuit_receptor' => (string) ($campos['cuit_receptor'] ?? ''),
+                'doc_tipo_receptor' => (int) ($campos['tipo_doc_receptor'] ?? 80),
             ]);
             // Mapeo: VALIDO → A, INVALIDO → R, NO_ENCONTRADO → R, ERROR → ERROR
             $wscdcResult['resultado'] = match ($r['resultado']) {

@@ -173,14 +173,13 @@ function ValidarModal({ onClose }: { onClose: () => void }) {
     try {
       const fd = new FormData();
       fd.append('pdf', file);
-      const res = await fetch('/api/erp/control-facturas/extraer', {
-        method: 'POST', body: fd, credentials: 'include',
-      });
-      const body = await res.json();
-      if (!res.ok) throw new ApiError(res.status, body, body?.error?.message ?? 'Error extracción');
-      const p = body.data as ExtraccionResp;
-      setPreview(p);
-      setCampos(p.extraccion.campos);
+      // Usa el cliente api (manda Authorization: Bearer + maneja FormData).
+      const body = await api.post<{ ok: boolean; data: ExtraccionResp; error?: { message: string } }>(
+        '/api/erp/control-facturas/extraer', fd,
+      );
+      if (body.ok === false) throw new ApiError(409, body, body.error?.message ?? 'Error extracción');
+      setPreview(body.data);
+      setCampos(body.data.extraccion.campos);
     } catch (e) {
       toast.error('No se pudo procesar el PDF', errorMessage(e));
     } finally {

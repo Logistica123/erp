@@ -68,7 +68,15 @@ class ConstatacionService
         }
 
         $data = $response->json();
-        $resultado = mb_strtoupper($data['resultado'] ?? self::RESULTADO_NO_ENCONTRADO);
+        // Gateway devuelve 'A' (aprobado) / 'R' (rechazado). Mapeamos al enum
+        // legacy del service para no romper consumidores.
+        $resGateway = mb_strtoupper((string) ($data['resultado'] ?? ''));
+        $resultado = match ($resGateway) {
+            'A' => self::RESULTADO_VALIDO,
+            'R' => self::RESULTADO_INVALIDO,
+            'VALIDO', 'INVALIDO', 'NO_ENCONTRADO' => $resGateway, // ya viene mapeado
+            default => self::RESULTADO_NO_ENCONTRADO,
+        };
 
         return [
             'resultado' => $resultado,

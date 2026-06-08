@@ -16,12 +16,13 @@ class ArcaGatewayClient
 {
     private function request(): PendingRequest
     {
-        return Http::baseUrl(config('services.arca.gateway_url'))
+        $cfg = config('services.arca_gateway', []);
+        return Http::baseUrl($cfg['url'] ?? 'http://127.0.0.1:8000')
             ->withHeaders([
-                'X-Client-Id' => config('services.arca.client_id'),
-                'X-API-Key' => config('services.arca.api_key'),
+                'X-Client-Id' => $cfg['client_id'] ?? null,
+                'X-API-Key' => $cfg['api_key'] ?? null,
             ])
-            ->timeout(35)
+            ->timeout((int) ($cfg['timeout'] ?? 35))
             ->acceptJson();
     }
 
@@ -67,12 +68,27 @@ class ArcaGatewayClient
     }
 
     /**
-     * Constata CAE de un comprobante recibido (WS COMP_CONSULT) —
-     * devuelve VALIDO / INVALIDO / NO_ENCONTRADO más datos de AFIP.
+     * Constata CAE de un comprobante recibido (WSCDC) — devuelve A (válido)
+     * / R (rechazado) más datos AFIP. Endpoint real del gateway:
+     * `/comprobantes/constatar` (introducido en v1.28+; `/wsfe/constatar`
+     * era un alias que nunca existió en el gateway).
      */
     public function constatar(array $payload): Response
     {
-        return $this->request()->post('/wsfe/constatar', $payload);
+        // Gateway espera shape ConstatacionRequest (snake_case AFIP).
+        $body = [
+            'cuit_emisor' => preg_replace('/[^0-9]/', '', (string) ($payload['cuit_emisor'] ?? '')),
+            'tipo_cbte' => (int) ($payload['tipo_cbte'] ?? $payload['tipo'] ?? 0),
+            'pto_vta' => (int) ($payload['pto_vta'] ?? 0),
+            'nro_cbte' => (int) ($payload['cbte_nro'] ?? $payload['numero'] ?? 0),
+            'cae' => (string) ($payload['cae'] ?? ''),
+            'fecha_emision' => $payload['fecha_cbte'] ?? $payload['fecha_emision'] ?? null,
+            'importe_total' => (float) ($payload['imp_total'] ?? $payload['importe_total'] ?? 0),
+            'cuit_receptor' => preg_replace('/[^0-9]/', '',
+                (string) ($payload['cuit_receptor'] ?? config('services.arca_gateway.cuit_representado') ?? '30717060985')),
+            'doc_tipo_receptor' => (int) ($payload['doc_tipo_receptor'] ?? 80),
+        ];
+        return $this->request()->post('/comprobantes/constatar', $body);
     }
 
     /**

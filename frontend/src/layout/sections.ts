@@ -126,6 +126,7 @@ export const sections: NavSection[] = [
       { to: '/erp/arca/dashboard', label: 'Estado gateway', icon: CloudCog },
       { to: '/erp/arca/padron', label: 'Padrón AFIP', icon: ShieldCheck },
       { to: '/erp/arca/constatacion', label: 'Constatación CAE', icon: ShieldCheck },
+      { to: '/erp/control-facturas', label: 'Control de facturas', icon: ShieldCheck },
       { to: '/erp/arca/mis-comprobantes', label: 'Mis Comprobantes (scraper)', icon: Truck },
     ],
   },

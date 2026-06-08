@@ -684,6 +684,24 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/arca/estado', [ArcaController::class, 'estado'])->name('erp.arca.estado');
         Route::post('/arca/puntos-venta/sincronizar', [ArcaController::class, 'puntosVentaAfip'])
             ->name('erp.arca.puntos-venta.sincronizar');
+
+        // v1.44 — Control facturas (PDF → WSCDC + APOC) — módulo paralelo de control.
+        Route::post('/control-facturas/extraer', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'extraer'])
+            ->name('erp.control-facturas.extraer');
+        Route::post('/control-facturas/validar', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'validar'])
+            ->name('erp.control-facturas.validar');
+        Route::get('/control-facturas/alertas', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'alertas'])
+            ->name('erp.control-facturas.alertas');
+        Route::patch('/control-facturas/alertas/{id}/leer', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'marcarAlertaLeida'])
+            ->whereNumber('id')->name('erp.control-facturas.alertas.leer');
+        Route::get('/control-facturas', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'index'])
+            ->name('erp.control-facturas.index');
+        Route::get('/control-facturas/{id}', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'show'])
+            ->whereNumber('id')->name('erp.control-facturas.show');
+        Route::patch('/control-facturas/{id}/seguimiento', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'actualizarSeguimiento'])
+            ->whereNumber('id')->name('erp.control-facturas.seguimiento');
+        Route::delete('/control-facturas/{id}', [\App\Erp\Http\Controllers\ControlFacturasController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.control-facturas.destroy');
         Route::get('/mis-comprobantes/runs', [ArcaController::class, 'misComprobantesRuns'])
             ->name('erp.arca.mc.runs');
         Route::get('/puntos-venta/afip', [ArcaController::class, 'puntosVentaAfip'])

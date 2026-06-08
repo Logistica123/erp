@@ -143,8 +143,9 @@ class PadronService
                 'nombre' => $data['nombre'] ?? null,
                 'apellido' => $data['apellido'] ?? null,
                 'tipo_persona' => $data['tipo_persona'] ?? null,
-                'estado_cuit' => $data['estado_cuit'] ?? null,
-                'condicion_iva_afip' => $data['condicion_iva_afip'] ?? null,
+                // Gateway responde con clave `estado` (no `estado_cuit`). Aceptamos ambas.
+                'estado_cuit' => $data['estado_cuit'] ?? $data['estado'] ?? 'DESCONOCIDO',
+                'condicion_iva_afip' => $data['condicion_iva_afip'] ?? $data['condicion_iva'] ?? null,
                 'condicion_iva_id' => $this->resolverCondicionIvaId($data['condicion_iva_afip'] ?? null),
                 'domicilio_fiscal' => $data['domicilio_fiscal'] ?? null,
                 'actividades' => $data['actividades'] ?? null,

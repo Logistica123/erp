@@ -285,6 +285,14 @@ class LibroIvaComprasImportController
             'periodo_id' => ['required', 'integer', 'exists:erp_periodos,id'],
             // v1.27 — opcional: setear el período trabajado en la misma operación.
             'periodo_trabajado_texto' => ['nullable', 'string', 'max:20', 'regex:/^(|\d{4}-\d{2}(-Q[12])?)$/'],
+            // Enriquecimiento al tomar — mismos campos que setea el importador
+            // enriquecido. Se aplican a TODAS las facturas seleccionadas.
+            'cliente_auxiliar_id' => ['nullable', 'integer', 'exists:erp_auxiliares,id'],
+            'observaciones' => ['nullable', 'string', 'max:500'],
+            'tipo_gasto' => ['nullable', 'string', 'max:80'],
+            'jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
+            'op_externa' => ['nullable', 'string', 'max:50'],
+            'fecha_pago' => ['nullable', 'date'],
         ]);
         try {
             $tomadas = $this->svc->tomarFacturas(
@@ -293,8 +301,35 @@ class LibroIvaComprasImportController
                 $request->user(),
                 (int) ($request->header('X-Empresa-Id') ?: 1),
                 $data['periodo_trabajado_texto'] ?? null,
+                array_intersect_key($data, array_flip([
+                    'cliente_auxiliar_id', 'observaciones', 'tipo_gasto',
+                    'jurisdiccion_codigo', 'op_externa', 'fecha_pago',
+                ])),
             );
             return response()->json(['ok' => true, 'data' => ['tomadas' => $tomadas]]);
+        } catch (DomainException $e) {
+            return $this->errorDomain($e);
+        }
+    }
+
+    /**
+     * POST /api/erp/libro-iva-compras/destomar — revierte una toma accidental.
+     * La factura vuelve al listado de no-tomadas (su mes original por fecha
+     * de emisión) y se borra el asiento del período donde se había imputado.
+     */
+    public function destomarFacturas(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'factura_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'factura_ids.*' => ['integer'],
+        ]);
+        try {
+            $n = $this->svc->destomarFacturas(
+                $data['factura_ids'],
+                $request->user(),
+                (int) ($request->header('X-Empresa-Id') ?: 1),
+            );
+            return response()->json(['ok' => true, 'data' => ['destomadas' => $n]]);
         } catch (DomainException $e) {
             return $this->errorDomain($e);
         }

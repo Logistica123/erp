@@ -37,12 +37,21 @@ type Ejercicio = { id: number };
 const MESES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+type Auxiliar = { id: number; codigo: string; nombre: string };
+
 export function LibroIvaComprasNoTomadasPage() {
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [periodoTarget, setPeriodoTarget] = useState('');
   // v1.27 — período trabajado opcional al tomar (asigna en la misma operación).
   const [periodoTrabajado, setPeriodoTrabajado] = useState('');
   const [periodoTrabajadoErr, setPeriodoTrabajadoErr] = useState<string | null>(null);
+  // Enriquecimiento al tomar — mismos campos que el importador. Se aplican
+  // a todas las facturas seleccionadas.
+  const [extrasOpen, setExtrasOpen] = useState(false);
+  const [extras, setExtras] = useState({
+    clienteAuxiliarId: '', observaciones: '', tipoGasto: '',
+    jurisdiccion: '', opExterna: '', fechaPago: '',
+  });
 
   const toast = useToast();
   const invalidate = useInvalidate(['libro-iva-compras-no-tomadas']);
@@ -50,6 +59,12 @@ export function LibroIvaComprasNoTomadasPage() {
   const { data: filas, isLoading, error } = useApi<FacturaNoTomada[]>(
     ['libro-iva-compras-no-tomadas'],
     '/api/erp/libro-iva-compras/no-tomadas'
+  );
+
+  const { data: clientes } = useApi<Auxiliar[]>(
+    ['auxiliares', 'clientes-no-tomadas'],
+    '/api/erp/auxiliares?tipo=Cliente',
+    { enabled: extrasOpen },
   );
 
   const { data: ejercicios } = useApi<Ejercicio[]>(['ejercicios'], '/api/erp/ejercicios');
@@ -67,7 +82,7 @@ export function LibroIvaComprasNoTomadasPage() {
     [periodos]
   );
 
-  const tomar = useApiMutation<{ tomadas: number }, { factura_ids: number[]; periodo_id: number; periodo_trabajado_texto?: string }>(
+  const tomar = useApiMutation<{ tomadas: number }, Record<string, unknown>>(
     (vars) => api.post('/api/erp/libro-iva-compras/no-tomadas/tomar', vars),
     {
       onSuccess: (r) => {
@@ -78,6 +93,7 @@ export function LibroIvaComprasNoTomadasPage() {
             : 'Se generaron los asientos correspondientes en el período seleccionado.');
         setSeleccion(new Set());
         setPeriodoTrabajado('');
+        setExtras({ clienteAuxiliarId: '', observaciones: '', tipoGasto: '', jurisdiccion: '', opExterna: '', fechaPago: '' });
         invalidate();
       },
       onError: (e) => {
@@ -112,6 +128,13 @@ export function LibroIvaComprasNoTomadasPage() {
       factura_ids: [...seleccion],
       periodo_id: Number(periodoTarget),
       ...(pt ? { periodo_trabajado_texto: pt } : {}),
+      // Campos de enriquecimiento (solo los completados).
+      ...(extras.clienteAuxiliarId ? { cliente_auxiliar_id: Number(extras.clienteAuxiliarId) } : {}),
+      ...(extras.observaciones.trim() ? { observaciones: extras.observaciones.trim() } : {}),
+      ...(extras.tipoGasto.trim() ? { tipo_gasto: extras.tipoGasto.trim() } : {}),
+      ...(extras.jurisdiccion.trim() ? { jurisdiccion_codigo: extras.jurisdiccion.trim().padStart(3, '0') } : {}),
+      ...(extras.opExterna.trim() ? { op_externa: extras.opExterna.trim() } : {}),
+      ...(extras.fechaPago ? { fecha_pago: extras.fechaPago } : {}),
     });
   };
 
@@ -169,6 +192,44 @@ export function LibroIvaComprasNoTomadasPage() {
                 Selección: <strong>{seleccion.size}</strong> facturas ·
                 Neto: <strong>{fmtMoney(totalNeto)}</strong> ·
                 Total: <strong>{fmtMoney(totalTotal)}</strong>
+              </div>
+            )}
+          </div>
+
+          {/* Datos adicionales — mismos campos que el importador enriquecido.
+              Se aplican a TODAS las facturas seleccionadas al tomar. */}
+          <div className="border border-line rounded-md">
+            <button type="button"
+              className="w-full text-left px-3 py-2 text-[12px] font-medium text-azure hover:bg-surface-hover"
+              onClick={() => setExtrasOpen((v) => !v)}>
+              {extrasOpen ? '▾' : '▸'} Datos adicionales al tomar (cliente, tipo, jurisdicción, OP, fecha de pago…)
+            </button>
+            {extrasOpen && (
+              <div className="px-3 pb-3 space-y-2">
+                <div className="text-[11px] text-ink-muted">
+                  Estos valores se aplican a <strong>todas</strong> las facturas seleccionadas.
+                  Dejá vacío lo que no quieras setear (cada campo se puede editar después
+                  inline desde el listado de Facturas de compra).
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <SelectField label="Cliente" value={extras.clienteAuxiliarId}
+                    onChange={(e) => setExtras({ ...extras, clienteAuxiliarId: e.target.value })}
+                    placeholder="—"
+                    options={(clientes ?? []).map((c) => ({ value: String(c.id), label: c.nombre }))} />
+                  <Field label="Tipo gasto" value={extras.tipoGasto}
+                    onChange={(e) => setExtras({ ...extras, tipoGasto: e.target.value })}
+                    placeholder="COMBUSTIBLE, PEAJE…" />
+                  <Field label="Jurisdicción (cód. 3 dígitos)" value={extras.jurisdiccion}
+                    onChange={(e) => setExtras({ ...extras, jurisdiccion: e.target.value })}
+                    placeholder="902" />
+                  <Field label="OP" value={extras.opExterna}
+                    onChange={(e) => setExtras({ ...extras, opExterna: e.target.value })}
+                    placeholder="OP-1234" />
+                  <Field label="Fecha de pago" type="date" value={extras.fechaPago}
+                    onChange={(e) => setExtras({ ...extras, fechaPago: e.target.value })} />
+                  <Field label="Observaciones" value={extras.observaciones}
+                    onChange={(e) => setExtras({ ...extras, observaciones: e.target.value })} />
+                </div>
               </div>
             )}
           </div>

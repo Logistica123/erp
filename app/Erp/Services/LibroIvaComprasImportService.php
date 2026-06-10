@@ -373,13 +373,22 @@ class LibroIvaComprasImportService
         ];
     }
 
-    /** Tomar facturas previamente marcadas como no_tomada en un período X. */
+    /**
+     * Tomar facturas previamente marcadas como no_tomada en un período X.
+     *
+     * $campos (opcional) — datos de enriquecimiento que el importador normal
+     * permite y que el flujo "tomar" no cubría: se aplican A TODAS las facturas
+     * seleccionadas (la pantalla típicamente toma de a una). Claves soportadas:
+     * cliente_auxiliar_id, observaciones, tipo_gasto, jurisdiccion_codigo,
+     * op_externa, fecha_pago.
+     */
     public function tomarFacturas(
         array $facturaIds,
         int $periodoId,
         User $usuario,
         int $empresaId = 1,
         ?string $periodoTrabajadoTexto = null,
+        array $campos = [],
     ): int {
         $periodo = DB::table('erp_periodos')->where('id', $periodoId)->first();
         if (! $periodo) throw new DomainException('PERIODO_NO_ENCONTRADO');
@@ -407,6 +416,13 @@ class LibroIvaComprasImportService
             if ($periodoTrabajadoTexto !== null && $periodoTrabajadoTexto !== '') {
                 $updateFields['periodo_trabajado_texto'] = $periodoTrabajadoTexto;
             }
+            // Enriquecimiento al tomar — mismos campos que setea el importador.
+            foreach (['cliente_auxiliar_id', 'observaciones', 'tipo_gasto',
+                      'jurisdiccion_codigo', 'op_externa', 'fecha_pago'] as $k) {
+                if (array_key_exists($k, $campos) && $campos[$k] !== null && $campos[$k] !== '') {
+                    $updateFields[$k] = $campos[$k];
+                }
+            }
             $f->update($updateFields);
             // Generar asiento si no tiene.
             if (! $f->asiento_id) {
@@ -428,6 +444,86 @@ class LibroIvaComprasImportService
         );
 
         return $tomadas;
+    }
+
+    /**
+     * Revierte una toma accidental: la factura vuelve al listado de
+     * "no tomadas" (su mes original, por fecha_emision) y desaparece del
+     * período donde fue imputada.
+     *
+     * Qué hace por factura:
+     *  - Valida que el período donde está imputada esté ABIERTO.
+     *  - Borra físicamente el asiento contable (patrón borrarMasivo v1.22:
+     *    el asiento de una toma errónea es ruido, no se reversa).
+     *  - Limpia filas dependientes del período (libro IVA detalle, IIBB).
+     *  - Setea no_tomada=1. fecha_imputacion/periodo_id quedan como están —
+     *    se recalculan al re-tomar.
+     *
+     * Solo aplica a facturas origen LIBRO_IVA_IMPORT (las manuales no tienen
+     * flujo tomar/destomar).
+     *
+     * @return int cantidad de facturas destomadas
+     */
+    public function destomarFacturas(array $facturaIds, User $usuario, int $empresaId = 1): int
+    {
+        $facturas = FacturaCompra::whereIn('id', $facturaIds)
+            ->where('empresa_id', $empresaId)
+            ->where('no_tomada', 0)
+            ->where('origen', 'LIBRO_IVA_IMPORT')
+            ->get();
+
+        if ($facturas->isEmpty()) {
+            throw new DomainException('SIN_FACTURAS: ninguna de las seleccionadas es destomable (deben ser importadas del Libro IVA y estar tomadas).');
+        }
+
+        // Validar períodos abiertos ANTES de tocar nada.
+        $periodoIds = $facturas->pluck('periodo_id')->filter()->unique();
+        $cerrados = DB::table('erp_periodos')
+            ->whereIn('id', $periodoIds)
+            ->whereIn('estado', ['CERRADO', 'BLOQUEADO'])
+            ->get(['anio', 'mes']);
+        if ($cerrados->isNotEmpty()) {
+            $lista = $cerrados->map(fn ($p) => sprintf('%02d/%d', $p->mes, $p->anio))->implode(', ');
+            throw new DomainException("PERIODO_CERRADO: no se puede destomar facturas imputadas en períodos cerrados ({$lista}). Reabrir el período primero.");
+        }
+
+        $destomadas = 0;
+        DB::transaction(function () use ($facturas, $usuario, $empresaId, &$destomadas) {
+            DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
+
+            $facturaIds = $facturas->pluck('id')->all();
+            $asientoIds = $facturas->pluck('asiento_id')->filter()->unique()->values()->all();
+
+            // Filas dependientes que referencian la factura en el período tomado.
+            DB::table('erp_libro_iva_detalle')->whereIn('factura_compra_id', $facturaIds)->delete();
+            DB::table('erp_iibb_jurisdiccion_mov')->whereIn('factura_compra_id', $facturaIds)->delete();
+
+            // Desvincular y borrar asientos (movimientos caen por CASCADE).
+            DB::table('erp_facturas_compra')->whereIn('id', $facturaIds)->update(['asiento_id' => null]);
+            if (! empty($asientoIds)) {
+                \App\Erp\Models\Asiento::whereIn('id', $asientoIds)->forceDelete();
+            }
+
+            DB::table('erp_facturas_compra')->whereIn('id', $facturaIds)->update([
+                'no_tomada' => 1,
+                'updated_at' => now(),
+            ]);
+            $destomadas = count($facturaIds);
+        });
+
+        $this->audit->logEvento(
+            accion: 'DESTOMAR_FACTURAS_COMPRA',
+            modulo: 'compras',
+            descripcion: sprintf(
+                'Toma revertida: %d facturas vuelven a no-tomadas. IDs: %s · asientos borrados: %s',
+                $destomadas,
+                $facturas->pluck('id')->implode(','),
+                $facturas->pluck('asiento_id')->filter()->implode(',') ?: '(sin asientos)',
+            ),
+            empresaId: $empresaId,
+        );
+
+        return $destomadas;
     }
 
     // ---------- Helpers privados ----------

@@ -4,7 +4,7 @@ import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factu
 import { OpExternaCell, FechaPagoCell } from '@/components/factura/PagoInfoCells';
 import { CategoriaModal } from '@/components/factura/CategoriaModal';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange, FileDown } from 'lucide-react';
+import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange, FileDown, Undo2 } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -222,6 +222,22 @@ export function FacturasCompraPage() {
 
   const [editarPeriodoOpen, setEditarPeriodoOpen] = useState(false);
   const usaSelector = (periodosDistinct?.length ?? 0) > 0;
+
+  // Destomar — revierte una toma accidental (vuelve a no-tomadas + borra asiento).
+  const toastDestomar = useToast();
+  const invalidateDestomar = useInvalidate(['facturas-compra'], ['libro-iva-compras-no-tomadas']);
+  const destomar = useApiMutation<{ destomadas: number }, { factura_ids: number[] }>(
+    (vars) => api.post('/api/erp/libro-iva-compras/destomar', vars),
+    {
+      onSuccess: (r) => {
+        toastDestomar.success(`${r.destomadas} factura(s) destomada(s)`,
+          'Volvieron al listado de no-tomadas. El asiento del período fue eliminado.');
+        setSelectedIds(new Set());
+        invalidateDestomar();
+      },
+      onError: (e) => toastDestomar.error('No se pudo destomar', errorMessage(e)),
+    },
+  );
 
   const filas = data?.data ?? [];
   const todoSeleccionado = filas.length > 0 && filas.every((r) => selectedIds.has(r.id));
@@ -481,6 +497,18 @@ export function FacturasCompraPage() {
                 {puedeEditarPeriodo && (
                   <Button size="sm" variant="primary" onClick={() => setEditarPeriodoOpen(true)}>
                     <CalendarRange className="w-3 h-3" /> Asignar período
+                  </Button>
+                )}
+                {puedeEditarPeriodo && (
+                  <Button size="sm" variant="outline"
+                    disabled={destomar.isPending}
+                    title="Revierte una toma accidental: borra el asiento y la factura vuelve al listado de no-tomadas (su mes original)."
+                    onClick={() => {
+                      if (confirm(`¿Destomar ${selectedIds.size} factura(s)? Se borra el asiento del período donde fueron imputadas y vuelven al listado de no-tomadas. Solo aplica a importadas del Libro IVA.`)) {
+                        destomar.mutate({ factura_ids: [...selectedIds] });
+                      }
+                    }}>
+                    <Undo2 className="w-3 h-3" /> {destomar.isPending ? 'Destomando…' : `Destomar ${selectedIds.size}`}
                   </Button>
                 )}
                 {puedeBorrarMasivo && (

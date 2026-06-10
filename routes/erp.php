@@ -531,6 +531,8 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.livc.no-tomadas');
         Route::post('/libro-iva-compras/no-tomadas/tomar', [LibroIvaComprasImportController::class, 'tomarFacturas'])
             ->name('erp.livc.no-tomadas.tomar');
+        Route::post('/libro-iva-compras/destomar', [LibroIvaComprasImportController::class, 'destomarFacturas'])
+            ->name('erp.livc.destomar');
 
         // v1.45 — Importador del Libro IVA Ventas (espejo del v1.9 compras).
         Route::post('/libro-iva-ventas/import/preview', [LibroIvaVentasImportController::class, 'preview'])

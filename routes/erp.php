@@ -388,6 +388,20 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/tesoreria/recibos/proximo-numero', [\App\Erp\Http\Controllers\RecibosController::class, 'proximoNumero'])
             ->name('erp.recibos.proximo-numero');
 
+        // Cheques recibidos (papel) — capturados al emitir recibo con medio CHEQUES_CARTERA.
+        Route::get('/tesoreria/cheques-recibidos', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'index'])
+            ->name('erp.cheques-recibidos.index');
+        Route::get('/tesoreria/cheques-recibidos/alertas', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'alertas'])
+            ->name('erp.cheques-recibidos.alertas');
+        Route::post('/tesoreria/cheques-recibidos/{id}/depositar', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'depositar'])
+            ->whereNumber('id')->name('erp.cheques-recibidos.depositar');
+        Route::post('/tesoreria/cheques-recibidos/{id}/cobrar', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'cobrar'])
+            ->whereNumber('id')->name('erp.cheques-recibidos.cobrar');
+        Route::post('/tesoreria/cheques-recibidos/{id}/rechazar', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'rechazar'])
+            ->whereNumber('id')->name('erp.cheques-recibidos.rechazar');
+        Route::post('/tesoreria/cheques-recibidos/marcar-vencidos', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'marcarVencidos'])
+            ->name('erp.cheques-recibidos.marcar-vencidos');
+
         // ADDENDUM v1.15 Sprint O — Imputación de Notas de Crédito.
         Route::get('/imputaciones-nc', [ImputacionesNcController::class, 'index'])
             ->name('erp.imputaciones-nc.index');

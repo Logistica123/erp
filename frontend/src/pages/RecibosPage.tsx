@@ -108,6 +108,13 @@ type Draft = {
   medioCobroId: string;
   observaciones: string;
   autoIncrementar: boolean;
+  // Datos del cheque (solo cuando medio = CHEQUES_CARTERA).
+  chequeNumero: string;
+  chequeBancoEmisor: string;
+  chequeCuitLibrador: string;
+  chequeLibradorNombre: string;
+  chequeFechaEmision: string;
+  chequeFechaPago: string;
 };
 
 const DRAFT_INICIAL: Draft = {
@@ -137,6 +144,12 @@ const DRAFT_INICIAL: Draft = {
   medioCobroId: '',
   observaciones: '',
   autoIncrementar: true,
+  chequeNumero: '',
+  chequeBancoEmisor: '',
+  chequeCuitLibrador: '',
+  chequeLibradorNombre: '',
+  chequeFechaEmision: '',
+  chequeFechaPago: '',
 };
 
 function parseMontoEs(s: string | number | null | undefined): number {
@@ -349,6 +362,12 @@ export function RecibosPage() {
         medioCobroId: '',
         observaciones: '',
         autoIncrementar: true,
+        chequeNumero: '',
+        chequeBancoEmisor: '',
+        chequeCuitLibrador: '',
+        chequeLibradorNombre: '',
+        chequeFechaEmision: '',
+        chequeFechaPago: '',
       });
     }
   }, [reciboDetalle]);
@@ -376,6 +395,7 @@ export function RecibosPage() {
   // facturas Y NC, y el total cuadra (totalImputado === totalNc).
   const medioActual = bancos.find((b) => String(b.id) === draft.medioCobroId);
   const esCompensacion = medioActual?.codigo === 'COMP_CC';
+  const esCheque = medioActual?.codigo === 'CHEQUES_CARTERA';
   // Cuando el usuario elige Compensación, forzamos los importes a 0.
   useEffect(() => {
     if (! esCompensacion) return;
@@ -483,7 +503,19 @@ export function RecibosPage() {
         const created = await api.post<{ data: Recibo }>('/api/erp/tesoreria/recibos', body);
         reciboId = created.data.id;
       }
-      const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${reciboId}/emitir`, {});
+      const emitirBody: Record<string, unknown> = {};
+      if (esCheque) {
+        emitirBody.cheque = {
+          numero_cheque: draft.chequeNumero.trim(),
+          banco_emisor: draft.chequeBancoEmisor.trim(),
+          cuit_librador: draft.chequeCuitLibrador.replace(/[^0-9]/g, '') || null,
+          librador_nombre: draft.chequeLibradorNombre.trim() || null,
+          fecha_emision: draft.chequeFechaEmision,
+          fecha_pago: draft.chequeFechaPago,
+          importe: parseMontoEs(draft.importeRecibido),
+        };
+      }
+      const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${reciboId}/emitir`, emitirBody);
       // Leo el recibo REAL persistido (puede haber asignado un número distinto
       // al del draft si el contador estaba desfasado). El PDF y el toast deben
       // mostrar el numero real, no el del state local.
@@ -810,6 +842,40 @@ export function RecibosPage() {
                     options={[{ value: '', label: '—' },
                       ...bancos.map((b) => ({ value: String(b.id), label: b.nombre }))]} />
                 </div>
+                {esCheque && (
+                  <div className="border border-warning/50 bg-warning-bg/20 rounded p-2 space-y-2">
+                    <div className="text-[11px] font-semibold text-warning uppercase">
+                      Datos del cheque recibido
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                      <Field label="N° cheque *" value={draft.chequeNumero}
+                        onChange={(e) => setDraft({ ...draft, chequeNumero: e.target.value })}
+                        disabled={!esEditable} placeholder="12345678" />
+                      <Field label="Banco emisor *" value={draft.chequeBancoEmisor}
+                        onChange={(e) => setDraft({ ...draft, chequeBancoEmisor: e.target.value })}
+                        disabled={!esEditable} placeholder="ICBC, Galicia…" />
+                      <Field label="CUIT librador" value={draft.chequeCuitLibrador}
+                        onChange={(e) => setDraft({ ...draft, chequeCuitLibrador: e.target.value })}
+                        disabled={!esEditable} placeholder="30-XXX-X" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                      <Field label="Librador (nombre)" value={draft.chequeLibradorNombre}
+                        onChange={(e) => setDraft({ ...draft, chequeLibradorNombre: e.target.value })}
+                        disabled={!esEditable} />
+                      <Field label="Fecha emisión *" type="date" value={draft.chequeFechaEmision}
+                        onChange={(e) => setDraft({ ...draft, chequeFechaEmision: e.target.value })}
+                        disabled={!esEditable} />
+                      <Field label="Fecha pago / vencimiento *" type="date" value={draft.chequeFechaPago}
+                        onChange={(e) => setDraft({ ...draft, chequeFechaPago: e.target.value })}
+                        disabled={!esEditable}
+                        hint="Día desde el que se puede cobrar/depositar." />
+                    </div>
+                    <div className="text-[10.5px] text-ink-muted">
+                      Al emitir el recibo se registra el cheque en cartera. Si el día de pago
+                      llega sin que se haya marcado como cobrado, aparece como vencido.
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-2 text-[11.5px]">
                   <Field label="Ret IVA" type="text" inputMode="decimal"
                     value={draft.retencionIva}

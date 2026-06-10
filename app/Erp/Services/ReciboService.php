@@ -27,6 +27,7 @@ class ReciboService
         private readonly AsientoService $asientoService,
         private readonly AuditLogger $audit,
         private readonly DistriAppBridge $distri, // v1.32 — sync numeración cross-platform.
+        private readonly \App\Erp\Services\Tesoreria\ChequeRecibidoService $cheques,
     ) {}
 
     public const PV_DEFAULT = '00001';
@@ -444,7 +445,14 @@ class ReciboService
     /**
      * RN-31-2 — Emite el recibo (BORRADOR → EMITIDO + genera asiento).
      */
-    public function emitir(Recibo $recibo, User $usuario): Asiento
+    /**
+     * @param  ?array<string,mixed>  $chequeData  datos del cheque físico recibido
+     *                                            cuando el medio_cobro es CHEQUES_CARTERA.
+     *                                            Campos: numero_cheque, banco_emisor,
+     *                                            cuit_librador?, librador_nombre?,
+     *                                            fecha_emision, fecha_pago, importe.
+     */
+    public function emitir(Recibo $recibo, User $usuario, ?array $chequeData = null): Asiento
     {
         if ($recibo->estado !== Recibo::ESTADO_BORRADOR) {
             throw new DomainException(sprintf(
@@ -452,7 +460,16 @@ class ReciboService
             ));
         }
 
-        return DB::transaction(function () use ($recibo, $usuario) {
+        // Si el medio de cobro es CHEQUES_CARTERA, exigir datos del cheque.
+        $esCheque = $this->medioEsChequesCartera((int) $recibo->medio_cobro_id);
+        if ($esCheque && empty($chequeData)) {
+            throw new DomainException(
+                'CHEQUE_DATOS_REQUERIDOS: el medio de cobro "Cheques en Cartera" requiere '
+                . 'completar los datos del cheque (número, banco, librador, fechas, importe).'
+            );
+        }
+
+        return DB::transaction(function () use ($recibo, $usuario, $chequeData, $esCheque) {
             $empresaId = $recibo->empresa_id;
 
             // v1.32 — Reservar número PV-NRO sincronizado con DistriApp.
@@ -706,6 +723,17 @@ class ReciboService
                 'emitido_at' => now(),
             ]);
 
+            // Si el medio es CHEQUES_CARTERA, crear la fila en
+            // erp_cheques_recibidos con los datos del cheque físico.
+            if ($esCheque && $chequeData) {
+                $this->cheques->crearDesdeRecibo(
+                    reciboId: $recibo->id,
+                    empresaId: $empresaId,
+                    data: $chequeData,
+                    userId: $usuario->id,
+                );
+            }
+
             $this->audit->logEvento(
                 accion: 'RECIBO_EMITIDO',
                 modulo: 'tesoreria',
@@ -846,6 +874,13 @@ class ReciboService
         if (! $medioCobroId) return false;
         return DB::table('erp_cuentas_bancarias')
             ->where('id', $medioCobroId)->value('codigo') === 'COMP_CC';
+    }
+
+    public function medioEsChequesCartera(?int $medioCobroId): bool
+    {
+        if (! $medioCobroId) return false;
+        return DB::table('erp_cuentas_bancarias')
+            ->where('id', $medioCobroId)->value('codigo') === 'CHEQUES_CARTERA';
     }
 
     public function saldoImputableNc(int $ncId, int $empresaId = 1): float

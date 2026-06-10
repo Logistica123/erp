@@ -354,8 +354,23 @@ class RecibosController
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $recibo = Recibo::with(['ncAplicadas', 'retenciones'])
             ->where('empresa_id', $empresaId)->findOrFail($id);
+
+        // Datos opcionales del cheque (cuando el medio de cobro es
+        // CHEQUES_CARTERA). El service exige que vengan si el medio lo requiere.
+        $cheque = $request->validate([
+            'cheque' => ['nullable', 'array'],
+            'cheque.numero_cheque' => ['required_with:cheque', 'string', 'max:30'],
+            'cheque.banco_emisor' => ['required_with:cheque', 'string', 'max:100'],
+            'cheque.cuit_librador' => ['nullable', 'string', 'max:13'],
+            'cheque.librador_nombre' => ['nullable', 'string', 'max:200'],
+            'cheque.fecha_emision' => ['required_with:cheque', 'date'],
+            'cheque.fecha_pago' => ['required_with:cheque', 'date', 'after_or_equal:cheque.fecha_emision'],
+            'cheque.importe' => ['required_with:cheque', 'numeric', 'min:0.01'],
+            'cheque.observaciones' => ['nullable', 'string', 'max:500'],
+        ])['cheque'] ?? null;
+
         try {
-            $asiento = $this->svc->emitir($recibo, $request->user());
+            $asiento = $this->svc->emitir($recibo, $request->user(), $cheque);
             return response()->json(['ok' => true, 'data' => [
                 'recibo_id' => $recibo->id,
                 'asiento_id' => $asiento->id,

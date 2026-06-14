@@ -1,0 +1,792 @@
+{
+  "fuente": "Addendum v1.45 — Reglas de Conciliación: asignación de cuentas + matching automático",
+  "fecha_generacion": "2026-06-13",
+  "version": "1.45",
+  "empresa": "Logística Argentina SRL",
+  "cuit": "30717060985",
+  "schema_delta": {
+    "erp_reglas_conciliacion": {
+      "alter": [
+        {
+          "columna": "cuenta_contable_id",
+          "tipo": "BIGINT UNSIGNED NULL",
+          "fk": "erp_cuentas_contables(id)"
+        },
+        {
+          "columna": "cuenta_contable_modo",
+          "tipo": "ENUM('FIJO','DINAMICO_POR_AUXILIAR','SIN_CUENTA_TRANSFERENCIA_INTERNA') NOT NULL DEFAULT 'FIJO'"
+        },
+        {
+          "columna": "cuit_extractor_regex",
+          "tipo": "VARCHAR(500) NULL",
+          "comentario": "Regex con grupo de captura para extraer CUIT"
+        },
+        {
+          "columna": "matching_auto_factura",
+          "tipo": "BOOLEAN NOT NULL DEFAULT FALSE"
+        },
+        {
+          "columna": "tipo_auxiliar",
+          "tipo": "ENUM('CLIENTE','PROVEEDOR','DISTRIBUIDOR','EMPLEADO','OTRO') NULL"
+        }
+      ]
+    },
+    "erp_extractos_movimientos": {
+      "alter": [
+        {
+          "columna": "estado",
+          "tipo": "MODIFY ENUM('PENDIENTE','AUTO_ETIQUETADO','MATCH_AUTO','CONFIRMADO','REVERTIDO','CONCILIADO_MANUAL','IGNORADO')"
+        },
+        {
+          "columna": "factura_imputada_id",
+          "tipo": "BIGINT UNSIGNED NULL"
+        },
+        {
+          "columna": "factura_imputada_tipo",
+          "tipo": "ENUM('VENTA','COMPRA') NULL"
+        },
+        {
+          "columna": "imputacion_confianza",
+          "tipo": "DECIMAL(5,2) NULL"
+        },
+        {
+          "columna": "cuit_extractado",
+          "tipo": "VARCHAR(13) NULL"
+        },
+        {
+          "columna": "auxiliar_resuelto_id",
+          "tipo": "BIGINT UNSIGNED NULL",
+          "fk": "erp_auxiliares(id)"
+        }
+      ]
+    },
+    "erp_extractos_imputaciones_audit": {
+      "create": true,
+      "ver_addendum": "§3.3 del addendum v1.45 para DDL completo"
+    }
+  },
+  "reglas_existentes_asignar_cuenta": [
+    {
+      "codigo": "ICBC-IMP-DEB",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "ICBC-IMP-CRED",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "BR-IMP-LEY-25413",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "MP-IMP-EXTRAC",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "MP-IMP-PAGOS",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "MP-IMP-RETIROS",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_IMP_DEB",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_IMP_CRED",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "IMP_DEBITO_CREDITO",
+      "cuenta_codigo": "5.4.04",
+      "cuenta_nombre": "Impuesto sobre Débitos y Créditos Bancarios",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "ICBC-SIRCREB",
+      "cuenta_codigo": "1.1.6.11",
+      "cuenta_nombre": "SIRCREB - Percepciones sobre Créditos",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "BR-SIRCREB",
+      "cuenta_codigo": "1.1.6.11",
+      "cuenta_nombre": "SIRCREB - Percepciones sobre Créditos",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_SIRCREB",
+      "cuenta_codigo": "1.1.6.11",
+      "cuenta_nombre": "SIRCREB - Percepciones sobre Créditos",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "MP-RENDIMIENTOS",
+      "cuenta_codigo": "4.2.02",
+      "cuenta_nombre": "Intereses Cuenta Remunerada",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "BR-INTERESES",
+      "cuenta_codigo": "4.2.02",
+      "cuenta_nombre": "Intereses Cuenta Remunerada",
+      "modo": "FIJO",
+      "nota": "Corregir descripción: son intereses GANADOS, no pagados"
+    },
+    {
+      "codigo": "INTERESES GANADOS",
+      "cuenta_codigo": "4.2.02",
+      "cuenta_nombre": "Intereses Cuenta Remunerada",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_INT_GANADO",
+      "cuenta_codigo": "4.2.01",
+      "cuenta_nombre": "Intereses Ganados",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "COMISION_ICBC",
+      "cuenta_codigo": "5.4.02",
+      "cuenta_nombre": "Gastos y Comisiones Bancarias",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "ICBC-COM-MPAY",
+      "cuenta_codigo": "5.4.02",
+      "cuenta_nombre": "Gastos y Comisiones Bancarias",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "ICBC-COM-MANT",
+      "cuenta_codigo": "5.4.02",
+      "cuenta_nombre": "Gastos y Comisiones Bancarias",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_COMIS_BAN",
+      "cuenta_codigo": "5.4.02",
+      "cuenta_nombre": "Gastos y Comisiones Bancarias",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_MANTENIMIENTO",
+      "cuenta_codigo": "5.4.02",
+      "cuenta_nombre": "Gastos y Comisiones Bancarias",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "ICBC-IVA-COM",
+      "cuenta_codigo": "1.1.6.01.21",
+      "cuenta_nombre": "IVA Crédito Fiscal 21%",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "ICBC-IVA-COM-105",
+      "cuenta_codigo": "1.1.6.01.10",
+      "cuenta_nombre": "IVA Crédito Fiscal 10,5%",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_IVA_COM",
+      "cuenta_codigo": "1.1.6.01.21",
+      "cuenta_nombre": "IVA Crédito Fiscal 21%",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_IVA_2408",
+      "cuenta_codigo": "1.1.6.04",
+      "cuenta_nombre": "Percepciones IVA Sufridas",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "IVA_PERCEPCION",
+      "cuenta_codigo": "1.1.6.04",
+      "cuenta_nombre": "Percepciones IVA Sufridas",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_PERC_IIBB",
+      "cuenta_codigo": "1.1.6.15",
+      "cuenta_nombre": "Percepciones IIBB Sufridas (agregada)",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "IIBB_PERCEPCION",
+      "cuenta_codigo": "1.1.6.15",
+      "cuenta_nombre": "Percepciones IIBB Sufridas (agregada)",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "V27_RET_GAN",
+      "cuenta_codigo": "1.1.6.06",
+      "cuenta_nombre": "Retenciones Ganancias Sufridas",
+      "modo": "FIJO"
+    },
+    {
+      "codigo": "TRANSFERENCIA_ENTRE",
+      "cuenta_codigo": null,
+      "cuenta_nombre": "(transferencia interna sin asiento de gasto/ingreso)",
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    },
+    {
+      "codigo": "TRF-INT-ICBC-AR",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    },
+    {
+      "codigo": "TRF-INT-BR-A-ICBC",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    },
+    {
+      "codigo": "TRF-INT-BR-A-MP",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    },
+    {
+      "codigo": "TRF-INT-BR-DE-ICBC",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    },
+    {
+      "codigo": "TRF-INT-BR-DE-MP",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    },
+    {
+      "codigo": "TRF-INT-BR-RETIRO-REM",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    },
+    {
+      "codigo": "TRF-INT-BR-FONDEO-REM",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA"
+    }
+  ],
+  "reglas_a_desactivar": [
+    {
+      "id_o_codigo": "regla #6",
+      "patron_actual": "^Rendimientos|^Pago de servicio Aguas",
+      "motivo": "Mezcla 2 conceptos opuestos con cuentas distintas. Reemplazada por RENDIMIENTOS_GEN + SERV-AGUA.",
+      "accion": "Marcar activa=FALSE + sumar observación '[v1.45] Reemplazada por RENDIMIENTOS_GEN + SERV-AGUA'"
+    }
+  ],
+  "reglas_nuevas": [
+    {
+      "codigo": "RENDIMIENTOS_GEN",
+      "descripcion": "Rendimientos cuenta remunerada (genérico)",
+      "patron_concepto_regex": "/^Rendimientos/",
+      "tipo": "Concepto (regex)",
+      "banco": "TODOS",
+      "signo": "+",
+      "cuenta_codigo": "4.2.02",
+      "cuenta_nombre": "Intereses Cuenta Remunerada",
+      "modo": "FIJO",
+      "prioridad": 100,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "SERV-AGUA",
+      "descripcion": "Pago Servicio Agua (AySA / equivalente)",
+      "patron_concepto_regex": "/^Pago de servicio Aguas|^DEBITO AYSA|^DEB AGUA/i",
+      "tipo": "Concepto (regex)",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "5.2.2.04",
+      "cuenta_nombre": "Agua",
+      "modo": "FIJO",
+      "prioridad": 100,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-SUELDOS",
+      "descripcion": "ICBC: Pago haberes Plan Sueldo",
+      "patron_concepto_regex": "/(?:PAGO\\s+HABERES|TRF\\s+SUELDOS|PAGO\\s+SUELDO)/i",
+      "tipo": "Concepto (regex)",
+      "banco": "ICBC",
+      "signo": "-",
+      "cuenta_codigo": "5.2.1.01",
+      "cuenta_nombre": "Sueldos Administración",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true,
+      "nota": "Opción B confirmada por Seba (D-45-2): gasto directo, sin pasivo. Devengamiento manual aparte."
+    },
+    {
+      "codigo": "ICBC-PAGO-TARJ",
+      "descripcion": "ICBC: Pago tarjeta corporativa",
+      "patron_concepto_regex": "/(?:PAGO\\s+TARJETA|DB\\s+TARJ\\s+CORP|PAGO\\s+TC)/i",
+      "banco": "ICBC",
+      "signo": "-",
+      "cuenta_codigo": "2.1.4.04",
+      "cuenta_nombre": "Tarjetas de Crédito a Pagar",
+      "auxiliar_fijo": "TC-ICBC",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-PAGO-PRESTAMO",
+      "descripcion": "ICBC: Pago cuota préstamo",
+      "patron_concepto_regex": "/(?:DB\\s+CUOTA\\s+PRESTAMO|CUOTA\\s+PRESTAMO\\s+ICBC|DEB\\s+PRESTAMO)/i",
+      "banco": "ICBC",
+      "signo": "-",
+      "cuenta_codigo": "2.2.1.01",
+      "cuenta_nombre": "Préstamos Bancarios Largo Plazo",
+      "auxiliar_fijo": "PRESTAMO-ICBC-0204720603",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-CHQ-EMITIDO",
+      "descripcion": "ICBC: Cheque emitido cobrado",
+      "patron_concepto_regex": "/(?:CHQ\\s+EMITIDO\\s+COB|CHEQUE\\s+PROPIO\\s+COBRADO|DB\\s+CHQ\\s+\\d+)/i",
+      "banco": "ICBC",
+      "signo": "-",
+      "cuenta_codigo": "2.1.1.05",
+      "cuenta_nombre": "Cheques Emitidos Diferidos",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-CHQ-DEPOSITO",
+      "descripcion": "ICBC: Presentación cheques a depósito",
+      "patron_concepto_regex": "/(?:PRESENTACION\\s+CHEQUES|DEP\\s+CHQ|DEPOSITO\\s+CHEQUE)/i",
+      "banco": "ICBC",
+      "signo": "+",
+      "cuenta_codigo": "1.1.4.04",
+      "cuenta_nombre": "Valores al Cobro - Cheques Recibidos",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-DEP-EFECTIVO",
+      "descripcion": "ICBC: Depósito en efectivo en cuenta",
+      "patron_concepto_regex": "/(?:DEPOSITO\\s+EFECTIVO|DEP\\s+EFEC|DEP\\s+EN\\s+EFECTIVO)/i",
+      "banco": "ICBC",
+      "signo": "+",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA",
+      "contraparte_cuenta_codigo": "1.1.1.01",
+      "contraparte_cuenta_nombre": "Caja Pesos",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-EXT-EFECTIVO",
+      "descripcion": "ICBC: Extracción de efectivo del banco",
+      "patron_concepto_regex": "/(?:EXTRACCION\\s+EFECTIVO|EXT\\s+EFEC|RETIRO\\s+CAJERO)/i",
+      "banco": "ICBC",
+      "signo": "-",
+      "cuenta_codigo": null,
+      "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA",
+      "contraparte_cuenta_codigo": "1.1.1.01",
+      "contraparte_cuenta_nombre": "Caja Pesos",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-ECHEQ-EMIT",
+      "descripcion": "ICBC: e-Cheque emitido (débito)",
+      "patron_concepto_regex": "/(?:ECHEQ\\s+EMITIDO|E-CHEQ\\s+DB|DEB\\s+ECHEQ)/i",
+      "banco": "ICBC",
+      "signo": "-",
+      "cuenta_codigo": "2.1.1.06",
+      "cuenta_nombre": "E-Cheq Emitidos",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ICBC-ECHEQ-RECIB",
+      "descripcion": "ICBC: e-Cheque recibido (crédito)",
+      "patron_concepto_regex": "/(?:ECHEQ\\s+RECIBIDO|E-CHEQ\\s+CR|ACR\\s+ECHEQ)/i",
+      "banco": "ICBC",
+      "signo": "+",
+      "cuenta_codigo": "1.1.4.05",
+      "cuenta_nombre": "Valores al Cobro - E-Cheq",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "BR-TRANSF-EXT-ENT",
+      "descripcion": "Brubank: transferencia entrante externa",
+      "patron_concepto_regex": "/(?:TRANSFERENCIA\\s+RECIBIDA|INGRESO\\s+DE\\s+DINERO|TRF\\s+RECIBIDA)/i",
+      "banco": "Brubank",
+      "signo": "+",
+      "cuenta_codigo": null,
+      "modo": "FIJO",
+      "prioridad": 15,
+      "confianza": 60,
+      "activa": true,
+      "nota": "Sin cuenta — queda PENDIENTE para conciliación manual o se procesa por extractor CUIT en el futuro"
+    },
+    {
+      "codigo": "BR-TRANSF-EXT-SAL",
+      "descripcion": "Brubank: transferencia saliente externa",
+      "patron_concepto_regex": "/(?:TRANSFERENCIA\\s+ENVIADA|ENVIO\\s+DE\\s+DINERO|TRF\\s+ENVIADA)/i",
+      "banco": "Brubank",
+      "signo": "-",
+      "cuenta_codigo": null,
+      "modo": "FIJO",
+      "prioridad": 15,
+      "confianza": 60,
+      "activa": true
+    },
+    {
+      "codigo": "BR-PAGO-SERV",
+      "descripcion": "Brubank: pago de servicios genérico",
+      "patron_concepto_regex": "/(?:PAGO\\s+DE\\s+SERVICIO|PAGO\\s+SERV|DEB\\s+SERVICIO)/i",
+      "banco": "Brubank",
+      "signo": "-",
+      "cuenta_codigo": null,
+      "modo": "FIJO",
+      "prioridad": 15,
+      "confianza": 60,
+      "activa": true,
+      "nota": "Genérico — el tipo de servicio se identifica con las reglas SERV-LUZ / SERV-GAS / SERV-INTER-TEL si matchea, sino queda PENDIENTE"
+    },
+    {
+      "codigo": "BR-PAGO-TARJ",
+      "descripcion": "Brubank: pago tarjeta",
+      "patron_concepto_regex": "/(?:PAGO\\s+TARJ|PAGO\\s+TC)/i",
+      "banco": "Brubank",
+      "signo": "-",
+      "cuenta_codigo": "2.1.4.04",
+      "cuenta_nombre": "Tarjetas de Crédito a Pagar",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 85,
+      "activa": true
+    },
+    {
+      "codigo": "BR-REM-RET-GAN",
+      "descripcion": "Brubank: Retención Ganancias sobre intereses cuenta remunerada",
+      "patron_concepto_regex": "/(?:RET\\s+GANANCIAS|RETENCION\\s+GAN|IIGG)/i",
+      "banco": "Brubank",
+      "signo": "-",
+      "cuenta_codigo": "1.1.6.06",
+      "cuenta_nombre": "Retenciones Ganancias Sufridas",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "MP-COBRO-QR-POS",
+      "descripcion": "MP: cobro por QR / POS / link de pago",
+      "patron_concepto_regex": "/(?:COBRO\\s+QR|COBRO\\s+POS|COBRO\\s+CHECKOUT|VENTA\\s+POR\\s+LINK|PAGO\\s+RECIBIDO)/i",
+      "banco": "MercadoPago",
+      "signo": "+",
+      "cuenta_codigo": "1.1.4.01",
+      "cuenta_nombre": "Deudores por Ventas",
+      "modo": "FIJO",
+      "prioridad": 15,
+      "confianza": 75,
+      "activa": true
+    },
+    {
+      "codigo": "MP-TRANSF-RECIB",
+      "descripcion": "MP: transferencia recibida",
+      "patron_concepto_regex": "/(?:TRANSFERENCIA\\s+RECIBIDA|INGRESO\\s+DE\\s+DINERO)/i",
+      "banco": "MercadoPago",
+      "signo": "+",
+      "cuenta_codigo": null,
+      "modo": "FIJO",
+      "prioridad": 15,
+      "confianza": 60,
+      "activa": true
+    },
+    {
+      "codigo": "MP-PAGO-PROV",
+      "descripcion": "MP: pago a proveedor por transferencia",
+      "patron_concepto_regex": "/(?:PAGO\\s+A\\s+PROVEEDOR|TRANSFERENCIA\\s+ENVIADA|ENVIO\\s+DE\\s+DINERO)/i",
+      "banco": "MercadoPago",
+      "signo": "-",
+      "cuenta_codigo": "2.1.1.01",
+      "cuenta_nombre": "Proveedores Comunes",
+      "modo": "FIJO",
+      "prioridad": 15,
+      "confianza": 70,
+      "activa": true
+    },
+    {
+      "codigo": "MP-PAGO-SERV",
+      "descripcion": "MP: pago de servicios",
+      "patron_concepto_regex": "/(?:PAGO\\s+DE\\s+SERVICIO|DEB\\s+SERV)/i",
+      "banco": "MercadoPago",
+      "signo": "-",
+      "cuenta_codigo": null,
+      "modo": "FIJO",
+      "prioridad": 15,
+      "confianza": 60,
+      "activa": true
+    },
+    {
+      "codigo": "MP-COMIS-VENTA",
+      "descripcion": "MP: comisión por venta / cobro",
+      "patron_concepto_regex": "/(?:COMISION\\s+POR\\s+VENTA|COMISION\\s+POR\\s+COBRO|COMISION\\s+MP)/i",
+      "banco": "MercadoPago",
+      "signo": "-",
+      "cuenta_codigo": "5.4.06",
+      "cuenta_nombre": "Comisiones Mercado Pago",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 95,
+      "activa": true
+    },
+    {
+      "codigo": "MP-DEVOLUCION",
+      "descripcion": "MP: devolución / recupero de comisión",
+      "patron_concepto_regex": "/(?:DEVOLUCION|RECUPERO\\s+COMISION|REVERSO)/i",
+      "banco": "MercadoPago",
+      "signo": "+",
+      "cuenta_codigo": "5.4.06",
+      "cuenta_nombre": "Comisiones Mercado Pago",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true,
+      "nota": "Revierte la comisión cobrada — va al haber de la misma cuenta"
+    },
+    {
+      "codigo": "MP-RET-GAN",
+      "descripcion": "MP: retención Ganancias practicada",
+      "patron_concepto_regex": "/(?:RETENCION\\s+GANANCIAS|RET\\s+IIGG)/i",
+      "banco": "MercadoPago",
+      "signo": "-",
+      "cuenta_codigo": "1.1.6.06",
+      "cuenta_nombre": "Retenciones Ganancias Sufridas",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 95,
+      "activa": true
+    },
+    {
+      "codigo": "MP-RET-IIBB",
+      "descripcion": "MP: retención IIBB practicada",
+      "patron_concepto_regex": "/(?:RETENCION\\s+IIBB|RET\\s+INGRESOS\\s+BRUTOS)/i",
+      "banco": "MercadoPago",
+      "signo": "-",
+      "cuenta_codigo": "1.1.6.10",
+      "cuenta_nombre": "Retenciones IIBB Sufridas",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 95,
+      "activa": true
+    },
+    {
+      "codigo": "SERV-LUZ",
+      "descripcion": "Pago Luz / Energía Eléctrica",
+      "patron_concepto_regex": "/(?:EDENOR|EDESUR|EDEMSA|EPEC|PAGO\\s+LUZ|PAGO\\s+ELECTRIC|DEB\\s+ELECTR)/i",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "5.2.2.03",
+      "cuenta_nombre": "Energía Eléctrica",
+      "modo": "FIJO",
+      "prioridad": 12,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "SERV-GAS",
+      "descripcion": "Pago Gas",
+      "patron_concepto_regex": "/(?:METROGAS|CAMUZZI|GAS\\s+NEA|PAGO\\s+GAS|DEB\\s+GAS)/i",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "5.2.2.05",
+      "cuenta_nombre": "Gas",
+      "modo": "FIJO",
+      "prioridad": 12,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "SERV-INTER-TEL",
+      "descripcion": "Pago Internet / Telefonía",
+      "patron_concepto_regex": "/(?:MOVISTAR|CLARO|PERSONAL|FIBERTEL|TELECENTRO|FLOW|PAGO\\s+INTERNET|DEB\\s+TEL)/i",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "5.2.2.06",
+      "cuenta_nombre": "Internet y Telefonía",
+      "modo": "FIJO",
+      "prioridad": 12,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "SUSS-F931",
+      "descripcion": "Pago SUSS Formulario 931 (cargas sociales)",
+      "patron_concepto_regex": "/(?:F\\.?\\s*931|SUSS|VEP\\s+AFIP\\s+REGIMEN\\s+GENERAL)/i",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "2.1.2.02",
+      "cuenta_nombre": "Cargas Sociales a Pagar",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "ART-PAGO",
+      "descripcion": "Pago ART (Aseguradora Riesgos del Trabajo)",
+      "patron_concepto_regex": "/(?:PROVINCIA\\s+ART|ART\\s+MUTUAL|GALENO\\s+ART|PAGO\\s+ART)/i",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "2.1.2.04",
+      "cuenta_nombre": "ART a Pagar",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "SINDICATO-FAECYS",
+      "descripcion": "Pago FAECYS / FUVA / cuotas sindicales",
+      "patron_concepto_regex": "/(?:FAECYS|FUVA|CUOTA\\s+SINDICAL|SINDICATO\\s+COMERCIO)/i",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "2.1.2.05",
+      "cuenta_nombre": "Cuota Sindical a Pagar",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    },
+    {
+      "codigo": "OSECAC-OS",
+      "descripcion": "Pago OSECAC / obras sociales",
+      "patron_concepto_regex": "/(?:OSECAC|OBRA\\s+SOCIAL|OS\\s+EMP\\s+COMERCIO)/i",
+      "banco": "TODOS",
+      "signo": "-",
+      "cuenta_codigo": "2.1.2.03",
+      "cuenta_nombre": "Obra Social a Pagar",
+      "modo": "FIJO",
+      "prioridad": 10,
+      "confianza": 90,
+      "activa": true
+    }
+  ],
+  "reglas_extractor_cuit": [
+    {
+      "codigo": "ICBC-COBRO-TRF",
+      "descripcion": "ICBC: Cobranza por transferencia entrante (DEBITO INMEDIATO + CUIT)",
+      "patron_concepto_regex": "/(?:DEBITO\\s*INMEDIATO|TRANS(?:F)?\\s*PAG\\s*PROV|CRED\\s+TRF)\\s*(\\d{2}-?\\d{8}-?\\d{1}|\\d{11})/i",
+      "tipo": "Concepto con extractor CUIT",
+      "banco": "ICBC",
+      "signo": "+",
+      "cuenta_codigo": "1.1.4.01",
+      "cuenta_nombre": "Deudores por Ventas",
+      "modo": "DINAMICO_POR_AUXILIAR",
+      "tipo_auxiliar": "CLIENTE",
+      "matching_auto_factura": true,
+      "prioridad": 3,
+      "confianza_base": 80,
+      "activa": true,
+      "logica_matching": [
+        {
+          "caso": "monto == saldo de UNA factura",
+          "confianza": 95,
+          "accion": "MATCH_AUTO con factura imputada, genera asiento"
+        },
+        {
+          "caso": "monto == suma de N facturas pendientes",
+          "confianza": 85,
+          "accion": "MATCH_AUTO compuesto, múltiples facturas"
+        },
+        {
+          "caso": "monto cercano a saldo factura ± retenciones (tolerancia 5% o $500)",
+          "confianza": 70,
+          "accion": "MATCH_AUTO con observación de diferencia, revisión humana"
+        },
+        {
+          "caso": "monto no matchea pero CUIT identificado",
+          "confianza": 60,
+          "accion": "MATCH_AUTO solo identifica cliente, sin factura"
+        },
+        {
+          "caso": "CUIT no encuentra auxiliar",
+          "confianza": 0,
+          "accion": "no auto-imputa, cae a regla genérica"
+        }
+      ]
+    },
+    {
+      "codigo": "ICBC-PAGO-TRF",
+      "descripcion": "ICBC: Pago a proveedor por transferencia (DEBITO INMEDIATO + CUIT)",
+      "patron_concepto_regex": "/(?:DEBITO\\s*INMEDIATO|TRF\\s*PROV|TRANSF?\\s*PROV|DB\\s+TRF)\\s*(\\d{2}-?\\d{8}-?\\d{1}|\\d{11})/i",
+      "tipo": "Concepto con extractor CUIT",
+      "banco": "ICBC",
+      "signo": "-",
+      "cuenta_codigo": "2.1.1.01",
+      "cuenta_nombre": "Proveedores Comunes",
+      "modo": "DINAMICO_POR_AUXILIAR",
+      "tipo_auxiliar": "PROVEEDOR",
+      "matching_auto_factura": true,
+      "prioridad": 3,
+      "confianza_base": 80,
+      "activa": true,
+      "nota_distribuidor": "Si el auxiliar identificado es tipo=DISTRIBUIDOR, la cuenta destino cambia a 2.1.1.03 Distribuidores a Pagar"
+    }
+  ],
+  "resumen": {
+    "reglas_existentes_actualizar": 37,
+    "reglas_a_desactivar": 1,
+    "reglas_nuevas_a_crear": 30,
+    "reglas_con_extractor_cuit": 2,
+    "total_reglas_post_v145": 68
+  },
+  "decisiones_aplicadas": {
+    "D-45-1": {
+      "tema": "Imp Ley 25413",
+      "resolucion": "100% al gasto 5.4.04 + pantalla manual /erp/contabilidad/reclasificar-iiddycc"
+    },
+    "D-45-2": {
+      "tema": "Sueldos Plan ICBC",
+      "resolucion": "Gasto directo 5.2.1.01 sin pasivo. Devengamiento manual aparte"
+    },
+    "D-45-3": {
+      "tema": "Cobranzas/pagos transferencia",
+      "resolucion": "Matching auto con extractor CUIT + flujo modificar/confirmar/revertir"
+    },
+    "D-45-4": {
+      "tema": "Galicia",
+      "resolucion": "Cuenta cerrada, no sumar reglas dedicadas"
+    }
+  }
+}

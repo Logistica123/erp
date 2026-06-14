@@ -33,6 +33,8 @@ import { InversionesPage } from './pages/InversionesPage';
 import { PrestamosPage } from './pages/PrestamosPage';
 import { ControlFacturasPage } from './pages/ControlFacturasPage';
 import { ChequesRecibidosPage } from './pages/ChequesRecibidosPage';
+import { ImputacionesAutoPage } from './pages/ImputacionesAutoPage';
+import { ReclasificarIiddyccPage } from './pages/ReclasificarIiddyccPage';
 import { FacturasCompraPage } from './pages/FacturasCompraPage';
 import { CCPage } from './pages/CCPage';
 import { FcePage } from './pages/FcePage';
@@ -161,6 +163,8 @@ export default function App() {
               <Route path="/erp/tesoreria/prestamos" element={<PrestamosPage />} handle={{ crumb: 'Préstamos' }} />
               <Route path="/erp/control-facturas" element={<ControlFacturasPage />} handle={{ crumb: 'Control de facturas' }} />
               <Route path="/erp/tesoreria/cheques-recibidos" element={<ChequesRecibidosPage />} handle={{ crumb: 'Cheques recibidos' }} />
+              <Route path="/erp/tesoreria/imputaciones-auto" element={<ImputacionesAutoPage />} handle={{ crumb: 'Imputaciones automáticas' }} />
+              <Route path="/erp/contabilidad/reclasificar-iiddycc" element={<ReclasificarIiddyccPage />} handle={{ crumb: 'Reclasificar Imp. Ley 25413' }} />
 
               {/* F3 — Compras + CC + FCE */}
               <Route path="/erp/facturas-compra" element={<FacturasCompraPage />} handle={{ crumb: 'Facturas de compra' }} />

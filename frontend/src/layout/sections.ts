@@ -3,7 +3,7 @@ import {
   Calculator, CalendarCheck, ClipboardList, CloudCog, Coins, Cog,
   FileBarChart, FileText, History, Landmark, LayoutDashboard, ListTree, Lock,
   PieChart, Receipt, Scale, ScrollText, ShieldCheck, ShoppingCart,
-  Split, Tag, TrendingUp, Truck, UserCog, Users, Wallet, Wrench,
+  Split, Sparkles, Tag, TrendingUp, Truck, UserCog, Users, Wallet, Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -38,6 +38,7 @@ export const sections: NavSection[] = [
       { to: '/erp/libro-mayor', label: 'Libro Mayor', icon: BookOpen },
       { to: '/erp/plan-cuentas', label: 'Plan de Cuentas', icon: ListTree },
       { to: '/erp/balance-ss', label: 'Sumas y Saldos', icon: Scale },
+      { to: '/erp/contabilidad/reclasificar-iiddycc', label: 'Reclasificar Imp. Ley 25413', icon: Scale },
       { to: '/erp/periodos', label: 'Períodos', icon: CalendarCheck },
       { to: '/erp/centros-costo', label: 'Centros de Costo', icon: ListTree },
       { to: '/erp/estados-contables', label: 'Estados Contables', icon: FileBarChart },
@@ -58,6 +59,7 @@ export const sections: NavSection[] = [
       { to: '/erp/tesoreria/inversiones', label: 'Inversiones', icon: Coins },
       { to: '/erp/tesoreria/prestamos', label: 'Préstamos', icon: Coins },
       { to: '/erp/conciliacion', label: 'Conciliación', icon: Split },
+      { to: '/erp/tesoreria/imputaciones-auto', label: 'Imputaciones automáticas', icon: Sparkles },
       { to: '/erp/conciliacion-reglas', label: 'Reglas conciliación', icon: Split },
       { to: '/erp/cierres-diarios', label: 'Cierres diarios', icon: Lock },
     ],

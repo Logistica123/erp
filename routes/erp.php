@@ -253,6 +253,24 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/conciliacion-reglas/{id}/probar', [ConciliacionReglasController::class, 'probar'])
             ->whereNumber('id')->name('erp.conc-reglas.probar');
 
+        // v1.45 — Imputaciones automáticas con extractor CUIT (MATCH_AUTO).
+        Route::get('/conciliacion/imputaciones-pendientes', [\App\Erp\Http\Controllers\ImputacionesAutoController::class, 'pendientes'])
+            ->name('erp.conc.imput.pendientes');
+        Route::patch('/conciliacion/{mov}/modificar', [\App\Erp\Http\Controllers\ImputacionesAutoController::class, 'modificar'])
+            ->whereNumber('mov')->name('erp.conc.imput.modificar');
+        Route::post('/conciliacion/{mov}/confirmar', [\App\Erp\Http\Controllers\ImputacionesAutoController::class, 'confirmar'])
+            ->whereNumber('mov')->name('erp.conc.imput.confirmar');
+        Route::post('/conciliacion/{mov}/revertir', [\App\Erp\Http\Controllers\ImputacionesAutoController::class, 'revertir'])
+            ->whereNumber('mov')->name('erp.conc.imput.revertir');
+        Route::get('/conciliacion/{mov}/audit', [\App\Erp\Http\Controllers\ImputacionesAutoController::class, 'audit'])
+            ->whereNumber('mov')->name('erp.conc.imput.audit');
+
+        // v1.45 §9 — Reclasificación Imp Ley 25413.
+        Route::get('/contabilidad/iiddycc/saldo-acumulado', [\App\Erp\Http\Controllers\ReclasificacionIiddyccController::class, 'saldo'])
+            ->name('erp.iiddycc.saldo');
+        Route::post('/contabilidad/iiddycc/reclasificar', [\App\Erp\Http\Controllers\ReclasificacionIiddyccController::class, 'reclasificar'])
+            ->name('erp.iiddycc.reclasificar');
+
         Route::get('/alias-contraparte', [AliasContraparteController::class, 'index'])->name('erp.alias.index');
         Route::post('/alias-contraparte', [AliasContraparteController::class, 'store'])->name('erp.alias.store');
         Route::patch('/alias-contraparte/{id}', [AliasContraparteController::class, 'update'])

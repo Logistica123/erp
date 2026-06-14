@@ -39,6 +39,7 @@ class ExtractoImporterService
         private readonly AuditLogger $audit,
         private readonly MatchingContraparteService $matcher,
         private readonly ExtractoTipoService $tipoSvc,
+        private readonly \App\Erp\Services\Conciliacion\MatchingAutoService $matchingAuto,
     ) {}
 
     /**
@@ -115,13 +116,18 @@ class ExtractoImporterService
             $matching = $this->aplicarMatching($extracto->id, $cuenta);
             $pasantes = $this->detectarPasanteMp($extracto->id, $cuenta);
 
+            // v1.45: pasada de matching automático con extractor CUIT sobre los
+            // movimientos que quedaron PENDIENTE (ICBC-COBRO-TRF / ICBC-PAGO-TRF).
+            $matchAuto = $this->aplicarMatchingAuto($extracto->id, $cuenta);
+
             return [
                 'extracto_id' => $extracto->id,
                 'cant_total' => count($parseado->movimientos),
                 'movimientos_importados' => $counts['movimientos_importados'],
                 'movimientos_duplicados' => $counts['movimientos_duplicados'],
                 'etiquetados_auto' => $matching['etiquetados'],
-                'pendientes' => $counts['movimientos_importados'] - $matching['etiquetados'],
+                'match_auto_cuit' => $matchAuto,
+                'pendientes' => $counts['movimientos_importados'] - $matching['etiquetados'] - $matchAuto,
                 'pasantes_mp' => $pasantes,
             ];
         });
@@ -223,6 +229,25 @@ class ExtractoImporterService
      *
      * @return array{etiquetados:int, conciliados:int}
      */
+    /**
+     * v1.45 — Pasada de matching automático con extractor CUIT sobre los
+     * movimientos PENDIENTE. Los lleva a MATCH_AUTO si una regla con
+     * matching_auto_factura identifica al auxiliar (y, si puede, la factura).
+     */
+    private function aplicarMatchingAuto(int $extractoId, CuentaBancaria $cuenta): int
+    {
+        $movs = MovimientoBancario::where('extracto_id', $extractoId)
+            ->where('cuenta_bancaria_id', $cuenta->id)
+            ->where('estado', MovimientoBancario::ESTADO_PENDIENTE)
+            ->with('cuentaBancaria')
+            ->get();
+        $n = 0;
+        foreach ($movs as $mov) {
+            if ($this->matchingAuto->intentarMatching($mov)) $n++;
+        }
+        return $n;
+    }
+
     private function aplicarMatching(int $extractoId, CuentaBancaria $cuenta): array
     {
         $movs = MovimientoBancario::where('extracto_id', $extractoId)

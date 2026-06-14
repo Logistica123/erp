@@ -15,6 +15,11 @@ class MovimientoBancario extends Model
     public const ESTADO_ETIQUETADO = 'ETIQUETADO';
     public const ESTADO_CONCILIADO = 'CONCILIADO';
     public const ESTADO_IGNORADO = 'IGNORADO';
+    // v1.45 — estados de imputación automática con extractor CUIT.
+    public const ESTADO_MATCH_AUTO = 'MATCH_AUTO';
+    public const ESTADO_CONFIRMADO = 'CONFIRMADO';
+    public const ESTADO_REVERTIDO = 'REVERTIDO';
+    public const ESTADO_CONCILIADO_MANUAL = 'CONCILIADO_MANUAL';
 
     protected $fillable = [
         'extracto_id', 'cuenta_bancaria_id',
@@ -28,6 +33,9 @@ class MovimientoBancario extends Model
         'confianza_match', 'dia_contable_id',
         // v1.27 Sprint A
         'tipo_operativo', 'monto_conciliado',
+        // v1.45 — imputación automática.
+        'factura_imputada_id', 'factura_imputada_tipo', 'imputacion_confianza',
+        'cuit_extractado', 'auxiliar_resuelto_id',
     ];
 
     protected $casts = [

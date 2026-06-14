@@ -113,12 +113,10 @@ export function ConciliacionPage() {
     queryKey: ['mis-permisos'],
     queryFn: () => api.get('/api/erp/mi-permisos'),
   });
-  const puedeBorrarBulk = useMemo(() => {
-    const arr = Array.isArray(misPermisos)
-      ? misPermisos
-      : (misPermisos?.data ?? []);
-    return arr.some((p) => p.codigo === 'tesoreria.movimientos.borrar_bulk');
-  }, [misPermisos]);
+  const permisosArr = useMemo(() => Array.isArray(misPermisos) ? misPermisos : (misPermisos?.data ?? []), [misPermisos]);
+  const puedeBorrarBulk = useMemo(() => permisosArr.some((p) => p.codigo === 'tesoreria.movimientos.borrar_bulk'), [permisosArr]);
+  const puedeBorrarImport = useMemo(() => permisosArr.some((p) => p.codigo === 'tesoreria.extractos.borrar_import'), [permisosArr]);
+  const [borrarImportOpen, setBorrarImportOpen] = useState(false);
 
   // v1.27 §16 — confirmar bulk auto-etiquetados.
   const autoEtiquetadosIds = useMemo(() => {
@@ -156,6 +154,11 @@ export function ConciliacionPage() {
           <Button variant="primary" onClick={() => setImportExtracto(true)}>
             <Upload className="w-3 h-3" /> Subir extracto bancario
           </Button>
+          {puedeBorrarImport && (
+            <Button variant="danger" onClick={() => setBorrarImportOpen(true)}>
+              <Trash2 className="w-3 h-3" /> Borrar import
+            </Button>
+          )}
         </div>
       </div>
 
@@ -443,7 +446,122 @@ export function ConciliacionPage() {
           qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
         }}
       />
+
+      {borrarImportOpen && (
+        <BorrarImportModal
+          cuentaBancariaId={cuentaBancariaId || ''}
+          onClose={() => setBorrarImportOpen(false)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ['mov-banc'] });
+            qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
+          }}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * v1.45.1 — Borrar un import de extracto bancario completo (super_admin).
+ * Lista los imports de la cuenta, valida 409 si hay asientos / vínculos,
+ * pide motivo opcional y registra audit log con snapshot.
+ */
+function BorrarImportModal({
+  cuentaBancariaId,
+  onClose,
+  onSuccess,
+}: {
+  cuentaBancariaId: number | '';
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const qc = useQueryClient();
+  const [cuentaSel, setCuentaSel] = useState<number | ''>(cuentaBancariaId);
+  const [confirmar, setConfirmar] = useState<{ id: number; nombre: string } | null>(null);
+  const [motivo, setMotivo] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+
+  const { data: cuentas } = useQuery<{ data: { id: number; codigo: string; nombre: string }[] }>({
+    queryKey: ['cuentas-bancarias'], queryFn: () => api.get('/api/erp/cuentas-bancarias'),
+  });
+  const qs = cuentaSel ? `?cuenta_id=${cuentaSel}` : '';
+  const { data: extractos, isLoading } = useQuery<{ data: { data: Array<{ id: number; nombre_archivo: string; fecha_desde: string; fecha_hasta: string; cant_movimientos: number; importado_at: string }> } }>({
+    queryKey: ['extractos-import', cuentaSel], queryFn: () => api.get(`/api/erp/extractos${qs}`),
+  });
+
+  const borrar = useMutation({
+    mutationFn: (id: number) => api.delete(`/api/erp/extractos/${id}`, { motivo: motivo || undefined }),
+    onSuccess: () => {
+      setConfirmar(null); setMotivo(''); setErr(null);
+      qc.invalidateQueries({ queryKey: ['extractos-import'] });
+      onSuccess();
+    },
+    onError: (e: ApiError) => setErr(e.message),
+  });
+
+  const lista = extractos?.data?.data ?? [];
+
+  return (
+    <Modal open onClose={onClose} title="Borrar import de extracto bancario" size="lg">
+      <div className="space-y-3 text-[12.5px]">
+        <div className="bg-red-50 border border-red-200 rounded p-2 text-[11.5px] text-red-700">
+          Acción irreversible (solo super_admin). Se bloquea si algún movimiento tiene asiento
+          contable o está vinculado a eCheq / cobros / transferencias. Queda registrado en el audit log.
+        </div>
+        <label className="block">
+          <span className="text-[11.5px] font-medium text-ink-muted">Cuenta bancaria</span>
+          <select className="mt-1 w-full border border-line rounded-md px-2 py-1.5"
+            value={cuentaSel} onChange={(e) => setCuentaSel(e.target.value ? Number(e.target.value) : '')}>
+            <option value="">Todas</option>
+            {(cuentas?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>)}
+          </select>
+        </label>
+
+        {err && <div className="text-red-600 text-[12px]">{err}</div>}
+        {isLoading && <div className="text-ink-3">Cargando imports…</div>}
+
+        <div className="border border-line rounded-md overflow-hidden max-h-[360px] overflow-y-auto">
+          <table className="w-full text-[12px]">
+            <thead className="bg-surface-row sticky top-0"><tr className="text-left">
+              <th className="px-2 py-1.5">Archivo</th><th className="px-2 py-1.5">Período</th>
+              <th className="px-2 py-1.5 text-right">Movs</th><th className="px-2 py-1.5">Importado</th><th className="px-2 py-1.5"></th>
+            </tr></thead>
+            <tbody>
+              {lista.map((e) => (
+                <tr key={e.id} className="border-t border-line">
+                  <td className="px-2 py-1">{e.nombre_archivo}</td>
+                  <td className="px-2 py-1">{e.fecha_desde} a {e.fecha_hasta}</td>
+                  <td className="px-2 py-1 text-right tabular-nums">{e.cant_movimientos}</td>
+                  <td className="px-2 py-1 text-ink-3">{String(e.importado_at).slice(0, 16)}</td>
+                  <td className="px-2 py-1 text-right">
+                    <Button variant="danger" onClick={() => { setConfirmar({ id: e.id, nombre: e.nombre_archivo }); setErr(null); }}>
+                      <Trash2 className="w-3 h-3" /> Borrar
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {!isLoading && lista.length === 0 && (
+                <tr><td colSpan={5} className="px-2 py-4 text-center text-ink-3">Sin imports.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {confirmar && (
+          <div className="border border-red-300 rounded-md p-3 bg-red-50 space-y-2">
+            <div className="font-medium text-red-700">Confirmar borrado de "{confirmar.nombre}"</div>
+            <textarea className="w-full border border-line rounded-md px-2 py-1.5" rows={2}
+              placeholder="Motivo (opcional)" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmar(null)}>Cancelar</Button>
+              <Button variant="danger" disabled={borrar.isPending} onClick={() => borrar.mutate(confirmar.id)}>
+                {borrar.isPending ? 'Borrando…' : 'Borrar definitivamente'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 

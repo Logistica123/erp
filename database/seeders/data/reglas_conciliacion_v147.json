@@ -1,0 +1,93 @@
+{
+  "version": "1.47",
+  "fecha": "2026-06-14",
+  "predecesor": "v1.45",
+  "descripcion": "Mejoras post-test ICBC abril 2026 + cobertura Brubank/MP + cuentas puente",
+
+  "schema_delta": {
+    "cuentas_contables_nuevas": [
+      { "codigo": "2.1.3.99", "nombre": "AFIP - Pagos por Identificar", "nivel": 4, "tipo": "P", "rubro_ec": "Cargas Fiscales", "imputable": true, "moneda": "ARS", "etiqueta_cierre": "AFIP-PAG-ID", "activo": true },
+      { "codigo": "1.1.6.99", "nombre": "Pendientes de Identificar", "nivel": 4, "tipo": "A", "rubro_ec": "Otros Créditos", "imputable": true, "moneda": "ARS", "etiqueta_cierre": "PEND-ID", "activo": true },
+      { "codigo": "4.4.01",   "nombre": "Rendimientos por Cuentas Remuneradas", "nivel": 4, "tipo": "I", "rubro_ec": "Otros Ingresos Financieros", "imputable": true, "moneda": "ARS", "etiqueta_cierre": "REND-REM", "activo": true }
+    ],
+    "auxiliares_nuevos": [
+      { "codigo": "TC-ICBC-USD", "razon_social": "Tarjeta Corporativa ICBC USD", "tipo": "OTRO", "moneda": "USD" },
+      { "codigo": "INACAP",      "razon_social": "INACAP - Instituto Argentino de Capacitación", "tipo": "OTRO", "moneda": "ARS" },
+      { "codigo": "DPEC",        "razon_social": "Dirección Provincial de Energía de Corrientes", "tipo": "PROVEEDOR", "moneda": "ARS" },
+      { "codigo": "AGUAS-CTES",  "razon_social": "Aguas de Corrientes S.A.", "tipo": "PROVEEDOR", "moneda": "ARS" },
+      { "codigo": "OSECAC",      "razon_social": "Obra Social de Empleados de Comercio", "tipo": "OTRO", "moneda": "ARS" }
+    ]
+  },
+
+  "reglas_existentes_ajustar_regex": [
+    { "codigo": "ICBC-IVA-COM",      "regex_nuevo": "I\\s*V\\s*A\\b",                                 "comentario": "permite I V A con espacios" },
+    { "codigo": "ICBC-IVA-COM-105",  "regex_nuevo": "IVA\\s+REDUCIDA",                                "comentario": "antes no matcheaba" },
+    { "codigo": "ICBC-PAGO-TARJ",    "regex_nuevo": "^PAGO\\s+VISA\\s*\\$",                          "comentario": "$ es literal — escapado. Cubre PAGO VISA $." },
+    { "codigo": "ICBC-PAGO-PRESTAMO","regex_nuevo": "CUOTA\\s+PRESTAMO|CTA\\s+CTE\\s+PRESTAMO",      "comentario": "saca prefijos rígidos" },
+    { "codigo": "V27_SIRCREB",       "regex_nuevo": "(?i)SIRCREB",                                    "comentario": "case-insensitive global" },
+    { "codigo": "ICBC-COBRO-TRF",    "regex_nuevo": "DEBITO\\s+INMEDIATO|CREDITO\\s+INMEDIATO|TRANS\\s+PAG\\s+PROV", "comentario": "amplía a créditos también" },
+    { "codigo": "ICBC-PAGO-TRF",     "regex_nuevo": "DEBITO\\s+INMEDIATO|TRANS\\s+PAG\\s+PROV",       "comentario": "incluye TRANS PAG PROV" }
+  ],
+
+  "reglas_nuevas_icbc": [
+    { "codigo": "ICBC-IVA-COM-CUSTODIA",  "banco": "ICBC", "signo": "-", "regex": "^IVA\\s+COMIS\\s+CUSTODIA",    "cuenta": "1.1.6.01.21", "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-COMIS-CUSTODIA",    "banco": "ICBC", "signo": "-", "regex": "COMIS\\s+CUSTODIA",            "cuenta": "5.4.02",      "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-COMIS-RECH-DDIR",   "banco": "ICBC", "signo": "-", "regex": "COMIS\\s+RECH\\s+DDIR",        "cuenta": "5.4.02",      "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-DEB-LIQ-INTER",     "banco": "ICBC", "signo": "-", "regex": "DEB\\s+LIQ\\s+INTER",          "cuenta": "5.4.04",      "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-DEB-PREA-DEBIN",    "banco": "ICBC", "signo": "-", "regex": "DEB\\s+PREA\\s+DEBIN",         "cuenta": "5.4.02",      "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-SELLADO",           "banco": "ICBC", "signo": "-", "regex": "^SELLADO",                     "cuenta": "5.4.06",      "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-CH-CAMARA",         "banco": "ICBC", "signo": "+", "regex": "CH\\s+CAMARA",                 "cuenta": null,          "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null },
+    { "codigo": "ICBC-PAGO-VISA-USD",     "banco": "ICBC", "signo": "-", "regex": "^PAGO\\s+VISA\\s+U\\$S",       "cuenta": "2.1.4.04",    "modo": "FIJO", "auxiliar": "TC-ICBC-USD" },
+    { "codigo": "ICBC-PAGO-AFIP-F931",         "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+F\\.?\\s*931", "cuenta": "2.1.2.02", "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-PAGO-AFIP-PLAN-U957448", "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+U957448",       "cuenta": "2.1.3.13", "modo": "FIJO", "auxiliar": "PLAN-U957448" },
+    { "codigo": "ICBC-PAGO-AFIP-PLAN-V030565", "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+V030565",       "cuenta": "2.1.3.13", "modo": "FIJO", "auxiliar": "PLAN-V030565" },
+    { "codigo": "ICBC-PAGO-AFIP-PLAN-V155995", "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+V155995",       "cuenta": "2.1.3.13", "modo": "FIJO", "auxiliar": "PLAN-V155995" },
+    { "codigo": "ICBC-PAGO-AFIP-PLAN-V245451", "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+V245451",       "cuenta": "2.1.3.13", "modo": "FIJO", "auxiliar": "PLAN-V245451" },
+    { "codigo": "ICBC-PAGO-AFIP-PLAN-V354836", "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+V354836",       "cuenta": "2.1.3.13", "modo": "FIJO", "auxiliar": "PLAN-V354836" },
+    { "codigo": "ICBC-PAGO-AFIP-PLAN-V606071", "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+V606071",       "cuenta": "2.1.3.13", "modo": "FIJO", "auxiliar": "PLAN-V606071" },
+    { "codigo": "ICBC-PAGO-AFIP-PLAN-W099151", "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP\\s+W099151",       "cuenta": "2.1.3.13", "modo": "FIJO", "auxiliar": "PLAN-W099151" },
+    { "codigo": "ICBC-PAGO-AFIP-GEN",          "banco": "ICBC", "signo": "-", "regex": "PAGO\\s+IMP\\.AFIP",                  "cuenta": "2.1.3.99", "modo": "FIJO", "auxiliar": null, "prioridad_baja": true, "comentario": "regla catch-all AFIP — prioridad menor que las anteriores" },
+    { "codigo": "ICBC-PAGO-SEGURO",       "banco": "ICBC", "signo": "-", "regex": "LA\\s+SEGUNDA|MAPFRE|SAN\\s+CRISTOBAL|FEDERACION\\s+PATRONAL|ALLIANZ|MERIDIONAL", "cuenta": "5.2.2.09", "modo": "FIJO", "auxiliar": null },
+    { "codigo": "ICBC-PAGO-NOSIS",        "banco": "ICBC", "signo": "-", "regex": "NOSIS",                                    "cuenta": "5.2.2.07", "modo": "FIJO", "auxiliar": "NOSIS" },
+    { "codigo": "ICBC-PAGO-PERSONAL",     "banco": "ICBC", "signo": "-", "regex": "PERSONAL\\s+(SA|S\\.A\\.)|PERSONAL\\s+FLOW", "cuenta": "5.2.2.05", "modo": "FIJO", "auxiliar": "PERSONAL" },
+    { "codigo": "ICBC-COMPRA-VENTA-TITULO","banco": "ICBC", "signo": "±", "regex": "COMPRA\\s+TITULO|VENTA\\s+TITULO",         "cuenta": "1.1.3.03", "modo": "FIJO", "auxiliar": null, "comentario": "cuenta genérica FCI — reclasificar manualmente contra instrumento" },
+    { "codigo": "ICBC-TRANSF-CONNBKG",    "banco": "ICBC", "signo": "+", "regex": "CONNBKG|CONN\\s+BKG",                       "cuenta": null,       "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null },
+    { "codigo": "ICBC-TRANSF-PUSH",       "banco": "ICBC", "signo": "+", "regex": "TR\\s+PUSH",                                "cuenta": null,       "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null },
+    { "codigo": "ICBC-TRANSF-BCOS-ONLINE","banco": "ICBC", "signo": "±", "regex": "TRANSF\\s+BCOS\\s+ONLINE",                  "cuenta": null,       "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null },
+    { "codigo": "ICBC-TR-CBU",            "banco": "ICBC", "signo": "±", "regex": "TR\\s+CBU",                                 "cuenta": null,       "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null }
+  ],
+
+  "reglas_nuevas_brubank": [
+    { "codigo": "BR-ECHEQ-RECIB",     "banco": "BRUBANK", "signo": "+", "regex": "^Acreditación\\s+E-Checks?$",     "cuenta": null,      "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null, "comentario": "matching auto contra factura por monto. Sin match → PENDIENTE" },
+    { "codigo": "BR-CHQ-DEPOSITO",    "banco": "BRUBANK", "signo": "+", "regex": "^Depósito\\s+de\\s+Cheques?$",     "cuenta": null,      "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null, "comentario": "cheques en papel depositados" },
+    { "codigo": "BR-INACAP",          "banco": "BRUBANK", "signo": "-", "regex": "INACAP\\s+Cuota",                  "cuenta": "5.2.1.04","modo": "FIJO", "auxiliar": "INACAP", "comentario": "aporte sindical INACAP (D-47-7)" },
+    { "codigo": "BR-MELI-PENDIENTE",  "banco": "BRUBANK", "signo": "±", "regex": "^MERCADOLIBRE\\s+S\\.?R\\.?L\\.?$","cuenta": "1.1.6.99","modo": "FIJO", "auxiliar": null,     "comentario": "puente — usuario reclasifica luego (D-47-5)" },
+    { "codigo": "TRF-INT-BR-A-MP",    "banco": "BRUBANK", "signo": "-", "regex": "^A\\s+una\\s+cuenta\\s+tuya\\s+-\\s+MercadoPago$", "cuenta": null, "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA", "auxiliar": null },
+    { "codigo": "TRF-INT-BR-DEP-REM", "banco": "BRUBANK", "signo": "-", "regex": "^Depósito\\s+en\\s+cuenta\\s+remunerada$", "cuenta": null, "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA", "auxiliar": null, "comentario": "espejo de Fondeo de tu cuenta remunerada" }
+  ],
+
+  "reglas_nuevas_mercadopago": [
+    { "codigo": "MP-RENDIMIENTOS",        "banco": "MERCADOPAGO", "signo": "+", "regex": "^Rendimientos$",                            "cuenta": "4.4.01",   "modo": "FIJO", "auxiliar": null },
+    { "codigo": "MP-INGRESO-DINERO",      "banco": "MERCADOPAGO", "signo": "+", "regex": "^Ingreso\\s+de\\s+dinero$",                 "cuenta": null,       "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null, "comentario": "entrada sin contraparte clara → matching dinámico" },
+    { "codigo": "MP-IMP-EXTRAC",          "banco": "MERCADOPAGO", "signo": "-", "regex": "^Impuesto\\s+por\\s+extracción$",           "cuenta": "5.4.04",   "modo": "FIJO", "auxiliar": null },
+    { "codigo": "MP-TRANSF-RECIB-LOGARG", "banco": "MERCADOPAGO", "signo": "+", "regex": "^Transferencia\\s+recibida\\s+LOGISTICA\\s+ARGENTINA\\s+S\\.?R\\.?L\\.?$", "cuenta": null, "modo": "SIN_CUENTA_TRANSFERENCIA_INTERNA", "auxiliar": null },
+    { "codigo": "MP-TRANSF-ENVIADA-GEN",  "banco": "MERCADOPAGO", "signo": "-", "regex": "^Transferencia\\s+enviada\\s",              "cuenta": null,       "modo": "DINAMICO_POR_AUXILIAR", "auxiliar": null, "comentario": "extrae nombre del concepto → busca auxiliar por razón_social" },
+    { "codigo": "MP-PAGO-SERV-DPEC",      "banco": "MERCADOPAGO", "signo": "-", "regex": "^Pago\\s+de\\s+servicio\\s+DPEC$",          "cuenta": "5.2.2.03", "modo": "FIJO", "auxiliar": "DPEC" },
+    { "codigo": "MP-PAGO-SERV-AGUAS",     "banco": "MERCADOPAGO", "signo": "-", "regex": "Pago\\s+de\\s+servicio\\s+Aguas\\s+de\\s+Corrientes", "cuenta": "5.2.2.04", "modo": "FIJO", "auxiliar": "AGUAS-CTES" },
+    { "codigo": "MP-PAGO-SERV-OSECAC",    "banco": "MERCADOPAGO", "signo": "-", "regex": "^Pago\\s+de\\s+servicio\\s+Osecac$",        "cuenta": "2.1.2.03", "modo": "FIJO", "auxiliar": "OSECAC", "comentario": "cancela pasivo si fue devengado en sueldos" },
+    { "codigo": "MP-PAGO-SERV-GEN",       "banco": "MERCADOPAGO", "signo": "-", "regex": "^Pago\\s+de\\s+servicio\\s",                "cuenta": "1.1.6.99", "modo": "FIJO", "auxiliar": null, "prioridad_baja": true, "comentario": "catch-all servicios (prioridad menor que DPEC/Aguas/Osecac)" },
+    { "codigo": "MP-PAGO-QR-WEE",         "banco": "MERCADOPAGO", "signo": "-", "regex": "^Pago\\s+con\\s+QR\\s+WEE!?\\s*Pagos?$",    "cuenta": "1.1.6.99", "modo": "FIJO", "auxiliar": null },
+    { "codigo": "MP-PAGO-COMERCIO",       "banco": "MERCADOPAGO", "signo": "-", "regex": "^Pago\\s+(Full24|MUSIMUNDO|TECNOCOMPRO|[A-Z][A-Z0-9!]+)$", "cuenta": "1.1.6.99", "modo": "FIJO", "auxiliar": null, "comentario": "compras a comercios sin CUIT → puente" }
+  ],
+
+  "resumen": {
+    "cuentas_nuevas": 3,
+    "auxiliares_nuevos": 5,
+    "reglas_ajustar_regex": 7,
+    "reglas_nuevas_icbc": 25,
+    "reglas_nuevas_brubank": 6,
+    "reglas_nuevas_mercadopago": 11,
+    "total_reglas_nuevas_v147": 42,
+    "total_reglas_activas_post_v147_aprox": 110
+  }
+}

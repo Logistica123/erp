@@ -66,13 +66,23 @@ class MatchingAutoService
         $extractor = $regla->cuit_extractor_regex ?: $regla->patron_concepto;
         if (! $extractor) return null;
 
+        // El patrón actúa de gatillo (debe matchear el concepto).
         if (! @preg_match("/{$extractor}/iu", (string) $mov->concepto, $m)) {
             return null;
         }
-        if (! isset($m[1])) return null; // sin grupo de captura del CUIT.
 
-        $cuit = preg_replace('/[^0-9]/', '', $m[1]);
-        if (strlen($cuit) !== 11) return null;
+        // CUIT: prioridad 1 grupo de captura del concepto; prioridad 2 la
+        // columna `Nro doc` del CSV (v1.47 §4 — el parser ICBC ya la normalizó
+        // en cuit_contraparte). Esto cubre las reglas v1.47 cuyo regex ya no
+        // trae el CUIT pegado al concepto.
+        $cuit = null;
+        if (isset($m[1])) {
+            $cuit = preg_replace('/[^0-9]/', '', $m[1]);
+        }
+        if (! $cuit || strlen($cuit) !== 11) {
+            $cuit = preg_replace('/[^0-9]/', '', (string) $mov->cuit_contraparte);
+        }
+        if (! $cuit || strlen($cuit) !== 11) return null;
 
         // Identificar auxiliar por CUIT (tipo de la regla; si PROVEEDOR no
         // matchea, probar DISTRIBUIDOR — D-45 nota distribuidor).
@@ -92,6 +102,19 @@ class MatchingAutoService
             // CUIT extraído pero sin auxiliar → confianza 0, no auto-imputa.
             return ['cuit' => $cuit, 'auxiliar' => null, 'confianza' => 0,
                     'factura_id' => null, 'factura_tipo' => null, 'tipo_match' => 'SIN_AUXILIAR'];
+        }
+
+        // v1.47 §5 — routing por tipo de auxiliar. EMPLEADO → pago de sueldo:
+        // no se busca factura, va directo a 5.2.1.01 Sueldos Administración.
+        if ($auxiliar->tipo === 'Empleado') {
+            $ctaSueldos = DB::table('erp_cuentas_contables')
+                ->where('empresa_id', (int) (DB::table('erp_cuentas_bancarias')->where('id', $mov->cuenta_bancaria_id)->value('empresa_id') ?: 1))
+                ->where('codigo', '5.2.1.01')->value('id');
+            return [
+                'cuit' => $cuit, 'auxiliar' => $auxiliar, 'confianza' => 90,
+                'factura_id' => null, 'factura_tipo' => null, 'tipo_match' => 'EMPLEADO_SUELDO',
+                'cuenta_override_id' => $ctaSueldos ? (int) $ctaSueldos : null,
+            ];
         }
 
         $esVenta = (float) $mov->credito > 0.005;
@@ -224,7 +247,7 @@ class MatchingAutoService
                 'factura_imputada_id' => $res['factura_id'],
                 'factura_imputada_tipo' => $res['factura_tipo'],
                 'imputacion_confianza' => $res['confianza'],
-                'cuenta_contable_propuesta_id' => $regla->cuenta_contable_id ?? $mov->cuenta_contable_propuesta_id,
+                'cuenta_contable_propuesta_id' => $res['cuenta_override_id'] ?? $regla->cuenta_contable_id ?? $mov->cuenta_contable_propuesta_id,
             ]);
 
             DB::table('erp_extractos_imputaciones_audit')->insert([

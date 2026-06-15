@@ -114,7 +114,7 @@ class ParserIcbc extends AbstractParser
                 canal: $canal ? trim((string) $canal) : null,
                 bancoContraparte: $banco ? trim((string) $banco) : null,
                 cbuContraparte: $cbu ? trim((string) $cbu) : null,
-                cuitContraparte: $nroDoc ? trim((string) $nroDoc) : null,
+                cuitContraparte: self::normalizarCuit($tipoDoc, $nroDoc),
                 nombreContraparte: $nombre ? trim((string) $nombre) : null,
                 referencia: $referencia ? trim((string) $referencia) : null,
                 infoComplementaria: $infoComp ? trim((string) $infoComp) : null,
@@ -192,6 +192,22 @@ class ParserIcbc extends AbstractParser
             monedaDetectada: $header['moneda'],
             numeroCuentaDetectado: $header['numero'],
         );
+    }
+
+    /**
+     * v1.47 §4.1 — Normaliza el CUIT de la columna `Nro doc` del CSV ICBC,
+     * que viene con padding de ceros (ej. "0030687280438"). Devuelve 11 dígitos
+     * limpios o null. Solo si Tipo doc == CUIT.
+     */
+    private static function normalizarCuit(?string $tipoDoc, ?string $nroDoc): ?string
+    {
+        $tipo = strtoupper(trim((string) $tipoDoc));
+        $nro = trim((string) $nroDoc);
+        if ($nro === '') return null;
+        // Si declara tipo y no es CUIT, no lo tomamos como CUIT.
+        if ($tipo !== '' && $tipo !== 'CUIT' && $tipo !== 'CUIL') return null;
+        $limpio = ltrim(preg_replace('/[^0-9]/', '', $nro), '0');
+        return (strlen($limpio) === 11) ? $limpio : null;
     }
 
     /**

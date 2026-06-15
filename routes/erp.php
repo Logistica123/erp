@@ -271,6 +271,30 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/contabilidad/iiddycc/reclasificar', [\App\Erp\Http\Controllers\ReclasificacionIiddyccController::class, 'reclasificar'])
             ->name('erp.iiddycc.reclasificar');
 
+        // v1.47 §15 — Conciliación en lote N:M.
+        Route::get('/conciliacion/lotes/candidatos', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'candidatos'])
+            ->name('erp.conc.lotes.candidatos');
+        Route::get('/conciliacion/lotes', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'index'])
+            ->name('erp.conc.lotes.index');
+        Route::post('/conciliacion/lotes', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'store'])
+            ->name('erp.conc.lotes.store');
+        Route::get('/conciliacion/lotes/{id}', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'show'])
+            ->whereNumber('id')->name('erp.conc.lotes.show');
+        Route::post('/conciliacion/lotes/{id}/confirmar', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'confirmar'])
+            ->whereNumber('id')->name('erp.conc.lotes.confirmar');
+        Route::post('/conciliacion/lotes/{id}/revertir', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'revertir'])
+            ->whereNumber('id')->name('erp.conc.lotes.revertir');
+        Route::delete('/conciliacion/lotes/{id}', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'destroy'])
+            ->whereNumber('id')->name('erp.conc.lotes.destroy');
+
+        // v1.47 §14.3 — Saneamiento cuenta puente 1.1.6.99.
+        Route::get('/contabilidad/pendientes-identificar', [\App\Erp\Http\Controllers\ReclasificacionPendientesController::class, 'index'])
+            ->name('erp.pendientes.index');
+        Route::get('/contabilidad/pendientes-identificar/saldo', [\App\Erp\Http\Controllers\ReclasificacionPendientesController::class, 'saldo'])
+            ->name('erp.pendientes.saldo');
+        Route::post('/contabilidad/pendientes-identificar/reclasificar', [\App\Erp\Http\Controllers\ReclasificacionPendientesController::class, 'reclasificar'])
+            ->name('erp.pendientes.reclasificar');
+
         Route::get('/alias-contraparte', [AliasContraparteController::class, 'index'])->name('erp.alias.index');
         Route::post('/alias-contraparte', [AliasContraparteController::class, 'store'])->name('erp.alias.store');
         Route::patch('/alias-contraparte/{id}', [AliasContraparteController::class, 'update'])

@@ -35,6 +35,8 @@ import { ControlFacturasPage } from './pages/ControlFacturasPage';
 import { ChequesRecibidosPage } from './pages/ChequesRecibidosPage';
 import { ImputacionesAutoPage } from './pages/ImputacionesAutoPage';
 import { ReclasificarIiddyccPage } from './pages/ReclasificarIiddyccPage';
+import { ConciliacionLotesPage } from './pages/ConciliacionLotesPage';
+import { ReclasificarPendientesPage } from './pages/ReclasificarPendientesPage';
 import { FacturasCompraPage } from './pages/FacturasCompraPage';
 import { CCPage } from './pages/CCPage';
 import { FcePage } from './pages/FcePage';
@@ -165,6 +167,8 @@ export default function App() {
               <Route path="/erp/tesoreria/cheques-recibidos" element={<ChequesRecibidosPage />} handle={{ crumb: 'Cheques recibidos' }} />
               <Route path="/erp/tesoreria/imputaciones-auto" element={<ImputacionesAutoPage />} handle={{ crumb: 'Imputaciones automáticas' }} />
               <Route path="/erp/contabilidad/reclasificar-iiddycc" element={<ReclasificarIiddyccPage />} handle={{ crumb: 'Reclasificar Imp. Ley 25413' }} />
+              <Route path="/erp/tesoreria/conciliacion/lotes" element={<ConciliacionLotesPage />} handle={{ crumb: 'Lotes de conciliación' }} />
+              <Route path="/erp/contabilidad/reclasificar-pendientes" element={<ReclasificarPendientesPage />} handle={{ crumb: 'Reclasificar pendientes' }} />
 
               {/* F3 — Compras + CC + FCE */}
               <Route path="/erp/facturas-compra" element={<FacturasCompraPage />} handle={{ crumb: 'Facturas de compra' }} />

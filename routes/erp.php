@@ -218,6 +218,8 @@ Route::prefix('api/erp')->group(function () {
         // v1.27 Sprint C — sugerencias + conciliación contra factura.
         Route::get('/movimientos-bancarios/{id}/sugerencias', [MovimientosBancariosController::class, 'sugerencias'])
             ->whereNumber('id')->name('erp.mov-banc.sugerencias');
+        Route::post('/movimientos-bancarios/{id}/conciliar-multiple', [MovimientosBancariosController::class, 'conciliarMultiple'])
+            ->whereNumber('id')->name('erp.mov-banc.conciliar-multiple');
         Route::post('/movimientos-bancarios/{id}/conciliar-factura', [MovimientosBancariosController::class, 'conciliarFactura'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar-factura');
         // v1.27 §15 — Búsqueda de auxiliares + facturas pendientes para modal manual.

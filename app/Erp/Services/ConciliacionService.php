@@ -798,6 +798,118 @@ class ConciliacionService
     }
 
     /**
+     * v1.47.2 — Concilia UN movimiento bancario contra N facturas (1:N) con un
+     * único asiento consolidado. Las facturas pueden ser de distintos auxiliares
+     * (flujo B manual con motivo). Soporta diferencia explícita contra una cuenta
+     * de ajuste (ej. retención).
+     *
+     * @param  array<int,array{id:int,tipo:string,monto_imputado:float}>  $facturas
+     */
+    public function conciliarMultiplesFacturas(MovimientoBancario $mov, array $facturas, User $usuario, ?string $motivo = null, bool $permitirDiferencia = false, ?int $cuentaAjusteId = null): MovimientoBancario
+    {
+        if ($mov->estado === MovimientoBancario::ESTADO_CONCILIADO) {
+            throw new DomainException('MOVIMIENTO_YA_CONCILIADO');
+        }
+        if (empty($facturas)) throw new DomainException('SIN_FACTURAS');
+
+        $cuentaBanco = $mov->cuentaBancaria;
+        $empresaId = $cuentaBanco->empresa_id;
+        $montoMov = (float) max($mov->debito, $mov->credito);
+        $esCobro = (float) $mov->credito > 0.005;
+
+        $sumImputado = round(array_sum(array_map(fn ($f) => (float) $f['monto_imputado'], $facturas)), 2);
+        $ajuste = round($montoMov - $sumImputado, 2); // lo que sobra del mov vs lo imputado
+
+        if (abs($ajuste) > 0.01) {
+            if (! $permitirDiferencia || ! $cuentaAjusteId || ! $motivo) {
+                throw new DomainException(sprintf(
+                    'DIFERENCIA_NO_PERMITIDA: mov $%.2f vs facturas $%.2f (dif $%.2f). Requiere permitir_diferencia + cuenta de ajuste + motivo.',
+                    $montoMov, $sumImputado, $ajuste,
+                ));
+            }
+        }
+
+        return DB::transaction(function () use ($mov, $facturas, $usuario, $cuentaBanco, $empresaId, $montoMov, $esCobro, $sumImputado, $ajuste, $motivo, $cuentaAjusteId) {
+            DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
+
+            $diarioBan = DB::table('erp_diarios')->where('empresa_id', $empresaId)->where('codigo', 'BAN')->value('id')
+                ?? DB::table('erp_diarios')->where('empresa_id', $empresaId)->where('codigo', 'GEN')->value('id');
+            if (! $diarioBan) throw new DomainException('DIARIO_BAN_INEXISTENTE');
+
+            $lineasFactura = [];
+            foreach ($facturas as $f) {
+                if (! in_array($f['tipo'], ['VENTA', 'COMPRA'], true)) throw new DomainException('TIPO_FACTURA_INVALIDO');
+                $tabla = $f['tipo'] === 'VENTA' ? 'erp_facturas_venta' : 'erp_facturas_compra';
+                $factura = DB::table($tabla)->where('id', $f['id'])->where('empresa_id', $empresaId)->whereNull('deleted_at')->first();
+                if (! $factura) throw new DomainException("FACTURA_NO_ENCONTRADA: {$f['tipo']} #{$f['id']}");
+                $auxId = $factura->auxiliar_id;
+                $cuentaAux = DB::table('erp_auxiliares')->where('id', $auxId)->value('cuenta_contable_default_id')
+                    ?? DB::table('erp_cuentas_contables')->where('empresa_id', $empresaId)
+                        ->where('codigo', $f['tipo'] === 'VENTA' ? '1.1.4.01' : '2.1.1.01')->value('id');
+                $lineasFactura[] = ['cuenta_id' => $cuentaAux, 'auxiliar_id' => $auxId, 'monto' => round((float) $f['monto_imputado'], 2),
+                    'factura_tabla' => $tabla, 'factura_id' => $f['id']];
+            }
+
+            $glosa = ($esCobro ? 'Cobro' : 'Pago') . ' múltiple ' . $mov->id . ' (' . count($facturas) . ' facturas)';
+            $movs = [];
+            // Banco siempre por el monto real del movimiento.
+            if ($esCobro) {
+                $movs[] = ['cuenta_id' => $cuentaBanco->cuenta_contable_id, 'debe' => $montoMov, 'haber' => 0, 'glosa' => $glosa];
+                foreach ($lineasFactura as $lf) {
+                    $movs[] = ['cuenta_id' => $lf['cuenta_id'], 'auxiliar_id' => $lf['auxiliar_id'], 'debe' => 0, 'haber' => $lf['monto'], 'glosa' => $glosa];
+                }
+                if (abs($ajuste) > 0.01) {
+                    // ajuste = montoMov - sumImputado. Si >0: HABER; si <0: DEBE.
+                    $ajuste > 0
+                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => 0, 'haber' => $ajuste, 'glosa' => "Ajuste: {$motivo}"]
+                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => -$ajuste, 'haber' => 0, 'glosa' => "Ajuste: {$motivo}"];
+                }
+            } else {
+                foreach ($lineasFactura as $lf) {
+                    $movs[] = ['cuenta_id' => $lf['cuenta_id'], 'auxiliar_id' => $lf['auxiliar_id'], 'debe' => $lf['monto'], 'haber' => 0, 'glosa' => $glosa];
+                }
+                if (abs($ajuste) > 0.01) {
+                    $ajuste > 0
+                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => $ajuste, 'haber' => 0, 'glosa' => "Ajuste: {$motivo}"]
+                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => 0, 'haber' => -$ajuste, 'glosa' => "Ajuste: {$motivo}"];
+                }
+                $movs[] = ['cuenta_id' => $cuentaBanco->cuenta_contable_id, 'debe' => 0, 'haber' => $montoMov, 'glosa' => $glosa];
+            }
+
+            $asientoSvc = app(AsientoService::class);
+            $asiento = $asientoSvc->crearBorrador([
+                'empresa_id' => $empresaId, 'diario_id' => $diarioBan, 'fecha' => $mov->fecha,
+                'glosa' => $glosa, 'origen' => 'BANCO', 'origen_tabla' => 'erp_movimientos_bancarios', 'origen_id' => $mov->id,
+                'observaciones' => $motivo, 'usuario_id' => $usuario->id, 'movimientos' => $movs,
+            ]);
+            $asiento = $asientoSvc->contabilizar($asiento);
+
+            foreach ($lineasFactura as $lf) {
+                Conciliacion::create([
+                    'movimiento_bancario_id' => $mov->id, 'referencia_tipo' => 'ASIENTO_MANUAL',
+                    'referencia_id' => $asiento->id, 'importe_conciliado' => $lf['monto'],
+                    'user_id' => $usuario->id, 'modo' => $motivo ? 'MANUAL' : 'AUTO',
+                    'observacion' => sprintf('Conciliación múltiple contra %s #%d%s', $lf['factura_tabla'], $lf['factura_id'], $motivo ? " · {$motivo}" : ''),
+                ]);
+            }
+
+            $mov->update([
+                'estado' => MovimientoBancario::ESTADO_CONCILIADO,
+                'asiento_id' => $asiento->id,
+                'monto_conciliado' => $sumImputado,
+            ]);
+
+            $this->audit->logEvento(
+                accion: 'MOVIMIENTO_CONCILIADO_MULTIPLE', modulo: 'tesoreria',
+                descripcion: sprintf('Mov #%d conciliado contra %d facturas por $%.2f (asiento #%d)%s',
+                    $mov->id, count($facturas), $sumImputado, $asiento->id, $motivo ? " · {$motivo}" : ''),
+                empresaId: $empresaId,
+            );
+            return $mov->fresh(['asiento', 'cuentaBancaria']);
+        });
+    }
+
+    /**
      * Auto-conciliación masiva sobre movimientos PENDIENTE/ETIQUETADO:
      *  - ETIQUETADO → confirma cuenta propuesta (crea asiento vía
      *    MovimientoBancarioService::conciliar)

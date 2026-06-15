@@ -243,6 +243,35 @@ class MovimientosBancariosController
     }
 
     /**
+     * v1.47.2 — Concilia 1 movimiento contra N facturas (1:N) con asiento
+     * consolidado. Soporta facturas de distintos auxiliares + diferencia.
+     */
+    public function conciliarMultiple(Request $request, int $id): JsonResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+        $data = $request->validate([
+            'facturas' => ['required', 'array', 'min:1'],
+            'facturas.*.id' => ['required', 'integer'],
+            'facturas.*.tipo' => ['required', Rule::in(['VENTA', 'COMPRA'])],
+            'facturas.*.monto_imputado' => ['required', 'numeric', 'gt:0'],
+            'motivo' => ['nullable', 'string', 'min:10', 'max:500'],
+            'permitir_diferencia' => ['nullable', 'boolean'],
+            'cuenta_ajuste_id' => ['nullable', 'integer', 'exists:erp_cuentas_contables,id'],
+        ]);
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        try {
+            $mov = $this->concilService->conciliarMultiplesFacturas(
+                $mov, $data['facturas'], $request->user(),
+                $data['motivo'] ?? null, (bool) ($data['permitir_diferencia'] ?? false),
+                $data['cuenta_ajuste_id'] ?? null,
+            );
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $mov->load('asiento')]);
+    }
+
+    /**
      * v1.27 §15 — Búsqueda de auxiliares (Cliente o Proveedor) para el modal
      * de conciliación manual. Filtra por nombre o CUIT.
      */

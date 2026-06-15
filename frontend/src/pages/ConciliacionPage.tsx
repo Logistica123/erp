@@ -1257,24 +1257,42 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   onError: (msg: string) => void;
 }) {
   const qc = useQueryClient();
-  const [seleccionada, setSeleccionada] = useState<Sugerencia | null>(null);
-  const [monto, setMonto] = useState<string>('');
+  // v1.47.2 — multi-select: claves "tipo-factura_id".
+  const [seleccionadas, setSeleccionadas] = useState<Set<string>>(new Set());
   const [manualOpen, setManualOpen] = useState(false);
+  const [permitirDif, setPermitirDif] = useState(false);
+  const [motivoDif, setMotivoDif] = useState('');
+  const [cuentaAjuste, setCuentaAjuste] = useState('');
 
   const { data: sugerencias, isLoading } = useQuery<{ data: SugerenciasResp }>({
     queryKey: ['sugerencias', mov?.id],
     queryFn: () => api.get(`/api/erp/movimientos-bancarios/${mov!.id}/sugerencias?top=10`),
     enabled: !!mov,
   });
+  const { data: cuentasResp } = useQuery<{ data: Array<{ id: number; codigo: string; nombre: string }> }>({
+    queryKey: ['cuentas-imputables'], queryFn: () => api.get('/api/erp/cuentas?imputable=1'), enabled: !!mov,
+  });
 
   const montoMov = mov ? Math.max(Number(mov.debito), Number(mov.credito)) : 0;
+  const resp = sugerencias?.data;
+  const lista = resp?.sugerencias ?? [];
+  const keyOf = (s: Sugerencia) => `${s.tipo}-${s.factura_id}`;
+  const selObjs = lista.filter((s) => seleccionadas.has(keyOf(s)));
+  const totalSel = selObjs.reduce((a, s) => a + Number(s.saldo_pendiente), 0);
+  const diff = Math.round((montoMov - totalSel) * 100) / 100;
+  const exacto = Math.abs(diff) <= 1;
+  const puedeConfirmar = selObjs.length > 0 && (exacto || (permitirDif && motivoDif.trim().length >= 10 && !!cuentaAjuste));
 
   const conciliarMut = useMutation({
     mutationFn: () =>
-      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar-factura`, {
-        tipo_factura: seleccionada!.tipo === 'FACTURA_VENTA' ? 'VENTA' : 'COMPRA',
-        factura_id: seleccionada!.factura_id,
-        monto: Number(monto || montoMov),
+      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar-multiple`, {
+        facturas: selObjs.map((s) => ({
+          id: s.factura_id, tipo: s.tipo === 'FACTURA_VENTA' ? 'VENTA' : 'COMPRA',
+          monto_imputado: Number(s.saldo_pendiente),
+        })),
+        motivo: permitirDif && !exacto ? motivoDif : null,
+        permitir_diferencia: permitirDif && !exacto,
+        cuenta_ajuste_id: permitirDif && !exacto ? Number(cuentaAjuste) : null,
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); onSuccess(); },
     onError: (e: ApiError) => onError(e.message),
@@ -1282,8 +1300,13 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
 
   if (!mov) return null;
 
-  const resp = sugerencias?.data;
-  const lista = resp?.sugerencias ?? [];
+  const toggle = (s: Sugerencia) => {
+    if (s.cuit_no_coincide === true) return; // Flujo A no permite CUIT distinto.
+    const k = keyOf(s);
+    const n = new Set(seleccionadas);
+    n.has(k) ? n.delete(k) : n.add(k);
+    setSeleccionadas(n);
+  };
 
   return (
     <Modal open onClose={onClose} title={`Sugerencias para mov #${mov.id} · $${fmtMoney(montoMov)}`} size="lg">
@@ -1339,13 +1362,18 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
         <div className="space-y-1 max-h-[300px] overflow-y-auto">
           {lista.map((s) => (
             <label key={`${s.tipo}-${s.factura_id}`}
-              className={`flex items-start gap-2 p-2 rounded border cursor-pointer transition ${
-                seleccionada?.factura_id === s.factura_id && seleccionada.tipo === s.tipo
-                  ? 'border-azure bg-azure-soft/30'
-                  : 'border-line hover:bg-surface-hover'
+              className={`flex items-start gap-2 p-2 rounded border transition ${
+                s.cuit_no_coincide === true
+                  ? 'border-line opacity-50 cursor-not-allowed'
+                  : seleccionadas.has(`${s.tipo}-${s.factura_id}`)
+                    ? 'border-azure bg-azure-soft/30 cursor-pointer'
+                    : 'border-line hover:bg-surface-hover cursor-pointer'
               }`}>
-              <input type="radio" checked={seleccionada?.factura_id === s.factura_id && seleccionada.tipo === s.tipo}
-                onChange={() => { setSeleccionada(s); setMonto(String(Math.min(s.saldo_pendiente, montoMov))); }} />
+              <input type="checkbox"
+                disabled={s.cuit_no_coincide === true}
+                title={s.cuit_no_coincide === true ? 'CUIT distinto — usá "Conciliar manualmente con motivo"' : undefined}
+                checked={seleccionadas.has(`${s.tipo}-${s.factura_id}`)}
+                onChange={() => toggle(s)} />
               <div className="flex-1">
                 <div className="font-medium text-ink-2 flex items-center gap-2">
                   {s.tipo_codigo} {s.letra ?? ''} {s.numero}
@@ -1385,14 +1413,33 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
           ))}
         </div>
 
-        {seleccionada && (
-          <div className="border-t border-line pt-3 space-y-2">
-            <div className="text-[11px] text-ink-muted">
-              Monto a conciliar (puede ser parcial si la factura es mayor):
+        {selObjs.length > 0 && (
+          <div className="border-t border-line pt-3 space-y-2 text-[11.5px]">
+            <div className="flex justify-between"><span>Total seleccionado ({selObjs.length} factura{selObjs.length === 1 ? '' : 's'}):</span><span className="tabular font-semibold">{fmtMoney(totalSel)}</span></div>
+            <div className="flex justify-between"><span>Movimiento:</span><span className="tabular">{fmtMoney(montoMov)}</span></div>
+            <div className={`flex justify-between font-semibold ${exacto ? 'text-success' : 'text-danger'}`}>
+              <span>Diferencia:</span><span className="tabular">{fmtMoney(diff)}</span>
             </div>
-            <input type="number" step="0.01"
-              value={monto} onChange={(e) => setMonto(e.target.value)}
-              className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
+            {!exacto && (
+              <div className="border border-warning/40 bg-warning-bg/20 rounded p-2 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={permitirDif} onChange={(e) => setPermitirDif(e.target.checked)} />
+                  <span>Permitir diferencia (genera línea de ajuste)</span>
+                </label>
+                {permitirDif && (
+                  <>
+                    <select value={cuentaAjuste} onChange={(e) => setCuentaAjuste(e.target.value)}
+                      className="w-full px-2 py-1 border border-line rounded">
+                      <option value="">Cuenta de ajuste…</option>
+                      {(cuentasResp?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>)}
+                    </select>
+                    <input type="text" placeholder="Motivo (mín 10 chars)" value={motivoDif}
+                      onChange={(e) => setMotivoDif(e.target.value)}
+                      className="w-full px-2 py-1 border border-line rounded" />
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1401,7 +1448,7 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
             Cancelar
           </Button>
           <Button variant="primary"
-            disabled={!seleccionada || !monto || Number(monto) <= 0 || conciliarMut.isPending}
+            disabled={!puedeConfirmar || conciliarMut.isPending}
             onClick={() => conciliarMut.mutate()}>
             {conciliarMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
             Confirmar conciliación

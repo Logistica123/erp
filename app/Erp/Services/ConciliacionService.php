@@ -403,8 +403,13 @@ class ConciliacionService
                 'motivo_fallback' => 'TIPO_SIN_FACTURAS'];
         }
 
-        // §15 — Paso 1: extraer CUIT del concepto.
-        $cuitDetectado = $this->extraerCuit($mov->concepto ?? '');
+        // v1.47.1 Bug #2 — Paso 1: usar el CUIT que ya resolvió el parser
+        // (columna `Nro doc` del CSV → cuit_contraparte) ANTES de re-extraer del
+        // concepto. El concepto sólo es fallback.
+        $cuitDetectado = preg_replace('/[^0-9]/', '', (string) ($mov->cuit_contraparte ?? ''));
+        if (! $cuitDetectado || strlen($cuitDetectado) !== 11) {
+            $cuitDetectado = $this->extraerCuit($mov->concepto ?? '');
+        }
 
         // §15 — Paso 2: si CUIT detectado, buscar contraparte.
         $contraparte = null;
@@ -427,10 +432,7 @@ class ConciliacionService
         if ($contraparte) {
             $sugerencias = $this->buscarFacturasDe($contraparte['id'], $buscarVenta, $buscarCompra,
                 $empresaId, $monto, $top);
-            foreach ($sugerencias as &$s) {
-                $s['cuit_coincide'] = true;
-            }
-            unset($s);
+            $sugerencias = $this->aplicarScoreCompuesto($sugerencias, $cuitDetectado, $monto);
 
             if (! empty($sugerencias)) {
                 return [
@@ -452,10 +454,9 @@ class ConciliacionService
         // §15 — Paso 3: fallback puro por monto.
         $sugerencias = $this->buscarFacturasPorMonto($buscarVenta, $buscarCompra,
             $empresaId, $monto, $top);
-        foreach ($sugerencias as &$s) {
-            $s['cuit_coincide'] = false;
-        }
-        unset($s);
+        // v1.47.1 Bug #3 — score compuesto: aunque sea fallback por monto, si
+        // alguna factura comparte el CUIT del mov sube; las que no, topean 50%.
+        $sugerencias = $this->aplicarScoreCompuesto($sugerencias, $cuitDetectado, $monto);
 
         return [
             'sugerencias' => $sugerencias,
@@ -584,6 +585,47 @@ class ConciliacionService
         }
         usort($result, fn ($a, $b) => $b['score'] <=> $a['score']);
         return array_slice($result, 0, $top);
+    }
+
+    /**
+     * v1.47.1 Bug #3 — Score compuesto CUIT + monto.
+     *   - 100% sólo si CUIT coincide Y monto exacto (±$0.01).
+     *   - CUIT coincide (monto inexacto) → score por proximidad, tope 95.
+     *   - CUIT NO coincide → tope 50 + flag cuit_no_coincide (badge rojo).
+     * Reordena: primero las que coinciden por CUIT, luego por score desc.
+     *
+     * @param  array<int,array<string,mixed>>  $sugerencias
+     * @return array<int,array<string,mixed>>
+     */
+    private function aplicarScoreCompuesto(array $sugerencias, ?string $cuitMov, float $monto): array
+    {
+        $cuitMovNorm = $cuitMov ? preg_replace('/[^0-9]/', '', $cuitMov) : null;
+        foreach ($sugerencias as &$s) {
+            $cuitFac = isset($s['cuit']) ? preg_replace('/[^0-9]/', '', (string) $s['cuit']) : '';
+            $coincide = $cuitMovNorm && $cuitFac && $cuitFac === $cuitMovNorm;
+            $saldo = (float) ($s['saldo_pendiente'] ?? $s['imp_total'] ?? 0);
+            $exacto = abs($saldo - $monto) < 0.01;
+            $base = (int) ($s['score'] ?? 0); // proximidad de monto 0-100
+
+            if ($coincide && $exacto) {
+                $s['score'] = 100;
+            } elseif ($coincide) {
+                $s['score'] = min($base, 95);
+            } else {
+                $s['score'] = min($base, 50);
+            }
+            $s['cuit_coincide'] = (bool) $coincide;
+            $s['cuit_no_coincide'] = $cuitMovNorm ? ! $coincide : false;
+        }
+        unset($s);
+
+        usort($sugerencias, function ($a, $b) {
+            if ($a['cuit_coincide'] !== $b['cuit_coincide']) {
+                return $a['cuit_coincide'] ? -1 : 1;
+            }
+            return ($b['score'] ?? 0) <=> ($a['score'] ?? 0);
+        });
+        return $sugerencias;
     }
 
     private function formatVenta($f, float $monto): array

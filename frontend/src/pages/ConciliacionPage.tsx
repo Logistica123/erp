@@ -48,6 +48,7 @@ type Sugerencia = {
   fecha_emision: string;
   score: number;
   cuit_coincide?: boolean; // §15
+  cuit_no_coincide?: boolean; // v1.47.1 Bug #3
 };
 
 // §15 — respuesta enriquecida.
@@ -1357,9 +1358,14 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
                       ✓ CUIT coincide
                     </span>
                   )}
-                  {s.cuit_coincide === false && (
+                  {s.cuit_no_coincide === true && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-danger-bg/40 text-danger font-semibold">
+                      ⚠ CUIT NO COINCIDE
+                    </span>
+                  )}
+                  {s.cuit_coincide === false && s.cuit_no_coincide !== true && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-line text-ink-muted">
-                      CUIT no coincide
+                      sin CUIT de referencia
                     </span>
                   )}
                 </div>

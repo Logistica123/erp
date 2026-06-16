@@ -805,12 +805,24 @@ class ConciliacionService
      *
      * @param  array<int,array{id:int,tipo:string,monto_imputado:float}>  $facturas
      */
-    public function conciliarMultiplesFacturas(MovimientoBancario $mov, array $facturas, User $usuario, ?string $motivo = null, bool $permitirDiferencia = false, ?int $cuentaAjusteId = null): MovimientoBancario
+    public function conciliarMultiplesFacturas(MovimientoBancario $mov, array $facturas, User $usuario, ?string $motivo = null, bool $permitirDiferencia = false, ?int $cuentaAjusteId = null, ?int $motivoDiferenciaId = null): MovimientoBancario
     {
         if ($mov->estado === MovimientoBancario::ESTADO_CONCILIADO) {
             throw new DomainException('MOVIMIENTO_YA_CONCILIADO');
         }
         if (empty($facturas)) throw new DomainException('SIN_FACTURAS');
+
+        // v1.48 Bloque D — si viene un motivo del catálogo, resuelve la cuenta de
+        // ajuste y el texto desde erp_conciliacion_motivos (pisa los sueltos).
+        $motivoTipo = null;
+        if ($motivoDiferenciaId) {
+            $cat = DB::table('erp_conciliacion_motivos')->where('id', $motivoDiferenciaId)->where('activo', 1)->first();
+            if (! $cat) throw new DomainException('MOTIVO_DIFERENCIA_INVALIDO: id='.$motivoDiferenciaId);
+            $cuentaAjusteId = $cat->cuenta_ajuste_id ?: $cuentaAjusteId;
+            $motivo = $cat->nombre ?: $motivo;
+            $motivoTipo = $cat->tipo;
+            $permitirDiferencia = true;
+        }
 
         $cuentaBanco = $mov->cuentaBancaria;
         $empresaId = $cuentaBanco->empresa_id;
@@ -829,7 +841,7 @@ class ConciliacionService
             }
         }
 
-        return DB::transaction(function () use ($mov, $facturas, $usuario, $cuentaBanco, $empresaId, $montoMov, $esCobro, $sumImputado, $ajuste, $motivo, $cuentaAjusteId) {
+        return DB::transaction(function () use ($mov, $facturas, $usuario, $cuentaBanco, $empresaId, $montoMov, $esCobro, $sumImputado, $ajuste, $motivo, $cuentaAjusteId, $motivoDiferenciaId, $motivoTipo) {
             DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
 
             $diarioBan = DB::table('erp_diarios')->where('empresa_id', $empresaId)->where('codigo', 'BAN')->value('id')
@@ -893,11 +905,21 @@ class ConciliacionService
                 ]);
             }
 
-            $mov->update([
+            // v1.48 Bloque E — motivo ANTICIPO_PROVEEDOR deja el mov como
+            // pendiente de facturar (el distribuidor debe emitir NC).
+            $datosMov = [
                 'estado' => MovimientoBancario::ESTADO_CONCILIADO,
                 'asiento_id' => $asiento->id,
                 'monto_conciliado' => $sumImputado,
-            ]);
+                'motivo_diferencia_id' => $motivoDiferenciaId ?: $mov->motivo_diferencia_id,
+            ];
+            if ($motivoTipo === 'ANTICIPO_PROVEEDOR' && abs($ajuste) > 0.01) {
+                $datosMov['pendiente_factura_complementaria'] = 1;
+                $datosMov['distribuidor_pendiente_id'] = $lineasFactura[0]['auxiliar_id'] ?? null;
+                $datosMov['monto_pendiente_facturar'] = round(abs($ajuste), 2);
+                $datosMov['observaciones_pendiente'] = $motivo;
+            }
+            $mov->update($datosMov);
 
             $this->audit->logEvento(
                 accion: 'MOVIMIENTO_CONCILIADO_MULTIPLE', modulo: 'tesoreria',

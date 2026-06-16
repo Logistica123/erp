@@ -82,27 +82,51 @@ class MatchingAutoService
         if (! $cuit || strlen($cuit) !== 11) {
             $cuit = preg_replace('/[^0-9]/', '', (string) $mov->cuit_contraparte);
         }
-        if (! $cuit || strlen($cuit) !== 11) return null;
+        $cuitValido = $cuit && strlen($cuit) === 11;
 
-        // Identificar auxiliar por CUIT (tipo de la regla; si PROVEEDOR no
-        // matchea, probar DISTRIBUIDOR — D-45 nota distribuidor).
         $tipos = match ($regla->tipo_auxiliar) {
             'CLIENTE' => ['Cliente'],
             'PROVEEDOR' => ['Proveedor', 'Distribuidor'],
             'DISTRIBUIDOR' => ['Distribuidor', 'Proveedor'],
-            default => ['Cliente', 'Proveedor', 'Distribuidor'],
+            'EMPLEADO' => ['Empleado'],
+            default => ['Cliente', 'Proveedor', 'Distribuidor', 'Empleado'],
         };
-        $auxiliar = DB::table('erp_auxiliares')
-            ->where('cuit', $cuit)
-            ->whereIn('tipo', $tipos)
-            ->orderByRaw("FIELD(tipo, '" . implode("','", $tipos) . "')")
-            ->first();
+
+        // Branch 1 — por CUIT.
+        $auxiliar = null;
+        if ($cuitValido) {
+            $auxiliar = DB::table('erp_auxiliares')
+                ->where('cuit', $cuit)
+                ->whereIn('tipo', $tipos)
+                ->orderByRaw("FIELD(tipo, '" . implode("','", $tipos) . "')")
+                ->first();
+        }
+
+        // Branch 2 (v1.48 Bloque A) — fuzzy por nombre, si la regla lo permite
+        // y el CUIT no resolvió auxiliar.
+        $matchCap = null; // tope de confianza cuando vino por nombre
+        if (! $auxiliar && $regla->matching_auto_por_nombre) {
+            $nombre = $this->extraerNombre($mov, $regla);
+            if ($nombre) {
+                $cands = $this->buscarAuxiliaresPorNombre($nombre, $tipos);
+                if (count($cands) === 1) {
+                    $auxiliar = $cands[0];
+                    $matchCap = 75; // D-48-2 tope fuzzy
+                } elseif (count($cands) > 1) {
+                    return ['cuit' => $cuitValido ? $cuit : null, 'auxiliar' => null, 'confianza' => 60,
+                            'factura_id' => null, 'factura_tipo' => null, 'tipo_match' => 'NOMBRE_AMBIGUO'];
+                }
+            }
+        }
 
         if (! $auxiliar) {
-            // CUIT extraído pero sin auxiliar → confianza 0, no auto-imputa.
-            return ['cuit' => $cuit, 'auxiliar' => null, 'confianza' => 0,
-                    'factura_id' => null, 'factura_tipo' => null, 'tipo_match' => 'SIN_AUXILIAR'];
+            if ($cuitValido) {
+                return ['cuit' => $cuit, 'auxiliar' => null, 'confianza' => 0,
+                        'factura_id' => null, 'factura_tipo' => null, 'tipo_match' => 'SIN_AUXILIAR'];
+            }
+            return null;
         }
+        $cuit = $cuitValido ? $cuit : $auxiliar->cuit;
 
         // v1.47 §5 — routing por tipo de auxiliar. EMPLEADO → pago de sueldo:
         // no se busca factura, va directo a 5.2.1.01 Sueldos Administración.
@@ -125,14 +149,86 @@ class MatchingAutoService
 
         $match = $this->matchearMonto($monto, $facturas);
 
+        // v1.48 Bloque A — si el auxiliar vino por nombre (fuzzy) la confianza
+        // se topea (D-48-2) y se marca el tipo de match.
+        $confianza = $match['confianza'];
+        $tipoMatch = $match['tipo_match'];
+        if ($matchCap !== null) {
+            $confianza = min($confianza, $matchCap);
+            $tipoMatch = 'POR_NOMBRE_' . $tipoMatch;
+        }
+
         return [
             'cuit' => $cuit,
             'auxiliar' => $auxiliar,
-            'confianza' => $match['confianza'],
+            'confianza' => $confianza,
             'factura_id' => $match['factura_id'],
             'factura_tipo' => $match['factura_id'] ? $facturaTipo : null,
-            'tipo_match' => $match['tipo_match'],
+            'tipo_match' => $tipoMatch,
         ];
+    }
+
+    /**
+     * Extrae el nombre de la contraparte para matching fuzzy (Bloque A v1.48).
+     * Prioridad: regex extractor de nombre de la regla sobre el concepto;
+     * luego la columna nombre_contraparte que dejó el parser.
+     */
+    private function extraerNombre(MovimientoBancario $mov, ConciliacionRegla $regla): ?string
+    {
+        if ($regla->nombre_extractor_regex
+            && @preg_match("/{$regla->nombre_extractor_regex}/iu", (string) $mov->concepto, $mm)
+            && isset($mm[1]) && trim($mm[1]) !== '') {
+            return trim($mm[1]);
+        }
+        $n = trim((string) ($mov->nombre_contraparte ?? ''));
+        return $n !== '' ? $n : null;
+    }
+
+    /**
+     * Busca auxiliares por nombre normalizado: exacto → LIKE → levenshtein ≤ 3.
+     * Devuelve el primer escalón no vacío (para no mezclar grados de certeza).
+     * @return array<int,object>
+     */
+    private function buscarAuxiliaresPorNombre(string $nombre, array $tipos): array
+    {
+        $norm = $this->normalizar($nombre);
+        if ($norm === '') return [];
+
+        $base = fn () => DB::table('erp_auxiliares')->whereIn('tipo', $tipos)->whereNull('deleted_at');
+
+        // 1) exacto sobre la columna generada.
+        $exact = $base()->where('razon_social_normalizada', $norm)->get()->all();
+        if (count($exact) >= 1) return $exact;
+
+        // 2) LIKE (contiene / contenido).
+        $like = $base()
+            ->where(function ($q) use ($norm) {
+                $q->where('razon_social_normalizada', 'like', "%{$norm}%")
+                  ->orWhereRaw('? like concat("%", razon_social_normalizada, "%")', [$norm]);
+            })
+            ->get()->all();
+        if (count($like) >= 1) return $like;
+
+        // 3) levenshtein ≤ 3 en PHP (universo acotado a los tipos).
+        $cands = [];
+        foreach ($base()->get(['id', 'nombre', 'cuit', 'tipo', 'razon_social_normalizada']) as $a) {
+            $rn = (string) ($a->razon_social_normalizada ?? '');
+            if ($rn === '') continue;
+            if (levenshtein(substr($norm, 0, 255), substr($rn, 0, 255)) <= 3) {
+                $cands[] = $a;
+            }
+        }
+        return $cands;
+    }
+
+    /** Normaliza igual que la columna generada: upper, sin tildes/no-alfanum, espacios colapsados. */
+    private function normalizar(string $s): string
+    {
+        $s = mb_strtoupper($s, 'UTF-8');
+        $s = strtr($s, ['Á'=>'A','É'=>'E','Í'=>'I','Ó'=>'O','Ú'=>'U','Ñ'=>'N','Ü'=>'U']);
+        $s = preg_replace('/[^A-Z0-9 ]/', '', $s) ?? '';
+        $s = preg_replace('/\s+/', ' ', $s) ?? '';
+        return trim($s);
     }
 
     /**

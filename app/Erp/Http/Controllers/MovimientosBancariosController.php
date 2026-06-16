@@ -257,13 +257,14 @@ class MovimientosBancariosController
             'motivo' => ['nullable', 'string', 'min:10', 'max:500'],
             'permitir_diferencia' => ['nullable', 'boolean'],
             'cuenta_ajuste_id' => ['nullable', 'integer', 'exists:erp_cuentas_contables,id'],
+            'motivo_diferencia_id' => ['nullable', 'integer', 'exists:erp_conciliacion_motivos,id'],
         ]);
         $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
         try {
             $mov = $this->concilService->conciliarMultiplesFacturas(
                 $mov, $data['facturas'], $request->user(),
                 $data['motivo'] ?? null, (bool) ($data['permitir_diferencia'] ?? false),
-                $data['cuenta_ajuste_id'] ?? null,
+                $data['cuenta_ajuste_id'] ?? null, $data['motivo_diferencia_id'] ?? null,
             );
         } catch (DomainException $e) {
             return $this->domainError($e);

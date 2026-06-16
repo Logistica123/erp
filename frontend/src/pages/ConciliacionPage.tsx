@@ -68,6 +68,12 @@ type Cuenta = { id: number; codigo: string; nombre: string; imputable: boolean; 
 type Auxiliar = { id: number; codigo: string; nombre: string; tipo: string };
 type CC = { id: number; codigo: string; nombre: string };
 type Motivo = { id: number; codigo: string; descripcion: string };
+// v1.48 Bloque D — catálogo de motivos de diferencia.
+type MotivoDif = {
+  id: number; codigo: string; nombre: string; tipo: string; signo_esperado: string;
+  requiere_auxiliar_tipo: string | null; cuenta_ajuste_id: number | null;
+  cuenta_codigo: string | null; cuenta_nombre: string | null; observaciones: string | null;
+};
 
 export function ConciliacionPage() {
   const qc = useQueryClient();
@@ -1263,6 +1269,8 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   const [permitirDif, setPermitirDif] = useState(false);
   const [motivoDif, setMotivoDif] = useState('');
   const [cuentaAjuste, setCuentaAjuste] = useState('');
+  // v1.48 Bloque D — motivo del catálogo (auto-completa cuenta de ajuste).
+  const [motivoDifId, setMotivoDifId] = useState('');
 
   const { data: sugerencias, isLoading } = useQuery<{ data: SugerenciasResp }>({
     queryKey: ['sugerencias', mov?.id],
@@ -1271,6 +1279,9 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   });
   const { data: cuentasResp } = useQuery<{ data: Array<{ id: number; codigo: string; nombre: string }> }>({
     queryKey: ['cuentas-imputables'], queryFn: () => api.get('/api/erp/cuentas?imputable=1'), enabled: !!mov,
+  });
+  const { data: motivosResp } = useQuery<{ data: MotivoDif[] }>({
+    queryKey: ['conciliacion-motivos'], queryFn: () => api.get('/api/erp/conciliacion/motivos'), enabled: !!mov,
   });
 
   const montoMov = mov ? Math.max(Number(mov.debito), Number(mov.credito)) : 0;
@@ -1281,7 +1292,15 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   const totalSel = selObjs.reduce((a, s) => a + Number(s.saldo_pendiente), 0);
   const diff = Math.round((montoMov - totalSel) * 100) / 100;
   const exacto = Math.abs(diff) <= 1;
-  const puedeConfirmar = selObjs.length > 0 && (exacto || (permitirDif && motivoDif.trim().length >= 10 && !!cuentaAjuste));
+  // Con motivo del catálogo la cuenta queda resuelta en backend (salvo OTRO,
+  // que requiere elegir cuenta manual). Sin catálogo, motivo libre ≥10 chars.
+  const motivoSel = (motivosResp?.data ?? []).find((m) => String(m.id) === motivoDifId);
+  const difOk = permitirDif && (
+    motivoSel
+      ? (!!motivoSel.cuenta_ajuste_id || !!cuentaAjuste)
+      : (motivoDif.trim().length >= 10 && !!cuentaAjuste)
+  );
+  const puedeConfirmar = selObjs.length > 0 && (exacto || difOk);
 
   const conciliarMut = useMutation({
     mutationFn: () =>
@@ -1290,9 +1309,10 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
           id: s.factura_id, tipo: s.tipo === 'FACTURA_VENTA' ? 'VENTA' : 'COMPRA',
           monto_imputado: Number(s.saldo_pendiente),
         })),
-        motivo: permitirDif && !exacto ? motivoDif : null,
+        motivo: permitirDif && !exacto ? (motivoSel?.nombre ?? motivoDif) : null,
         permitir_diferencia: permitirDif && !exacto,
-        cuenta_ajuste_id: permitirDif && !exacto ? Number(cuentaAjuste) : null,
+        cuenta_ajuste_id: permitirDif && !exacto && cuentaAjuste ? Number(cuentaAjuste) : null,
+        motivo_diferencia_id: permitirDif && !exacto && motivoDifId ? Number(motivoDifId) : null,
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); onSuccess(); },
     onError: (e: ApiError) => onError(e.message),
@@ -1428,14 +1448,39 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
                 </label>
                 {permitirDif && (
                   <>
-                    <select value={cuentaAjuste} onChange={(e) => setCuentaAjuste(e.target.value)}
+                    <select value={motivoDifId}
+                      onChange={(e) => {
+                        setMotivoDifId(e.target.value);
+                        const m = (motivosResp?.data ?? []).find((x) => String(x.id) === e.target.value);
+                        if (m?.cuenta_ajuste_id) setCuentaAjuste(String(m.cuenta_ajuste_id));
+                        else if (m) setCuentaAjuste('');
+                      }}
                       className="w-full px-2 py-1 border border-line rounded">
-                      <option value="">Cuenta de ajuste…</option>
-                      {(cuentasResp?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>)}
+                      <option value="">Motivo del catálogo…</option>
+                      {(motivosResp?.data ?? []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.nombre}{m.cuenta_codigo ? ` → ${m.cuenta_codigo}` : ' (elegir cuenta)'}
+                        </option>
+                      ))}
                     </select>
-                    <input type="text" placeholder="Motivo (mín 10 chars)" value={motivoDif}
-                      onChange={(e) => setMotivoDif(e.target.value)}
-                      className="w-full px-2 py-1 border border-line rounded" />
+                    {/* Cuenta de ajuste: auto-resuelta por el motivo, editable para OTRO. */}
+                    {(!motivoSel || !motivoSel.cuenta_ajuste_id) && (
+                      <select value={cuentaAjuste} onChange={(e) => setCuentaAjuste(e.target.value)}
+                        className="w-full px-2 py-1 border border-line rounded">
+                        <option value="">Cuenta de ajuste…</option>
+                        {(cuentasResp?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>)}
+                      </select>
+                    )}
+                    {!motivoDifId && (
+                      <input type="text" placeholder="…o motivo libre (mín 10 chars)" value={motivoDif}
+                        onChange={(e) => setMotivoDif(e.target.value)}
+                        className="w-full px-2 py-1 border border-line rounded" />
+                    )}
+                    {motivoSel?.tipo === 'ANTICIPO_PROVEEDOR' && (
+                      <div className="text-[10.5px] text-warning">
+                        ⓘ Quedará como <strong>pendiente de facturar</strong> (el distribuidor debe emitir NC).
+                      </div>
+                    )}
                   </>
                 )}
               </div>

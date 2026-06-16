@@ -36,6 +36,9 @@ import { ChequesRecibidosPage } from './pages/ChequesRecibidosPage';
 import { ImputacionesAutoPage } from './pages/ImputacionesAutoPage';
 import { ReclasificarIiddyccPage } from './pages/ReclasificarIiddyccPage';
 import { ConciliacionLotesPage } from './pages/ConciliacionLotesPage';
+import TransferenciasInternasPendientesPage from './pages/TransferenciasInternasPendientesPage';
+import ComprasPendientesFacturarPage from './pages/ComprasPendientesFacturarPage';
+import ConciliacionesDiferenciaPage from './pages/ConciliacionesDiferenciaPage';
 import { ReclasificarPendientesPage } from './pages/ReclasificarPendientesPage';
 import { FacturasCompraPage } from './pages/FacturasCompraPage';
 import { CCPage } from './pages/CCPage';
@@ -168,6 +171,9 @@ export default function App() {
               <Route path="/erp/tesoreria/imputaciones-auto" element={<ImputacionesAutoPage />} handle={{ crumb: 'Imputaciones automáticas' }} />
               <Route path="/erp/contabilidad/reclasificar-iiddycc" element={<ReclasificarIiddyccPage />} handle={{ crumb: 'Reclasificar Imp. Ley 25413' }} />
               <Route path="/erp/tesoreria/conciliacion/lotes" element={<ConciliacionLotesPage />} handle={{ crumb: 'Lotes de conciliación' }} />
+              <Route path="/erp/tesoreria/transferencias-internas-pendientes" element={<TransferenciasInternasPendientesPage />} handle={{ crumb: 'Transf. internas pendientes' }} />
+              <Route path="/erp/compras/pendientes-de-facturar" element={<ComprasPendientesFacturarPage />} handle={{ crumb: 'Pendientes de facturar' }} />
+              <Route path="/erp/contabilidad/conciliaciones-con-diferencia" element={<ConciliacionesDiferenciaPage />} handle={{ crumb: 'Conciliaciones c/ diferencia' }} />
               <Route path="/erp/contabilidad/reclasificar-pendientes" element={<ReclasificarPendientesPage />} handle={{ crumb: 'Reclasificar pendientes' }} />
 
               {/* F3 — Compras + CC + FCE */}

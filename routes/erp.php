@@ -18,6 +18,7 @@ use App\Erp\Http\Controllers\FacturasManualController;
 use App\Erp\Http\Controllers\ImputacionesNcController;
 use App\Erp\Http\Controllers\CotizacionesController;
 use App\Erp\Http\Controllers\EcheqController;
+use App\Erp\Http\Controllers\ConciliacionExtrasController;
 use App\Erp\Http\Controllers\ExtractosController;
 use App\Erp\Http\Controllers\LibroDiarioController;
 use App\Erp\Http\Controllers\RevaluacionController;
@@ -220,6 +221,28 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.mov-banc.sugerencias');
         Route::post('/movimientos-bancarios/{id}/conciliar-multiple', [MovimientosBancariosController::class, 'conciliarMultiple'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar-multiple');
+
+        // v1.48 — conciliación extras (Bloques D/E/F/G).
+        Route::get('/conciliacion/motivos', [ConciliacionExtrasController::class, 'motivos'])
+            ->name('erp.concil.motivos');
+        Route::get('/conciliacion/transferencias-internas-pendientes', [ConciliacionExtrasController::class, 'transferenciasInternasPendientes'])
+            ->name('erp.concil.transf-internas');
+        Route::post('/conciliacion/transferencias-internas/{movId}/emparejar', [ConciliacionExtrasController::class, 'emparejarTransferenciaInterna'])
+            ->whereNumber('movId')->name('erp.concil.transf-emparejar');
+        Route::post('/conciliacion/transferencias-internas/{movId}/descartar', [ConciliacionExtrasController::class, 'descartarTransferenciaInterna'])
+            ->whereNumber('movId')->name('erp.concil.transf-descartar');
+        Route::get('/compras/pendientes-facturar', [ConciliacionExtrasController::class, 'pendientesFacturar'])
+            ->name('erp.concil.pendientes-facturar');
+        Route::get('/compras/pendientes-facturar/export', [ConciliacionExtrasController::class, 'exportPendientesFacturar'])
+            ->name('erp.concil.pendientes-facturar.export');
+        Route::patch('/compras/pendientes-facturar/{movId}/asociar-nc', [ConciliacionExtrasController::class, 'asociarNc'])
+            ->whereNumber('movId')->name('erp.concil.pendientes-asociar-nc');
+        Route::patch('/compras/pendientes-facturar/{movId}/anular', [ConciliacionExtrasController::class, 'anularPendiente'])
+            ->whereNumber('movId')->name('erp.concil.pendientes-anular');
+        Route::get('/contabilidad/conciliaciones-con-diferencia', [ConciliacionExtrasController::class, 'conciliacionesConDiferencia'])
+            ->name('erp.concil.con-diferencia');
+        Route::get('/contabilidad/conciliaciones-con-diferencia/export', [ConciliacionExtrasController::class, 'exportConDiferencia'])
+            ->name('erp.concil.con-diferencia.export');
         Route::post('/movimientos-bancarios/{id}/conciliar-factura', [MovimientosBancariosController::class, 'conciliarFactura'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar-factura');
         // v1.27 §15 — Búsqueda de auxiliares + facturas pendientes para modal manual.

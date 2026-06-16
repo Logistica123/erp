@@ -36,6 +36,10 @@ class MovimientoBancario extends Model
         // v1.45 — imputación automática.
         'factura_imputada_id', 'factura_imputada_tipo', 'imputacion_confianza',
         'cuit_extractado', 'auxiliar_resuelto_id',
+        // v1.48 — diferencias + pendientes de facturar + transferencias internas.
+        'motivo_diferencia_id', 'pendiente_factura_complementaria', 'distribuidor_pendiente_id',
+        'monto_pendiente_facturar', 'nc_complementaria_id', 'observaciones_pendiente',
+        'es_transferencia_interna', 'mov_espejo_id',
     ];
 
     protected $casts = [

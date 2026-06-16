@@ -40,7 +40,11 @@ class ExtractoImporterService
         private readonly MatchingContraparteService $matcher,
         private readonly ExtractoTipoService $tipoSvc,
         private readonly \App\Erp\Services\Conciliacion\MatchingAutoService $matchingAuto,
+        private readonly \App\Erp\Services\Conciliacion\EmparejarEspejosService $espejos,
     ) {}
+
+    /** CUIT propio (Logística Argentina SRL) — transferencias entre cuentas propias. */
+    public const CUIT_PROPIO = '30717060985';
 
     /**
      * @return array{
@@ -74,8 +78,17 @@ class ExtractoImporterService
             ));
         }
 
-        $parser = $this->factory->make($cuenta->banco->codigo_parser);
-        $parseado = $parser->parse($pathTemporal, $cuenta);
+        // v1.48 Bloques I/J — Brubank y MercadoPago ahora exportan .xlsx. Los
+        // parsers leen CSV (`;`), así que si llega un Excel lo convertimos a un
+        // CSV temporal preservando el formato MOSTRADO de cada celda (coma
+        // decimal, fechas DD-MM-YY) que es lo que esperan los parsers.
+        [$pathParse, $esTmp] = $this->normalizarArchivoParseable($pathTemporal, $nombreArchivo);
+        try {
+            $parser = $this->factory->make($cuenta->banco->codigo_parser);
+            $parseado = $parser->parse($pathParse, $cuenta);
+        } finally {
+            if ($esTmp && is_file($pathParse)) @unlink($pathParse);
+        }
 
         $warnings = $parseado->errores;
 
@@ -112,6 +125,10 @@ class ExtractoImporterService
 
             $counts = $this->persistirMovimientos($extracto->id, $cuenta, $parseado->movimientos);
 
+            // v1.48 Bloque B — marcar transferencias internas (CUIT propio) ANTES
+            // del matching, para que las pasadas de etiquetado las salteen.
+            $transfInternas = $this->marcarTransferenciasInternas($extracto->id);
+
             // CM-3: Pasada de matching contraparte + detección de pasante MP.
             $matching = $this->aplicarMatching($extracto->id, $cuenta);
             $pasantes = $this->detectarPasanteMp($extracto->id, $cuenta);
@@ -129,8 +146,19 @@ class ExtractoImporterService
                 'match_auto_cuit' => $matchAuto,
                 'pendientes' => $counts['movimientos_importados'] - $matching['etiquetados'] - $matchAuto,
                 'pasantes_mp' => $pasantes,
+                'transferencias_internas' => $transfInternas,
             ];
         });
+
+        // v1.48 Bloque B — emparejar espejos de transferencias internas a nivel
+        // empresa (el espejo puede haber venido en una importación anterior de
+        // otra cuenta). Fuera de la transacción de import: su propio asiento.
+        $espejos = ['emparejados' => 0, 'ambiguos' => 0, 'sin_espejo' => 0];
+        try {
+            $espejos = $this->espejos->emparejarEspejos($cuenta->empresa_id, $usuario->id);
+        } catch (\Throwable $e) {
+            \Log::warning('emparejarEspejos falló tras import: '.$e->getMessage());
+        }
 
         $this->audit->logEvento(
             accion: 'EXTRACTO_IMPORTADO',
@@ -154,8 +182,74 @@ class ExtractoImporterService
             'etiquetados_auto' => $resumen['etiquetados_auto'],
             'pendientes' => $resumen['pendientes'],
             'pasantes_mp' => $resumen['pasantes_mp'],
+            'transferencias_internas' => $resumen['transferencias_internas'],
+            'espejos_emparejados' => $espejos['emparejados'],
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * v1.48 Bloques I/J — si el archivo es Excel (.xlsx/.xls) lo convierte a un
+     * CSV temporal `;`-separado usando el valor MOSTRADO de cada celda (respeta
+     * la máscara: coma decimal, fechas DD-MM-YY). Devuelve [path, esTemporal].
+     * CSV/TXT pasan tal cual.
+     *
+     * @return array{0:string,1:bool}
+     */
+    private function normalizarArchivoParseable(string $path, string $nombreArchivo): array
+    {
+        $ext = strtolower(pathinfo($nombreArchivo, PATHINFO_EXTENSION));
+        $esExcel = in_array($ext, ['xlsx', 'xls'], true);
+        if (! $esExcel) {
+            // Detección por firma ZIP (PK\x03\x04) para uploads sin extensión.
+            $fh = @fopen($path, 'rb');
+            if ($fh) {
+                $sig = fread($fh, 4);
+                fclose($fh);
+                $esExcel = $sig === "PK\x03\x04" && $ext !== 'csv' && $ext !== 'txt';
+            }
+        }
+        if (! $esExcel) {
+            return [$path, false];
+        }
+
+        $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
+        $reader->setReadDataOnly(false); // necesitamos máscaras de formato
+        $ss = $reader->load($path);
+        $sheet = $ss->getSheet(0); // primera hoja, sin asumir nombre (D-47/J)
+        $maxRow = $sheet->getHighestDataRow();
+        $maxColIdx = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($sheet->getHighestDataColumn());
+
+        $tmp = tempnam(sys_get_temp_dir(), 'erp_xlsx_').'.csv';
+        $out = fopen($tmp, 'w');
+        for ($r = 1; $r <= $maxRow; $r++) {
+            $campos = [];
+            for ($c = 1; $c <= $maxColIdx; $c++) {
+                $coord = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($c).$r;
+                $val = (string) $sheet->getCell($coord)->getFormattedValue();
+                $campos[] = '"'.str_replace('"', '""', $val).'"';
+            }
+            fwrite($out, implode(';', $campos)."\r\n");
+        }
+        fclose($out);
+        $ss->disconnectWorksheets();
+        unset($ss);
+
+        return [$tmp, true];
+    }
+
+    /**
+     * v1.48 Bloque B — marca como transferencia interna los movimientos del
+     * extracto cuya contraparte es el propio CUIT. Quedan en
+     * PENDIENTE_TRANSF_INTERNA para que el emparejado de espejos los resuelva.
+     */
+    private function marcarTransferenciasInternas(int $extractoId): int
+    {
+        return DB::table('erp_movimientos_bancarios')
+            ->where('extracto_id', $extractoId)
+            ->where('estado', 'PENDIENTE')
+            ->whereRaw("REPLACE(REPLACE(COALESCE(cuit_contraparte,''),'-',''),' ','') = ?", [self::CUIT_PROPIO])
+            ->update(['es_transferencia_interna' => 1, 'estado' => 'PENDIENTE_TRANSF_INTERNA']);
     }
 
     /**

@@ -40,6 +40,7 @@ export const sections: NavSection[] = [
       { to: '/erp/balance-ss', label: 'Sumas y Saldos', icon: Scale },
       { to: '/erp/contabilidad/reclasificar-iiddycc', label: 'Reclasificar Imp. Ley 25413', icon: Scale },
       { to: '/erp/contabilidad/reclasificar-pendientes', label: 'Reclasificar pendientes (1.1.6.99)', icon: Scale },
+      { to: '/erp/contabilidad/conciliaciones-con-diferencia', label: 'Conciliaciones c/ diferencia', icon: Scale },
       { to: '/erp/periodos', label: 'Períodos', icon: CalendarCheck },
       { to: '/erp/centros-costo', label: 'Centros de Costo', icon: ListTree },
       { to: '/erp/estados-contables', label: 'Estados Contables', icon: FileBarChart },
@@ -62,6 +63,7 @@ export const sections: NavSection[] = [
       { to: '/erp/conciliacion', label: 'Conciliación', icon: Split },
       { to: '/erp/tesoreria/imputaciones-auto', label: 'Imputaciones automáticas', icon: Sparkles },
       { to: '/erp/tesoreria/conciliacion/lotes', label: 'Lotes de conciliación', icon: Split },
+      { to: '/erp/tesoreria/transferencias-internas-pendientes', label: 'Transf. internas pendientes', icon: ArrowLeftRight },
       { to: '/erp/conciliacion-reglas', label: 'Reglas conciliación', icon: Split },
       { to: '/erp/cierres-diarios', label: 'Cierres diarios', icon: Lock },
     ],
@@ -80,6 +82,7 @@ export const sections: NavSection[] = [
     label: 'Compras',
     items: [
       { to: '/erp/facturas-compra', label: 'Facturas de compra', icon: ShoppingCart },
+      { to: '/erp/compras/pendientes-de-facturar', label: 'Pendientes de facturar', icon: FileText },
       { to: '/erp/cc-proveedores', label: 'CC Proveedores', icon: Users },
       { to: '/erp/libro-iva-compras/import', label: 'Libro IVA Compras (import enriquecido)', icon: ScrollText },
       { to: '/erp/libro-iva-compras/no-tomadas', label: 'Libro IVA Compras (no tomadas)', icon: ScrollText },

@@ -26,6 +26,31 @@ class ConciliacionExtrasController
         private readonly EmparejarEspejosService $espejos,
     ) {}
 
+    /**
+     * v1.48 Anexo A — anticipos otorgados pendientes de un auxiliar (saldo en
+     * 1.1.5.01 con débito, vía el asiento del mov de adelanto, sin cancelar).
+     */
+    public function anticiposPendientes(Request $request, int $auxId): JsonResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+        $rows = DB::table('erp_movimientos_bancarios as m')
+            ->join('erp_movimientos_asiento as l', 'l.asiento_id', '=', 'm.asiento_id')
+            ->join('erp_cuentas_contables as c', 'c.id', '=', 'l.cuenta_id')
+            ->where('c.codigo', '1.1.5.01')
+            ->where('l.auxiliar_id', $auxId)
+            ->where('l.debe', '>', 0.005)
+            ->whereNull('m.anticipo_cancelado_por_mov_id')
+            ->whereNotNull('m.asiento_id')
+            ->orderBy('m.fecha')
+            ->get([
+                'm.id as mov_id', 'm.fecha', 'l.debe as monto', 'm.concepto as glosa',
+                DB::raw('DATEDIFF(CURDATE(), m.fecha) as dias_pendiente'),
+            ]);
+        $total = round((float) $rows->sum('monto'), 2);
+
+        return response()->json(['ok' => true, 'data' => $rows, 'meta' => ['total' => $total]]);
+    }
+
     /** Bloque D — catálogo de motivos para el dropdown. */
     public function motivos(Request $request): JsonResponse
     {

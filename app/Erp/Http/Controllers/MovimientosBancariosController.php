@@ -138,6 +138,20 @@ class MovimientosBancariosController
             'observacion' => ['nullable', 'string', 'max:300'],
         ]);
 
+        // v1.48 Anexo A Pieza 1 — si la cuenta contraparte admite auxiliar,
+        // exigir auxiliar_id (sino el saldo por proveedor no es trackeable, ej.
+        // 1.1.5.01 Anticipos a Proveedores).
+        if (($data['referencia_tipo'] ?? null) === 'ASIENTO_MANUAL' && ! empty($data['cuenta_contable_contraparte_id'])) {
+            $admite = DB::table('erp_cuentas_contables')
+                ->where('id', $data['cuenta_contable_contraparte_id'])->value('admite_auxiliar');
+            if ($admite && empty($data['auxiliar_id'])) {
+                return response()->json(['ok' => false, 'error' => [
+                    'code' => 'AUXILIAR_REQUERIDO',
+                    'message' => 'La cuenta seleccionada requiere auxiliar (ej. Anticipos a Proveedores).',
+                ]], 422);
+            }
+        }
+
         $mov = MovimientoBancario::findOrFail($id);
 
         try {
@@ -258,6 +272,10 @@ class MovimientosBancariosController
             'permitir_diferencia' => ['nullable', 'boolean'],
             'cuenta_ajuste_id' => ['nullable', 'integer', 'exists:erp_cuentas_contables,id'],
             'motivo_diferencia_id' => ['nullable', 'integer', 'exists:erp_conciliacion_motivos,id'],
+            // v1.48 Anexo A — anticipos a cancelar (movs de adelanto previos).
+            'anticipos_a_cancelar' => ['nullable', 'array'],
+            'anticipos_a_cancelar.*.mov_id' => ['required_with:anticipos_a_cancelar', 'integer'],
+            'anticipos_a_cancelar.*.monto' => ['required_with:anticipos_a_cancelar', 'numeric', 'gt:0'],
         ]);
         $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
         try {
@@ -265,6 +283,7 @@ class MovimientosBancariosController
                 $mov, $data['facturas'], $request->user(),
                 $data['motivo'] ?? null, (bool) ($data['permitir_diferencia'] ?? false),
                 $data['cuenta_ajuste_id'] ?? null, $data['motivo_diferencia_id'] ?? null,
+                $data['anticipos_a_cancelar'] ?? [],
             );
         } catch (DomainException $e) {
             return $this->domainError($e);

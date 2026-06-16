@@ -225,6 +225,8 @@ Route::prefix('api/erp')->group(function () {
         // v1.48 — conciliación extras (Bloques D/E/F/G).
         Route::get('/conciliacion/motivos', [ConciliacionExtrasController::class, 'motivos'])
             ->name('erp.concil.motivos');
+        Route::get('/auxiliares/{auxId}/anticipos-pendientes', [ConciliacionExtrasController::class, 'anticiposPendientes'])
+            ->whereNumber('auxId')->name('erp.concil.anticipos-pendientes');
         Route::get('/conciliacion/transferencias-internas-pendientes', [ConciliacionExtrasController::class, 'transferenciasInternasPendientes'])
             ->name('erp.concil.transf-internas');
         Route::post('/conciliacion/transferencias-internas/{movId}/emparejar', [ConciliacionExtrasController::class, 'emparejarTransferenciaInterna'])

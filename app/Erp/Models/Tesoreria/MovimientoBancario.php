@@ -40,6 +40,8 @@ class MovimientoBancario extends Model
         'motivo_diferencia_id', 'pendiente_factura_complementaria', 'distribuidor_pendiente_id',
         'monto_pendiente_facturar', 'nc_complementaria_id', 'observaciones_pendiente',
         'es_transferencia_interna', 'mov_espejo_id',
+        // v1.48 Anexo A — trazabilidad de anticipos cancelados.
+        'anticipo_cancelado_por_mov_id',
     ];
 
     protected $casts = [

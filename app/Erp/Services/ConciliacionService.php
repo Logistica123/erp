@@ -805,7 +805,7 @@ class ConciliacionService
      *
      * @param  array<int,array{id:int,tipo:string,monto_imputado:float}>  $facturas
      */
-    public function conciliarMultiplesFacturas(MovimientoBancario $mov, array $facturas, User $usuario, ?string $motivo = null, bool $permitirDiferencia = false, ?int $cuentaAjusteId = null, ?int $motivoDiferenciaId = null): MovimientoBancario
+    public function conciliarMultiplesFacturas(MovimientoBancario $mov, array $facturas, User $usuario, ?string $motivo = null, bool $permitirDiferencia = false, ?int $cuentaAjusteId = null, ?int $motivoDiferenciaId = null, array $anticiposACancelar = []): MovimientoBancario
     {
         if ($mov->estado === MovimientoBancario::ESTADO_CONCILIADO) {
             throw new DomainException('MOVIMIENTO_YA_CONCILIADO');
@@ -832,6 +832,26 @@ class ConciliacionService
         $sumImputado = round(array_sum(array_map(fn ($f) => (float) $f['monto_imputado'], $facturas)), 2);
         $ajuste = round($montoMov - $sumImputado, 2); // lo que sobra del mov vs lo imputado
 
+        // v1.48 Anexo A — cancelación de anticipos. La diferencia entre lo
+        // imputado (factura total) y lo que salió del banco la cubre el saldo
+        // de anticipos a favor del proveedor (cuenta 1.1.5.01). El ajuste se
+        // rutea a esa cuenta con el auxiliar, y se valida que cuadre.
+        $totalAnt = round(array_sum(array_map(fn ($a) => (float) $a['monto'], $anticiposACancelar)), 2);
+        $cuentaAnticipoId = null;
+        if ($totalAnt > 0.01) {
+            $cuentaAnticipoId = DB::table('erp_cuentas_contables')->where('empresa_id', $empresaId)
+                ->where('codigo', '1.1.5.01')->value('id');
+            if (! $cuentaAnticipoId) throw new DomainException('CUENTA_ANTICIPOS_INEXISTENTE: 1.1.5.01');
+            if (abs(abs($ajuste) - $totalAnt) > 1.0) {
+                throw new DomainException(sprintf(
+                    'ANTICIPO_NO_CUADRA: diferencia $%.2f vs anticipos a cancelar $%.2f', abs($ajuste), $totalAnt,
+                ));
+            }
+            $cuentaAjusteId = $cuentaAnticipoId;
+            $motivo = $motivo ?: 'Cancelación de anticipo';
+            $permitirDiferencia = true;
+        }
+
         if (abs($ajuste) > 0.01) {
             if (! $permitirDiferencia || ! $cuentaAjusteId || ! $motivo) {
                 throw new DomainException(sprintf(
@@ -841,7 +861,7 @@ class ConciliacionService
             }
         }
 
-        return DB::transaction(function () use ($mov, $facturas, $usuario, $cuentaBanco, $empresaId, $montoMov, $esCobro, $sumImputado, $ajuste, $motivo, $cuentaAjusteId, $motivoDiferenciaId, $motivoTipo) {
+        return DB::transaction(function () use ($mov, $facturas, $usuario, $cuentaBanco, $empresaId, $montoMov, $esCobro, $sumImputado, $ajuste, $motivo, $cuentaAjusteId, $motivoDiferenciaId, $motivoTipo, $anticiposACancelar, $totalAnt) {
             DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
 
             $diarioBan = DB::table('erp_diarios')->where('empresa_id', $empresaId)->where('codigo', 'BAN')->value('id')
@@ -863,6 +883,9 @@ class ConciliacionService
             }
 
             $glosa = ($esCobro ? 'Cobro' : 'Pago') . ' múltiple ' . $mov->id . ' (' . count($facturas) . ' facturas)';
+            // Si el ajuste cancela anticipos, su línea lleva el auxiliar (1.1.5.01).
+            $ajusteAux = $totalAnt > 0.01 ? ($lineasFactura[0]['auxiliar_id'] ?? null) : null;
+            $glosaAjuste = $totalAnt > 0.01 ? "Cancelación anticipo: {$motivo}" : "Ajuste: {$motivo}";
             $movs = [];
             // Banco siempre por el monto real del movimiento.
             if ($esCobro) {
@@ -873,8 +896,8 @@ class ConciliacionService
                 if (abs($ajuste) > 0.01) {
                     // ajuste = montoMov - sumImputado. Si >0: HABER; si <0: DEBE.
                     $ajuste > 0
-                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => 0, 'haber' => $ajuste, 'glosa' => "Ajuste: {$motivo}"]
-                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => -$ajuste, 'haber' => 0, 'glosa' => "Ajuste: {$motivo}"];
+                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => 0, 'haber' => $ajuste, 'glosa' => $glosaAjuste]
+                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => -$ajuste, 'haber' => 0, 'glosa' => $glosaAjuste];
                 }
             } else {
                 foreach ($lineasFactura as $lf) {
@@ -882,8 +905,8 @@ class ConciliacionService
                 }
                 if (abs($ajuste) > 0.01) {
                     $ajuste > 0
-                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => $ajuste, 'haber' => 0, 'glosa' => "Ajuste: {$motivo}"]
-                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'debe' => 0, 'haber' => -$ajuste, 'glosa' => "Ajuste: {$motivo}"];
+                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => $ajuste, 'haber' => 0, 'glosa' => $glosaAjuste]
+                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => 0, 'haber' => -$ajuste, 'glosa' => $glosaAjuste];
                 }
                 $movs[] = ['cuenta_id' => $cuentaBanco->cuenta_contable_id, 'debe' => 0, 'haber' => $montoMov, 'glosa' => $glosa];
             }
@@ -920,6 +943,16 @@ class ConciliacionService
                 $datosMov['observaciones_pendiente'] = $motivo;
             }
             $mov->update($datosMov);
+
+            // v1.48 Anexo A — marcar los movimientos de adelanto como cancelados
+            // por este mov (trazabilidad bidireccional).
+            if ($totalAnt > 0.01 && ! empty($anticiposACancelar)) {
+                $idsAnt = array_filter(array_map(fn ($a) => (int) ($a['mov_id'] ?? 0), $anticiposACancelar));
+                if ($idsAnt) {
+                    DB::table('erp_movimientos_bancarios')->whereIn('id', $idsAnt)
+                        ->update(['anticipo_cancelado_por_mov_id' => $mov->id]);
+                }
+            }
 
             $this->audit->logEvento(
                 accion: 'MOVIMIENTO_CONCILIADO_MULTIPLE', modulo: 'tesoreria',

@@ -74,6 +74,8 @@ type MotivoDif = {
   requiere_auxiliar_tipo: string | null; cuenta_ajuste_id: number | null;
   cuenta_codigo: string | null; cuenta_nombre: string | null; observaciones: string | null;
 };
+// v1.48 Anexo A — anticipo otorgado pendiente del auxiliar.
+type Anticipo = { mov_id: number; fecha: string; monto: string; glosa: string | null; dias_pendiente: number };
 
 export function ConciliacionPage() {
   const qc = useQueryClient();
@@ -736,7 +738,8 @@ function ConciliarModal({
   const conciliar = useMutation({
     mutationFn: () =>
       api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar`, {
-        cuenta_contable_id: cuentaId,
+        referencia_tipo: 'ASIENTO_MANUAL',
+        cuenta_contable_contraparte_id: cuentaId,
         centro_costo_id: ccId || null,
         auxiliar_id: auxId || null,
         glosa: glosa || null,
@@ -747,6 +750,9 @@ function ConciliarModal({
 
   if (!mov) return null;
 
+  // v1.48 Anexo A — si la cuenta admite auxiliar, es obligatorio.
+  const faltaAux = !!cuentaSeleccionada?.admite_auxiliar && !auxId;
+
   return (
     <Modal
       open={!!mov}
@@ -756,7 +762,7 @@ function ConciliarModal({
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" disabled={!cuentaId || conciliar.isPending} onClick={() => conciliar.mutate()}>
+          <Button variant="primary" disabled={!cuentaId || faltaAux || conciliar.isPending} onClick={() => conciliar.mutate()}>
             {conciliar.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
             Conciliar y generar asiento
           </Button>
@@ -1283,6 +1289,16 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   const { data: motivosResp } = useQuery<{ data: MotivoDif[] }>({
     queryKey: ['conciliacion-motivos'], queryFn: () => api.get('/api/erp/conciliacion/motivos'), enabled: !!mov,
   });
+  // v1.48 Anexo A — anticipos pendientes del auxiliar detectado.
+  const auxDetectadoId = sugerencias?.data?.contraparte?.id ?? null;
+  const { data: antResp } = useQuery<{ data: Anticipo[]; meta: { total: number } }>({
+    queryKey: ['anticipos-pendientes', auxDetectadoId],
+    queryFn: () => api.get(`/api/erp/auxiliares/${auxDetectadoId}/anticipos-pendientes`),
+    enabled: !!auxDetectadoId,
+  });
+  const anticipos = antResp?.data ?? [];
+  const totalAnt = Math.round(anticipos.reduce((a, x) => a + Number(x.monto), 0) * 100) / 100;
+  const [descontarAnt, setDescontarAnt] = useState(true);
 
   const montoMov = mov ? Math.max(Number(mov.debito), Number(mov.credito)) : 0;
   const resp = sugerencias?.data;
@@ -1292,6 +1308,13 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   const totalSel = selObjs.reduce((a, s) => a + Number(s.saldo_pendiente), 0);
   const diff = Math.round((montoMov - totalSel) * 100) / 100;
   const exacto = Math.abs(diff) <= 1;
+  // v1.48 Anexo A — match dual: si se descuentan anticipos, el banco solo debe
+  // cubrir (facturas − anticipos). diffConAnt = diff + totalAnt.
+  const usaAnt = descontarAnt && totalAnt > 0.01 && selObjs.length > 0;
+  const diffConAnt = Math.round((diff + totalAnt) * 100) / 100;
+  const diffEf = usaAnt ? diffConAnt : diff;
+  const exactoEf = Math.abs(diffEf) <= 1;
+
   // Con motivo del catálogo la cuenta queda resuelta en backend (salvo OTRO,
   // que requiere elegir cuenta manual). Sin catálogo, motivo libre ≥10 chars.
   const motivoSel = (motivosResp?.data ?? []).find((m) => String(m.id) === motivoDifId);
@@ -1300,7 +1323,8 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
       ? (!!motivoSel.cuenta_ajuste_id || !!cuentaAjuste)
       : (motivoDif.trim().length >= 10 && !!cuentaAjuste)
   );
-  const puedeConfirmar = selObjs.length > 0 && (exacto || difOk);
+  // Con anticipos cuadrando no hace falta motivo/cuenta de ajuste manual.
+  const puedeConfirmar = selObjs.length > 0 && (exactoEf || (usaAnt && exactoEf) || difOk);
 
   const conciliarMut = useMutation({
     mutationFn: () =>
@@ -1309,10 +1333,13 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
           id: s.factura_id, tipo: s.tipo === 'FACTURA_VENTA' ? 'VENTA' : 'COMPRA',
           monto_imputado: Number(s.saldo_pendiente),
         })),
-        motivo: permitirDif && !exacto ? (motivoSel?.nombre ?? motivoDif) : null,
-        permitir_diferencia: permitirDif && !exacto,
-        cuenta_ajuste_id: permitirDif && !exacto && cuentaAjuste ? Number(cuentaAjuste) : null,
-        motivo_diferencia_id: permitirDif && !exacto && motivoDifId ? Number(motivoDifId) : null,
+        // Si los anticipos cubren la diferencia, el backend rutea el ajuste a
+        // 1.1.5.01 — no se envía motivo/cuenta manual.
+        motivo: !usaAnt && permitirDif && !exacto ? (motivoSel?.nombre ?? motivoDif) : null,
+        permitir_diferencia: !usaAnt && permitirDif && !exacto,
+        cuenta_ajuste_id: !usaAnt && permitirDif && !exacto && cuentaAjuste ? Number(cuentaAjuste) : null,
+        motivo_diferencia_id: !usaAnt && permitirDif && !exacto && motivoDifId ? Number(motivoDifId) : null,
+        anticipos_a_cancelar: usaAnt ? anticipos.map((a) => ({ mov_id: a.mov_id, monto: Number(a.monto) })) : [],
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); onSuccess(); },
     onError: (e: ApiError) => onError(e.message),
@@ -1433,14 +1460,35 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
           ))}
         </div>
 
+        {/* v1.48 Anexo A — anticipos pendientes del auxiliar */}
+        {totalAnt > 0.01 && (
+          <div className="border border-azure/40 bg-azure/10 rounded p-2 text-[11.5px] space-y-1">
+            <div className="font-semibold">⚠️ Este auxiliar tiene ANTICIPOS pendientes:</div>
+            {anticipos.map((a) => (
+              <div key={a.mov_id} className="flex justify-between text-ink-muted">
+                <span>• {a.fecha.slice(0, 10)} — ref mov #{a.mov_id}</span>
+                <span className="tabular">{fmtMoney(Number(a.monto))}</span>
+              </div>
+            ))}
+            <div className="flex justify-between font-semibold border-t border-azure/30 pt-1">
+              <span>Total anticipos:</span><span className="tabular">{fmtMoney(totalAnt)}</span>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <input type="checkbox" checked={descontarAnt} onChange={(e) => setDescontarAnt(e.target.checked)} />
+              <span>Descontar anticipos al imputar (recomendado)</span>
+            </label>
+          </div>
+        )}
+
         {selObjs.length > 0 && (
           <div className="border-t border-line pt-3 space-y-2 text-[11.5px]">
             <div className="flex justify-between"><span>Total seleccionado ({selObjs.length} factura{selObjs.length === 1 ? '' : 's'}):</span><span className="tabular font-semibold">{fmtMoney(totalSel)}</span></div>
-            <div className="flex justify-between"><span>Movimiento:</span><span className="tabular">{fmtMoney(montoMov)}</span></div>
-            <div className={`flex justify-between font-semibold ${exacto ? 'text-success' : 'text-danger'}`}>
-              <span>Diferencia:</span><span className="tabular">{fmtMoney(diff)}</span>
+            {usaAnt && <div className="flex justify-between text-azure"><span>− Anticipos a descontar:</span><span className="tabular">{fmtMoney(totalAnt)}</span></div>}
+            <div className="flex justify-between"><span>Movimiento (banco):</span><span className="tabular">{fmtMoney(montoMov)}</span></div>
+            <div className={`flex justify-between font-semibold ${exactoEf ? 'text-success' : 'text-danger'}`}>
+              <span>Diferencia{usaAnt ? ' (con anticipo)' : ''}:</span><span className="tabular">{fmtMoney(diffEf)}</span>
             </div>
-            {!exacto && (
+            {!exactoEf && (
               <div className="border border-warning/40 bg-warning-bg/20 rounded p-2 space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={permitirDif} onChange={(e) => setPermitirDif(e.target.checked)} />

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { AlertCircle, Check, Loader2, Plus, Upload, X, Zap, Search, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, Check, Loader2, Plus, Upload, X, Zap, Search, Trash2, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -146,6 +146,7 @@ export function ConciliacionPage() {
 
   // v1.27 §16 — borrar bulk.
   const [borrarBulkOpen, setBorrarBulkOpen] = useState(false);
+  const [rematchOpen, setRematchOpen] = useState(false);
 
   return (
     <>
@@ -168,6 +169,9 @@ export function ConciliacionPage() {
               <Trash2 className="w-3 h-3" /> Borrar import
             </Button>
           )}
+          <Button variant="secondary" onClick={() => setRematchOpen(true)}>
+            <RefreshCw className="w-3 h-3" /> Re-aplicar reglas y emparejar
+          </Button>
         </div>
       </div>
 
@@ -466,7 +470,78 @@ export function ConciliacionPage() {
           }}
         />
       )}
+
+      {rematchOpen && (
+        <RematchModal
+          cuentas={cuentasBanc?.data ?? []}
+          onClose={() => setRematchOpen(false)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ['mov-banc'] });
+            qc.invalidateQueries({ queryKey: ['cuentas-bancarias'] });
+          }}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * v1.48 Anexo B Fix 3 — Re-aplicar reglas + detectar transferencias internas
+ * retroactivas + emparejar espejos. Para movs cargados antes del v1.48.
+ */
+function RematchModal({ cuentas, onClose, onSuccess }: {
+  cuentas: CuentaBancaria[]; onClose: () => void; onSuccess: () => void;
+}) {
+  const [cuentaId, setCuentaId] = useState<number | ''>('');
+  const [res, setRes] = useState<{ reaplicadas: number; transferencias_detectadas: number; emparejadas: number; pendientes_transf: number } | null>(null);
+  const [err, setErr] = useState('');
+
+  const run = useMutation({
+    mutationFn: () => api.post<{ data: typeof res }>('/api/erp/tesoreria/reaplicar-reglas', { cuenta_bancaria_id: cuentaId || null }),
+    onSuccess: (r) => { setErr(''); setRes(r.data); onSuccess(); },
+    onError: (e: ApiError) => setErr(e.message),
+  });
+
+  return (
+    <Modal open onClose={onClose} title="Re-aplicar reglas y emparejar transferencias" size="md"
+      footer={res ? (
+        <Button variant="primary" onClick={onClose}>Cerrar</Button>
+      ) : (
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={run.isPending}>Cancelar</Button>
+          <Button variant="primary" disabled={run.isPending} onClick={() => run.mutate()}>
+            {run.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Ejecutar
+          </Button>
+        </>
+      )}
+    >
+      <div className="space-y-3 text-[12px]">
+        {err && <div className="p-2 bg-danger-bg text-danger rounded text-[11.5px]">{err}</div>}
+        {!res ? (
+          <>
+            <p className="text-ink-2">
+              Re-evalúa reglas sobre movs en <code>PENDIENTE</code> / <code>ETIQUETADO</code> (sin cuenta) / <code>MATCH_AUTO</code>,
+              marca transferencias internas (CUIT propio) y empareja espejos. Los movs <code>CONCILIADO</code> / <code>IGNORADO</code> quedan intactos.
+            </p>
+            <div>
+              <label className="block text-[11px] font-semibold text-ink-muted uppercase mb-1">Cuenta bancaria</label>
+              <select value={cuentaId} onChange={(e) => setCuentaId(e.target.value ? Number(e.target.value) : '')}
+                className="w-full px-2 py-1.5 border border-line-strong rounded bg-white">
+                <option value="">Todas las cuentas</option>
+                {cuentas.map((c) => <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>)}
+              </select>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex justify-between"><span>Movs re-evaluados:</span><strong>{res.reaplicadas}</strong></div>
+            <div className="flex justify-between"><span>Transferencias internas detectadas:</span><strong>{res.transferencias_detectadas}</strong></div>
+            <div className="flex justify-between"><span>Emparejadas con espejo:</span><strong className="text-success">{res.emparejadas}</strong></div>
+            <div className="flex justify-between"><span>Pendientes de espejo:</span><strong>{res.pendientes_transf}</strong></div>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -735,6 +810,20 @@ function ConciliarModal({
     [cuentasResp, cuentaId]
   );
 
+  // v1.48 Anexo B Fix 4 — precargar la cuenta propuesta por la regla aplicada
+  // (si el mov está auto-etiquetado). El operador puede cambiarla. No rompe el
+  // principio de las reglas: etiquetar = saber la cuenta.
+  useEffect(() => {
+    if (mov?.cuenta_contable_propuesta_id) setCuentaId(mov.cuenta_contable_propuesta_id);
+    else setCuentaId('');
+    setCcId(''); setAuxId(''); setGlosa('');
+  }, [mov?.id]);
+
+  // ⚠ la regla propuso una cuenta que no está en el listado de imputables.
+  const propuestaHuerfana = !!mov?.cuenta_contable_propuesta_id
+    && !!cuentasResp?.data
+    && !cuentasResp.data.some((c) => c.id === mov.cuenta_contable_propuesta_id);
+
   const conciliar = useMutation({
     mutationFn: () =>
       api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar`, {
@@ -812,6 +901,12 @@ function ConciliarModal({
               {cuentaSeleccionada.admite_cc && '⚠ Requiere centro de costo · '}
               {cuentaSeleccionada.admite_auxiliar && '⚠ Requiere auxiliar'}
             </div>
+          )}
+          {mov.cuenta_contable_propuesta_id && cuentaId === mov.cuenta_contable_propuesta_id && (
+            <div className="text-[11px] text-success mt-1">✓ Cuenta precargada por la regla aplicada (podés cambiarla)</div>
+          )}
+          {propuestaHuerfana && (
+            <div className="text-[11px] text-danger mt-1">⚠️ La regla aplicada propone una cuenta no imputable. Reportar a administrador.</div>
           )}
         </div>
 

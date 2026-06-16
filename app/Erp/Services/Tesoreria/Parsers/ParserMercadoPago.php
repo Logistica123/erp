@@ -62,15 +62,23 @@ class ParserMercadoPago extends AbstractParser
         $totalDebitos   = self::parsearImporte($r1[2]);
         $finalBalance   = self::parsearImporte($r1[3]);
 
-        // Línea 3: vacía. Línea 4: header del detalle.
-        do {
-            $h2 = fgetcsv($handle, 0, ';');
-        } while ($h2 !== false && count($h2) === 1 && trim((string) $h2[0]) === '');
+        // v1.48 Anexo B Fix 1 — saltar filas vacías separadoras hasta encontrar
+        // el header del bloque 2. La fila separadora puede venir como blank line
+        // (CSV) o como ";;;;" (5 celdas vacías, cuando se convierte de xlsx), por
+        // eso se chequea sólo la PRIMERA celda, no la cantidad de columnas.
+        $h2 = false;
+        while (($fila = fgetcsv($handle, 0, ';')) !== false) {
+            $primera = trim((string) ($fila[0] ?? ''));
+            if ($primera === '') continue; // fila vacía separadora
+            $h2 = $fila;
+            break;
+        }
 
         if ($h2 === false || count($h2) < 5 ||
             mb_strtoupper(trim($h2[0])) !== 'RELEASE_DATE') {
             fclose($handle);
-            throw new DomainException('FORMATO_INVALIDO: header detalle MP inválido (esperaba RELEASE_DATE)');
+            $enc = $h2 === false ? '(fin de archivo)' : trim((string) $h2[0]);
+            throw new DomainException("FORMATO_INVALIDO: header detalle MP inválido (esperaba RELEASE_DATE, encontró: {$enc})");
         }
 
         $movimientos = [];
@@ -78,7 +86,7 @@ class ParserMercadoPago extends AbstractParser
         $fechaHasta = null;
 
         while (($row = fgetcsv($handle, 0, ';')) !== false) {
-            if (count($row) === 1 && trim((string) $row[0]) === '') continue;
+            if (trim((string) ($row[0] ?? '')) === '') continue; // fila vacía (blank o ";;;;")
             while (count($row) < 5) $row[] = null;
 
             [$fechaStr, $tipo, $refId, $importeStr, $saldoStr] = $row;

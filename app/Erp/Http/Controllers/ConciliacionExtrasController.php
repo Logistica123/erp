@@ -21,10 +21,85 @@ use Illuminate\Support\Facades\DB;
  */
 class ConciliacionExtrasController
 {
+    /** CUIT propio (Logística Argentina SRL) para transferencias internas. */
+    private const CUIT_PROPIO = '30717060985';
+
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly EmparejarEspejosService $espejos,
+        private readonly \App\Erp\Services\Tesoreria\MatchingContraparteService $matcher,
+        private readonly \App\Erp\Services\Conciliacion\MatchingAutoService $matchingAuto,
     ) {}
+
+    /**
+     * v1.48 Anexo B Fix 3 — rematch retroactivo: re-evalúa reglas, marca
+     * transferencias internas (CUIT propio) en movs ya cargados y empareja
+     * espejos. Para movs importados ANTES del v1.48 que no traen el flag.
+     */
+    public function reaplicarReglas(Request $request): JsonResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+        $data = $request->validate(['cuenta_bancaria_id' => ['nullable', 'integer', 'exists:erp_cuentas_bancarias,id']]);
+        $cuentaId = $data['cuenta_bancaria_id'] ?? null;
+        $userId = $request->user()->id;
+
+        $reaplicadas = 0; $transfDetectadas = 0;
+
+        // Paso 1 — re-evaluar reglas sobre PENDIENTE / ETIQUETADO-sin-cuenta.
+        $q = \App\Erp\Models\Tesoreria\MovimientoBancario::query()->with('cuentaBancaria')
+            ->where(function ($w) {
+                $w->where('estado', 'PENDIENTE')
+                  ->orWhere(fn ($x) => $x->where('estado', 'ETIQUETADO')->whereNull('cuenta_contable_propuesta_id'));
+            });
+        if ($cuentaId) $q->where('cuenta_bancaria_id', $cuentaId);
+        foreach ($q->get() as $mov) {
+            $r = $this->matcher->matchear($mov);
+            if (($r['confianza_match'] ?? 0) >= 50 && ($r['cuenta_contable_propuesta_id'] ?? null)) {
+                $mov->update([
+                    'cuenta_contable_propuesta_id' => $r['cuenta_contable_propuesta_id'],
+                    'regla_aplicada_id' => $r['regla_aplicada_id'] ?? $mov->regla_aplicada_id,
+                    'confianza_match' => $r['confianza_match'],
+                    'estado' => $mov->estado === 'PENDIENTE' ? 'ETIQUETADO' : $mov->estado,
+                    'cuit_contraparte' => $r['cuit_contraparte'] ?? $mov->cuit_contraparte,
+                    'nombre_contraparte' => $r['nombre_contraparte'] ?? $mov->nombre_contraparte,
+                ]);
+                $reaplicadas++;
+            } elseif ($mov->estado === 'PENDIENTE' && $this->matchingAuto->intentarMatching($mov->fresh())) {
+                $reaplicadas++;
+            }
+        }
+
+        // Paso 2 — marcar transferencias internas retroactivas (CUIT propio en
+        // estados elegibles, sin conciliar todavía).
+        $qt = DB::table('erp_movimientos_bancarios')
+            ->whereIn('estado', ['PENDIENTE', 'ETIQUETADO', 'MATCH_AUTO'])
+            ->where('es_transferencia_interna', 0)
+            ->whereRaw("REPLACE(REPLACE(COALESCE(cuit_contraparte,''),'-',''),' ','') = ?", [self::CUIT_PROPIO]);
+        if ($cuentaId) $qt->where('cuenta_bancaria_id', $cuentaId);
+        $transfDetectadas = $qt->update(['es_transferencia_interna' => 1, 'estado' => 'PENDIENTE_TRANSF_INTERNA']);
+
+        // Paso 3 — emparejar espejos (a nivel empresa: el espejo puede estar en
+        // otro banco). Se resuelve la empresa de la cuenta elegida o default 1.
+        $empresaId = $cuentaId
+            ? (int) DB::table('erp_cuentas_bancarias')->where('id', $cuentaId)->value('empresa_id')
+            : null;
+        $esp = $this->espejos->emparejarEspejos($empresaId, $userId);
+
+        $pendientesTransf = DB::table('erp_movimientos_bancarios')
+            ->where('estado', 'PENDIENTE_TRANSF_INTERNA')->whereNull('mov_espejo_id')->count();
+
+        $this->audit->logEvento('REMATCH_RETROACTIVO', 'tesoreria',
+            sprintf('Rematch retroactivo cuenta=%s · reaplicadas=%d transf=%d emparejadas=%d',
+                $cuentaId ?? 'todas', $reaplicadas, $transfDetectadas, $esp['emparejados']),
+            $empresaId);
+
+        return response()->json(['ok' => true, 'data' => [
+            'reaplicadas' => $reaplicadas,
+            'transferencias_detectadas' => $transfDetectadas,
+            'emparejadas' => $esp['emparejados'],
+            'pendientes_transf' => $pendientesTransf,
+        ]]);
+    }
 
     /**
      * v1.48 Anexo A — anticipos otorgados pendientes de un auxiliar (saldo en

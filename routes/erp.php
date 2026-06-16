@@ -227,6 +227,8 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.concil.motivos');
         Route::get('/auxiliares/{auxId}/anticipos-pendientes', [ConciliacionExtrasController::class, 'anticiposPendientes'])
             ->whereNumber('auxId')->name('erp.concil.anticipos-pendientes');
+        Route::post('/tesoreria/reaplicar-reglas', [ConciliacionExtrasController::class, 'reaplicarReglas'])
+            ->name('erp.concil.reaplicar-reglas');
         Route::get('/conciliacion/transferencias-internas-pendientes', [ConciliacionExtrasController::class, 'transferenciasInternasPendientes'])
             ->name('erp.concil.transf-internas');
         Route::post('/conciliacion/transferencias-internas/{movId}/emparejar', [ConciliacionExtrasController::class, 'emparejarTransferenciaInterna'])

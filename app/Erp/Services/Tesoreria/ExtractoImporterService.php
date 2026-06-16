@@ -64,6 +64,13 @@ class ExtractoImporterService
             throw new DomainException('CUENTA_SIN_BANCO: la cuenta no tiene banco asociado');
         }
 
+        // v1.48 Anexo B Fix 2 — Brubank exporta las 2 cuentas (CC + Remunerada)
+        // en el mismo archivo. Se sube UNA SOLA VEZ y el parser distribuye los
+        // movimientos a cada cuenta bancaria según la columna `Cuenta`.
+        if (in_array($cuenta->banco->codigo_parser, ['BRUBANK_CC', 'BRUBANK_REM'], true)) {
+            return $this->importarBrubankCombinado($pathTemporal, $cuenta, $usuario, $nombreArchivo);
+        }
+
         $hashArchivo = \App\Erp\Services\Tesoreria\Parsers\AbstractParser::hashArchivo($pathTemporal);
 
         // RN-12 idempotencia (UK por cuenta + hash desde CB-2: Brubank
@@ -107,7 +114,56 @@ class ExtractoImporterService
         // Guardar archivo
         $rutaStorage = $this->guardarArchivo($pathTemporal, $cuenta, $hashArchivo, $nombreArchivo);
 
-        $resumen = DB::transaction(function () use ($parseado, $cuenta, $usuario, $hashArchivo, $rutaStorage, $nombreArchivo) {
+        $resumen = $this->procesarExtractoCuenta($parseado, $cuenta, $usuario, $hashArchivo, $rutaStorage, $nombreArchivo);
+
+        // v1.48 Bloque B — emparejar espejos de transferencias internas a nivel
+        // empresa (el espejo puede haber venido en una importación anterior de
+        // otra cuenta). Fuera de la transacción de import: su propio asiento.
+        $espejos = ['emparejados' => 0, 'ambiguos' => 0, 'sin_espejo' => 0];
+        try {
+            $espejos = $this->espejos->emparejarEspejos($cuenta->empresa_id, $usuario->id);
+        } catch (\Throwable $e) {
+            \Log::warning('emparejarEspejos falló tras import: '.$e->getMessage());
+        }
+
+        $this->audit->logEvento(
+            accion: 'EXTRACTO_IMPORTADO',
+            modulo: 'tesoreria',
+            descripcion: sprintf(
+                'Extracto %s cuenta=%s mov=%d etiquetados=%d pendientes=%d dup=%d',
+                $nombreArchivo,
+                $cuenta->codigo,
+                count($parseado->movimientos),
+                $resumen['etiquetados_auto'],
+                $resumen['pendientes'],
+                $resumen['movimientos_duplicados']
+            ),
+            empresaId: $cuenta->empresa_id,
+        );
+
+        return [
+            'extracto_id' => $resumen['extracto_id'],
+            'movimientos_importados' => $resumen['movimientos_importados'],
+            'movimientos_duplicados' => $resumen['movimientos_duplicados'],
+            'etiquetados_auto' => $resumen['etiquetados_auto'],
+            'pendientes' => $resumen['pendientes'],
+            'pasantes_mp' => $resumen['pasantes_mp'],
+            'transferencias_internas' => $resumen['transferencias_internas'],
+            'espejos_emparejados' => $espejos['emparejados'],
+            'warnings' => $warnings,
+        ];
+    }
+
+    /**
+     * Núcleo de import por cuenta: crea el extracto, persiste, marca
+     * transferencias internas y corre las pasadas de matching. Reusado por el
+     * import normal y por el combinado de Brubank.
+     *
+     * @return array<string,mixed>
+     */
+    private function procesarExtractoCuenta(ExtractoParseado $parseado, CuentaBancaria $cuenta, User $usuario, string $hashArchivo, string $rutaStorage, string $nombreArchivo): array
+    {
+        return DB::transaction(function () use ($parseado, $cuenta, $usuario, $hashArchivo, $rutaStorage, $nombreArchivo) {
             $extracto = ExtractoBancario::create([
                 'cuenta_bancaria_id' => $cuenta->id,
                 'fecha_desde' => $parseado->fechaDesde,
@@ -149,41 +205,104 @@ class ExtractoImporterService
                 'transferencias_internas' => $transfInternas,
             ];
         });
+    }
 
-        // v1.48 Bloque B — emparejar espejos de transferencias internas a nivel
-        // empresa (el espejo puede haber venido en una importación anterior de
-        // otra cuenta). Fuera de la transacción de import: su propio asiento.
-        $espejos = ['emparejados' => 0, 'ambiguos' => 0, 'sin_espejo' => 0];
+    /**
+     * v1.48 Anexo B Fix 2 — import combinado de Brubank: una sola carga del
+     * archivo distribuye los movimientos a las 2 cuentas bancarias (Cuenta
+     * corriente → BRUBANK_CC, Cuenta remunerada → BRUBANK_REM) según la columna
+     * `Cuenta`. Cada parser-subclase ya filtra sus filas; acá iteramos ambas
+     * cuentas de la empresa. Idempotencia: rechaza si el hash ya existe en
+     * cualquiera de las 2 cuentas.
+     *
+     * @return array<string,mixed>
+     */
+    private function importarBrubankCombinado(string $pathTemporal, CuentaBancaria $cuenta, User $usuario, string $nombreArchivo): array
+    {
+        $hashArchivo = \App\Erp\Services\Tesoreria\Parsers\AbstractParser::hashArchivo($pathTemporal);
+
+        // Resolver las 2 cuentas Brubank de la empresa (CC + Remunerada).
+        $cuentas = CuentaBancaria::with('banco', 'moneda')
+            ->where('empresa_id', $cuenta->empresa_id)
+            ->whereHas('banco', fn ($q) => $q->whereIn('codigo_parser', ['BRUBANK_CC', 'BRUBANK_REM']))
+            ->get()
+            ->sortBy(fn ($c) => $c->banco->codigo_parser) // CC antes que REM
+            ->values();
+        if ($cuentas->isEmpty()) {
+            throw new DomainException('BRUBANK_SIN_CUENTAS: no hay cuentas Brubank configuradas en la empresa');
+        }
+
+        // Idempotencia: si el archivo ya se importó a cualquiera de las cuentas.
+        $dup = ExtractoBancario::whereIn('cuenta_bancaria_id', $cuentas->pluck('id'))
+            ->where('hash_archivo', $hashArchivo)->first();
+        if ($dup) {
+            throw new DomainException(sprintf(
+                'EXTRACTO_DUPLICADO: este archivo Brubank ya fue importado el %s (extracto #%d)',
+                $dup->importado_at?->format('d/m/Y H:i') ?? '?', $dup->id
+            ));
+        }
+
+        // Convertir xlsx→CSV una sola vez; ambos parsers leen el mismo CSV.
+        [$pathParse, $esTmp] = $this->normalizarArchivoParseable($pathTemporal, $nombreArchivo);
+
+        $resumenes = [];
+        $warnings = [];
+        try {
+            foreach ($cuentas as $cb) {
+                $parser = $this->factory->make($cb->banco->codigo_parser);
+                try {
+                    $parseado = $parser->parse($pathParse, $cb);
+                } catch (DomainException $e) {
+                    // Una cuenta puede no tener filas en el archivo: se omite.
+                    if (str_contains($e->getMessage(), 'no hay filas')) {
+                        $warnings[] = "Sin movimientos para {$cb->codigo} en el archivo.";
+                        continue;
+                    }
+                    throw $e;
+                }
+                $warnings = array_merge($warnings, $parseado->errores);
+                $rutaStorage = $this->guardarArchivo($pathTemporal, $cb, $hashArchivo, $nombreArchivo);
+                $resumenes[$cb->codigo] = $this->procesarExtractoCuenta($parseado, $cb, $usuario, $hashArchivo, $rutaStorage, $nombreArchivo);
+            }
+        } finally {
+            if ($esTmp && is_file($pathParse)) @unlink($pathParse);
+        }
+
+        if (empty($resumenes)) {
+            throw new DomainException('BRUBANK_SIN_MOVIMIENTOS: el archivo no tenía filas para ninguna cuenta Brubank');
+        }
+
+        // Emparejar espejos una sola vez (nivel empresa).
+        $espejos = ['emparejados' => 0];
         try {
             $espejos = $this->espejos->emparejarEspejos($cuenta->empresa_id, $usuario->id);
         } catch (\Throwable $e) {
-            \Log::warning('emparejarEspejos falló tras import: '.$e->getMessage());
+            \Log::warning('emparejarEspejos falló tras import Brubank: '.$e->getMessage());
         }
+
+        $totImport = array_sum(array_map(fn ($r) => $r['movimientos_importados'], $resumenes));
+        $totDup = array_sum(array_map(fn ($r) => $r['movimientos_duplicados'], $resumenes));
+        $totEtiq = array_sum(array_map(fn ($r) => $r['etiquetados_auto'], $resumenes));
+        $totPend = array_sum(array_map(fn ($r) => $r['pendientes'], $resumenes));
 
         $this->audit->logEvento(
             accion: 'EXTRACTO_IMPORTADO',
             modulo: 'tesoreria',
-            descripcion: sprintf(
-                'Extracto %s cuenta=%s mov=%d etiquetados=%d pendientes=%d dup=%d',
-                $nombreArchivo,
-                $cuenta->codigo,
-                count($parseado->movimientos),
-                $resumen['etiquetados_auto'],
-                $resumen['pendientes'],
-                $resumen['movimientos_duplicados']
-            ),
+            descripcion: sprintf('Brubank combinado %s → %s · importados=%d etiquetados=%d pendientes=%d',
+                $nombreArchivo, implode('+', array_keys($resumenes)), $totImport, $totEtiq, $totPend),
             empresaId: $cuenta->empresa_id,
         );
 
         return [
-            'extracto_id' => $resumen['extracto_id'],
-            'movimientos_importados' => $resumen['movimientos_importados'],
-            'movimientos_duplicados' => $resumen['movimientos_duplicados'],
-            'etiquetados_auto' => $resumen['etiquetados_auto'],
-            'pendientes' => $resumen['pendientes'],
-            'pasantes_mp' => $resumen['pasantes_mp'],
-            'transferencias_internas' => $resumen['transferencias_internas'],
+            'extracto_id' => $resumenes[array_key_first($resumenes)]['extracto_id'],
+            'movimientos_importados' => $totImport,
+            'movimientos_duplicados' => $totDup,
+            'etiquetados_auto' => $totEtiq,
+            'pendientes' => $totPend,
+            'pasantes_mp' => 0,
+            'transferencias_internas' => array_sum(array_map(fn ($r) => $r['transferencias_internas'], $resumenes)),
             'espejos_emparejados' => $espejos['emparejados'],
+            'distribucion' => array_map(fn ($r) => $r['movimientos_importados'], $resumenes),
             'warnings' => $warnings,
         ];
     }

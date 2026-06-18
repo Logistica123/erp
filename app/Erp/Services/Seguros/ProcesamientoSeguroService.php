@@ -100,6 +100,28 @@ class ProcesamientoSeguroService
         return (array) DB::table('erp_seguros_comprobantes')->find($id);
     }
 
+    /**
+     * Carga varios comprobantes en lote. Cada ítem es el resultado revisado de
+     * analizar() + punto_venta/numero. Devuelve un resultado por ítem.
+     * @param  array<int,array<string,mixed>>  $items
+     * @return array<int,array<string,mixed>>
+     */
+    public function cargarLote(array $items, User $usuario, int $empresaId = 1): array
+    {
+        $res = [];
+        foreach ($items as $i => $item) {
+            $nombre = $item['nombre_archivo'] ?? ('item '.($i + 1));
+            try {
+                $row = $this->cargar($item, $usuario, $empresaId);
+                $res[] = ['ok' => true, 'id' => $row['id'], 'nombre_archivo' => $nombre, 'aseguradora' => $row['aseguradora'] ?? null];
+            } catch (DomainException $e) {
+                [$code] = explode(':', $e->getMessage(), 2);
+                $res[] = ['ok' => false, 'nombre_archivo' => $nombre, 'error' => $code, 'mensaje' => $e->getMessage()];
+            }
+        }
+        return $res;
+    }
+
     /** @return array<int,object> */
     public function listar(int $empresaId = 1): array
     {

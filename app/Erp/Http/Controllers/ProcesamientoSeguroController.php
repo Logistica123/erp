@@ -32,49 +32,56 @@ class ProcesamientoSeguroController
         return response()->json(['ok' => true, 'data' => $this->service->listar()]);
     }
 
-    /** Sube el PDF y devuelve el detalle extraído + flag de duplicado (sin guardar). */
+    /** Sube uno o varios PDFs y devuelve el detalle extraído de cada uno (sin guardar). */
     public function analizar(Request $request): JsonResponse
     {
         $this->requierePermiso($request, 'compras.libro_iva.importar');
-        $request->validate(['archivo' => ['required', 'file', 'mimes:pdf', 'max:20480']]);
-        try {
-            $data = $this->service->analizar($request->file('archivo')->getRealPath());
-            $data['nombre_archivo'] = $request->file('archivo')->getClientOriginalName();
-        } catch (DomainException $e) {
-            return $this->domainError($e);
+        $request->validate([
+            'archivos' => ['required', 'array', 'min:1'],
+            'archivos.*' => ['file', 'mimes:pdf', 'max:20480'],
+        ]);
+        $out = [];
+        foreach ($request->file('archivos') as $file) {
+            $nombre = $file->getClientOriginalName();
+            try {
+                $data = $this->service->analizar($file->getRealPath());
+                $data['nombre_archivo'] = $nombre;
+                $data['analisis_ok'] = true;
+                $out[] = $data;
+            } catch (DomainException $e) {
+                [$code] = explode(':', $e->getMessage(), 2);
+                $out[] = ['analisis_ok' => false, 'nombre_archivo' => $nombre, 'error' => $code, 'mensaje' => $e->getMessage()];
+            }
         }
-        return response()->json(['ok' => true, 'data' => $data]);
+        return response()->json(['ok' => true, 'data' => $out]);
     }
 
-    /** Guarda el comprobante revisado en el módulo (autónomo). */
+    /** Guarda uno o varios comprobantes revisados en el módulo (autónomo). */
     public function cargar(Request $request): JsonResponse
     {
         $this->requierePermiso($request, 'compras.libro_iva.importar');
         $data = $request->validate([
-            'aseguradora' => ['nullable', 'string'],
-            'cuit_aseguradora' => ['required', 'string'],
-            'fecha_emision' => ['required', 'date'],
-            'fecha_imputacion' => ['nullable', 'date'],
-            'punto_venta' => ['required', 'integer', 'min:0'],
-            'numero' => ['required', 'integer', 'min:0'],
-            'tipo_comprobante_id' => ['required', 'integer', 'in:90,99'],
-            'poliza' => ['nullable', 'string'],
-            'comprobante_ref' => ['nullable', 'string'],
-            'contenido_hash' => ['required', 'string', 'size:64'],
-            'nombre_archivo' => ['nullable', 'string'],
-            'imp_neto_gravado_21' => ['required', 'numeric'],
-            'imp_iva_21' => ['required', 'numeric'],
-            'imp_percepciones_iva' => ['nullable', 'numeric'],
-            'imp_otros_tributos' => ['nullable', 'numeric'],
-            'imp_total' => ['required', 'numeric'],
-            'crudos' => ['nullable', 'array'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.aseguradora' => ['nullable', 'string'],
+            'items.*.cuit_aseguradora' => ['required', 'string'],
+            'items.*.fecha_emision' => ['required', 'date'],
+            'items.*.fecha_imputacion' => ['nullable', 'date'],
+            'items.*.punto_venta' => ['required', 'integer', 'min:0'],
+            'items.*.numero' => ['required', 'integer', 'min:0'],
+            'items.*.tipo_comprobante_id' => ['required', 'integer', 'in:90,99'],
+            'items.*.poliza' => ['nullable', 'string'],
+            'items.*.comprobante_ref' => ['nullable', 'string'],
+            'items.*.contenido_hash' => ['required', 'string', 'size:64'],
+            'items.*.nombre_archivo' => ['nullable', 'string'],
+            'items.*.imp_neto_gravado_21' => ['required', 'numeric'],
+            'items.*.imp_iva_21' => ['required', 'numeric'],
+            'items.*.imp_percepciones_iva' => ['nullable', 'numeric'],
+            'items.*.imp_otros_tributos' => ['nullable', 'numeric'],
+            'items.*.imp_total' => ['required', 'numeric'],
+            'items.*.crudos' => ['nullable', 'array'],
         ]);
-        try {
-            $row = $this->service->cargar($data, $request->user());
-        } catch (DomainException $e) {
-            return $this->domainError($e);
-        }
-        return response()->json(['ok' => true, 'data' => $row]);
+        $res = $this->service->cargarLote($data['items'], $request->user());
+        return response()->json(['ok' => true, 'data' => $res]);
     }
 
     public function eliminar(Request $request, int $id): JsonResponse

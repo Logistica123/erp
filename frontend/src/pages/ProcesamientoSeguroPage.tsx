@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ShieldCheck, Upload, Loader2, Check, Download, Trash2, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, Upload, Loader2, Check, Download, Trash2, AlertTriangle, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { fmtMoney } from '@/lib/cn';
@@ -7,14 +7,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 
 type Analisis = {
-  aseguradora: string; cuit_aseguradora: string; fecha_emision: string | null;
-  poliza: string | null; comprobante_ref: string | null;
-  tipo_comprobante_id: number; tipo_label: string; es_baja: boolean;
-  imp_neto_gravado_21: number; imp_iva_21: number; imp_percepciones_iva: number;
-  imp_otros_tributos: number; imp_total: number; control_cuadra: boolean;
-  contenido_hash: string; nombre_archivo?: string; duplicado: boolean; duplicado_id: number | null;
+  analisis_ok: boolean; nombre_archivo: string; error?: string; mensaje?: string;
+  aseguradora?: string; cuit_aseguradora?: string; fecha_emision?: string | null;
+  poliza?: string | null; comprobante_ref?: string | null;
+  tipo_comprobante_id?: number; tipo_label?: string; es_baja?: boolean;
+  imp_neto_gravado_21?: number; imp_iva_21?: number; imp_percepciones_iva?: number;
+  imp_otros_tributos?: number; imp_total?: number; control_cuadra?: boolean;
+  contenido_hash?: string; duplicado?: boolean; duplicado_id?: number | null;
   crudos?: Record<string, number>;
 };
+type Fila = Analisis & { _pv: string; _numero: string; _fechaImput: string };
 type Comprobante = {
   id: number; aseguradora: string; cuit_aseguradora: string; fecha_emision: string;
   poliza: string | null; tipo_comprobante: number; punto_venta: number; numero: number;
@@ -31,10 +33,7 @@ function descargarTxt(nombre: string, contenido: string) {
 export default function ProcesamientoSeguroPage() {
   const qc = useQueryClient();
   const [err, setErr] = useState('');
-  const [form, setForm] = useState<Analisis | null>(null);
-  const [pv, setPv] = useState('');
-  const [numero, setNumero] = useState('');
-  const [fechaImput, setFechaImput] = useState('');
+  const [filas, setFilas] = useState<Fila[]>([]);
   const [sel, setSel] = useState<Set<number>>(new Set());
 
   const { data: lista } = useQuery<{ data: Comprobante[] }>({
@@ -44,26 +43,32 @@ export default function ProcesamientoSeguroPage() {
   const comprobantes = lista?.data ?? [];
 
   const analizar = useMutation({
-    mutationFn: (file: File) => {
-      const fd = new FormData(); fd.append('archivo', file);
-      return api.post<{ data: Analisis }>('/api/erp/compras/seguros/analizar', fd);
+    mutationFn: (files: FileList) => {
+      const fd = new FormData();
+      Array.from(files).forEach((f) => fd.append('archivos[]', f));
+      return api.post<{ data: Analisis[] }>('/api/erp/compras/seguros/analizar', fd);
     },
-    onSuccess: (r) => { setErr(''); setForm(r.data); setFechaImput(r.data.fecha_emision ?? ''); setPv(''); setNumero(''); },
-    onError: (e: ApiError) => { setErr(e.message); setForm(null); },
+    onSuccess: (r) => {
+      setErr('');
+      setFilas((prev) => [
+        ...prev,
+        ...r.data.map((a) => ({ ...a, _pv: '', _numero: '', _fechaImput: a.fecha_emision ?? '' })),
+      ]);
+    },
+    onError: (e: ApiError) => setErr(e.message),
   });
 
   const cargar = useMutation({
-    mutationFn: () => api.post('/api/erp/compras/seguros/cargar', {
-      aseguradora: form!.aseguradora, cuit_aseguradora: form!.cuit_aseguradora,
-      fecha_emision: form!.fecha_emision, fecha_imputacion: fechaImput || form!.fecha_emision,
-      punto_venta: Number(pv), numero: Number(numero), tipo_comprobante_id: form!.tipo_comprobante_id,
-      poliza: form!.poliza, comprobante_ref: form!.comprobante_ref,
-      contenido_hash: form!.contenido_hash, nombre_archivo: form!.nombre_archivo,
-      imp_neto_gravado_21: form!.imp_neto_gravado_21, imp_iva_21: form!.imp_iva_21,
-      imp_percepciones_iva: form!.imp_percepciones_iva, imp_otros_tributos: form!.imp_otros_tributos,
-      imp_total: form!.imp_total, crudos: form!.crudos ?? null,
-    }),
-    onSuccess: () => { setErr(''); setForm(null); qc.invalidateQueries({ queryKey: ['seguros-comprobantes'] }); },
+    mutationFn: (items: object[]) => api.post<{ data: { ok: boolean; nombre_archivo: string; error?: string }[] }>(
+      '/api/erp/compras/seguros/cargar', { items }),
+    onSuccess: (r) => {
+      const fallidos = r.data.filter((x) => !x.ok);
+      setErr(fallidos.length ? `No se cargaron ${fallidos.length}: ${fallidos.map((f) => `${f.nombre_archivo} (${f.error})`).join(', ')}` : '');
+      // dejar en la tabla solo los que fallaron
+      const fallidosNombres = new Set(fallidos.map((f) => f.nombre_archivo));
+      setFilas((prev) => prev.filter((f) => fallidosNombres.has(f.nombre_archivo) && f.analisis_ok));
+      qc.invalidateQueries({ queryKey: ['seguros-comprobantes'] });
+    },
     onError: (e: ApiError) => setErr(e.message),
   });
 
@@ -82,8 +87,21 @@ export default function ProcesamientoSeguroPage() {
     onError: (e: ApiError) => setErr(e.message),
   });
 
-  const upd = (k: keyof Analisis, v: number) => setForm((f) => (f ? { ...f, [k]: v } : f));
-  const puedeCargar = !!form && !form.duplicado && !!pv && !!numero && !!form.fecha_emision;
+  const setFila = (idx: number, patch: Partial<Fila>) =>
+    setFilas((prev) => prev.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
+  const quitarFila = (idx: number) => setFilas((prev) => prev.filter((_, i) => i !== idx));
+
+  const listas = filas.filter((f) => f.analisis_ok && !f.duplicado && f._pv !== '' && f._numero !== '');
+  const cargarTodos = () => cargar.mutate(listas.map((f) => ({
+    aseguradora: f.aseguradora, cuit_aseguradora: f.cuit_aseguradora,
+    fecha_emision: f.fecha_emision, fecha_imputacion: f._fechaImput || f.fecha_emision,
+    punto_venta: Number(f._pv), numero: Number(f._numero), tipo_comprobante_id: f.tipo_comprobante_id,
+    poliza: f.poliza, comprobante_ref: f.comprobante_ref, contenido_hash: f.contenido_hash,
+    nombre_archivo: f.nombre_archivo, imp_neto_gravado_21: f.imp_neto_gravado_21, imp_iva_21: f.imp_iva_21,
+    imp_percepciones_iva: f.imp_percepciones_iva, imp_otros_tributos: f.imp_otros_tributos,
+    imp_total: f.imp_total, crudos: f.crudos ?? null,
+  })));
+
   const toggle = (id: number) => { const n = new Set(sel); n.has(id) ? n.delete(id) : n.add(id); setSel(n); };
 
   return (
@@ -98,69 +116,73 @@ export default function ProcesamientoSeguroPage() {
       {err && <div className="mb-4 p-3 bg-danger-bg text-danger rounded-md text-[12px]">{err}</div>}
 
       <Card>
-        <CardHeader title="1 · Subir PDF de póliza" />
+        <CardHeader title="1 · Subir PDFs de pólizas" />
         <CardBody>
           <label className="inline-flex items-center gap-2 cursor-pointer">
-            <input type="file" accept="application/pdf" className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) analizar.mutate(f); e.currentTarget.value = ''; }} />
+            <input type="file" accept="application/pdf" multiple className="hidden"
+              onChange={(e) => { if (e.target.files?.length) analizar.mutate(e.target.files); e.currentTarget.value = ''; }} />
             <span className="px-3 py-1.5 bg-navy-700 text-white rounded text-[12px] inline-flex items-center gap-1">
-              {analizar.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Elegir PDF
+              {analizar.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Elegir PDFs (uno o varios)
             </span>
           </label>
           <span className="text-[11px] text-ink-2 ml-2">Aseguradora soportada: La Segunda.</span>
         </CardBody>
       </Card>
 
-      {form && (
+      {filas.length > 0 && (
         <Card className="mt-4">
-          <CardHeader title="2 · Revisar y cargar" />
-          <CardBody>
-            {form.duplicado && (
-              <div className="mb-3 p-2 bg-warning-bg/30 border border-warning/40 rounded text-[11.5px] flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-warning" /> Este PDF ya fue cargado (comprobante #{form.duplicado_id}). No se va a duplicar.
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3 text-[12px] mb-3">
-              <Campo label="Aseguradora"><span className="font-semibold">{form.aseguradora}</span></Campo>
-              <Campo label="CUIT">{form.cuit_aseguradora}</Campo>
-              <Campo label="Fecha emisión">{form.fecha_emision ?? '—'}</Campo>
-              <Campo label="Tipo comprobante"><span className={form.es_baja ? 'text-danger' : 'text-success'}>{form.tipo_label}</span></Campo>
-              <Campo label="Póliza">{form.poliza ?? '—'} · ref {form.comprobante_ref ?? '—'}</Campo>
-              <Campo label="Fecha imputación"><input type="date" value={fechaImput} onChange={(e) => setFechaImput(e.target.value)} className="px-2 py-1 border border-line-strong rounded w-full" /></Campo>
-              <Campo label="Punto de venta (lo definís vos)"><input type="number" value={pv} onChange={(e) => setPv(e.target.value)} placeholder="ej. 1" className="px-2 py-1 border border-line-strong rounded w-full" /></Campo>
-              <Campo label="Número (lo definís vos)"><input type="number" value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="ej. 63" className="px-2 py-1 border border-line-strong rounded w-full" /></Campo>
+          <CardHeader title={`2 · Revisar (${filas.length}) — completá PV y Número`} actions={
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setFilas([])}>Limpiar</Button>
+              <Button variant="primary" size="sm" disabled={!listas.length || cargar.isPending} onClick={cargarTodos}>
+                {cargar.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Cargar {listas.length}/{filas.length}
+              </Button>
             </div>
-            <table className="w-full text-[12px] mb-2">
-              <thead><tr className="text-left text-[11px] uppercase text-ink-2 border-b border-line"><th className="py-1">Concepto (Libro IVA)</th><th className="text-right">Importe</th></tr></thead>
+          } />
+          <CardBody className="overflow-x-auto">
+            <table className="w-full text-[11.5px]">
+              <thead><tr className="text-left text-[10px] uppercase text-ink-2 border-b border-line">
+                <th className="py-1">Archivo</th><th>Aseguradora</th><th>Fecha</th><th>Tipo</th>
+                <th>PV</th><th>Número</th><th className="text-right">Neto 21%</th><th className="text-right">IVA 21%</th>
+                <th className="text-right">Perc.IVA</th><th className="text-right">Otros trib.</th><th className="text-right">Total</th><th></th>
+              </tr></thead>
               <tbody>
-                {([['Neto gravado 21%', 'imp_neto_gravado_21'], ['IVA 21%', 'imp_iva_21'], ['Percepción IVA', 'imp_percepciones_iva'], ['Otros tributos', 'imp_otros_tributos'], ['TOTAL', 'imp_total']] as [string, keyof Analisis][]).map(([lbl, key]) => (
-                  <tr key={key} className={key === 'imp_total' ? 'border-t border-line font-semibold' : ''}>
-                    <td className="py-1">{lbl}</td>
-                    <td className="text-right"><input type="number" step="0.01" value={Number(form[key])} onChange={(e) => upd(key, Number(e.target.value))} className="px-2 py-1 border border-line rounded text-right tabular w-40" /></td>
+                {filas.map((f, idx) => f.analisis_ok ? (
+                  <tr key={idx} className={f.duplicado ? 'bg-warning-bg/20' : idx % 2 ? 'bg-surface-row' : ''}>
+                    <td className="py-1 max-w-[150px] truncate" title={f.nombre_archivo}>
+                      {f.duplicado && <AlertTriangle className="w-3 h-3 text-warning inline mr-1" />}{f.nombre_archivo}
+                    </td>
+                    <td className="max-w-[140px] truncate" title={f.aseguradora}>{f.aseguradora}</td>
+                    <td>{f.fecha_emision?.slice(0, 10)}</td>
+                    <td><span className={f.es_baja ? 'text-danger' : 'text-success'}>{String(f.tipo_comprobante_id).padStart(3, '0')}</span></td>
+                    <td><input type="number" value={f._pv} onChange={(e) => setFila(idx, { _pv: e.target.value })} className="w-14 px-1 py-0.5 border border-line rounded" /></td>
+                    <td><input type="number" value={f._numero} onChange={(e) => setFila(idx, { _numero: e.target.value })} className="w-20 px-1 py-0.5 border border-line rounded" /></td>
+                    {(['imp_neto_gravado_21', 'imp_iva_21', 'imp_percepciones_iva', 'imp_otros_tributos', 'imp_total'] as const).map((k) => (
+                      <td key={k} className="text-right"><input type="number" step="0.01" value={Number(f[k])} onChange={(e) => setFila(idx, { [k]: Number(e.target.value) } as Partial<Fila>)} className="w-24 px-1 py-0.5 border border-line rounded text-right tabular" /></td>
+                    ))}
+                    <td><Button variant="ghost" size="sm" onClick={() => quitarFila(idx)}><X className="w-3 h-3" /></Button></td>
+                  </tr>
+                ) : (
+                  <tr key={idx} className="bg-danger-bg/20">
+                    <td className="py-1 max-w-[150px] truncate" title={f.nombre_archivo}>{f.nombre_archivo}</td>
+                    <td colSpan={10} className="text-danger text-[11px]">No se pudo analizar: {f.mensaje}</td>
+                    <td><Button variant="ghost" size="sm" onClick={() => quitarFila(idx)}><X className="w-3 h-3" /></Button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <div className={`text-[11px] ${form.control_cuadra ? 'text-success' : 'text-warning'}`}>{form.control_cuadra ? '✓ El desglose cuadra con el total.' : '⚠ El desglose no cuadra con el total.'}</div>
-            <div className="flex justify-end gap-2 pt-3 border-t border-line mt-3">
-              <Button variant="secondary" onClick={() => setForm(null)}>Cancelar</Button>
-              <Button variant="primary" disabled={!puedeCargar || cargar.isPending} onClick={() => cargar.mutate()}>
-                {cargar.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Cargar al módulo
-              </Button>
-            </div>
+            <p className="text-[10.5px] text-ink-2 mt-2">Solo se cargan las filas con PV y Número completos y que no sean duplicados. Las amarillas ya están cargadas (duplicado).</p>
           </CardBody>
         </Card>
       )}
 
       <Card className="mt-4">
         <CardHeader title={`Comprobantes cargados (${comprobantes.length})`} actions={
-          <div className="flex gap-2">
-            <Button variant="primary" size="sm" disabled={!comprobantes.length || emitir.isPending}
-              onClick={() => emitir.mutate(sel.size ? Array.from(sel) : [])}>
-              {emitir.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-              Emitir TXT {sel.size ? `(${sel.size} sel.)` : '(todos)'}
-            </Button>
-          </div>
+          <Button variant="primary" size="sm" disabled={!comprobantes.length || emitir.isPending}
+            onClick={() => emitir.mutate(sel.size ? Array.from(sel) : [])}>
+            {emitir.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+            Emitir TXT {sel.size ? `(${sel.size} sel.)` : '(todos)'}
+          </Button>
         } />
         <CardBody>
           {comprobantes.length === 0 ? (
@@ -192,15 +214,6 @@ export default function ProcesamientoSeguroPage() {
           )}
         </CardBody>
       </Card>
-    </div>
-  );
-}
-
-function Campo({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase text-ink-muted font-semibold mb-0.5">{label}</div>
-      <div>{children}</div>
     </div>
   );
 }

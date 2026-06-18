@@ -83,6 +83,7 @@ export const sections: NavSection[] = [
     items: [
       { to: '/erp/facturas-compra', label: 'Facturas de compra', icon: ShoppingCart },
       { to: '/erp/compras/pendientes-de-facturar', label: 'Pendientes de facturar', icon: FileText },
+      { to: '/erp/compras/procesamiento-seguro', label: 'Procesamiento de Seguro', icon: ShieldCheck },
       { to: '/erp/cc-proveedores', label: 'CC Proveedores', icon: Users },
       { to: '/erp/libro-iva-compras/import', label: 'Libro IVA Compras (import enriquecido)', icon: ScrollText },
       { to: '/erp/libro-iva-compras/no-tomadas', label: 'Libro IVA Compras (no tomadas)', icon: ScrollText },

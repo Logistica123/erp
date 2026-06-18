@@ -3,6 +3,7 @@
 use App\Erp\Http\Controllers\ArcaController;
 use App\Erp\Http\Controllers\AliasContraparteController;
 use App\Erp\Http\Controllers\LibroIvaComprasExportController;
+use App\Erp\Http\Controllers\ProcesamientoSeguroController;
 use App\Erp\Http\Controllers\LibroIvaComprasImportController;
 use App\Erp\Http\Controllers\LibroIvaVentasImportController;
 use App\Erp\Http\Controllers\AsientosController;
@@ -582,6 +583,16 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.libro-iva.importacion-detalle');
         Route::post('/libro-iva/importaciones/{id}/conciliar-masivo', [\App\Erp\Http\Controllers\LibroIvaController::class, 'conciliarMasivo'])
             ->whereNumber('id')->name('erp.libro-iva.conciliar-masivo');
+
+        // Procesamiento de Seguro — PDF póliza → Libro IVA Compras + TXT.
+        Route::get('/compras/seguros/soportadas', [ProcesamientoSeguroController::class, 'soportadas'])
+            ->name('erp.seguros.soportadas');
+        Route::post('/compras/seguros/analizar', [ProcesamientoSeguroController::class, 'analizar'])
+            ->name('erp.seguros.analizar');
+        Route::post('/compras/seguros/cargar', [ProcesamientoSeguroController::class, 'cargar'])
+            ->name('erp.seguros.cargar');
+        Route::get('/compras/seguros/{id}/txt', [ProcesamientoSeguroController::class, 'txt'])
+            ->whereNumber('id')->name('erp.seguros.txt');
 
         // ADDENDUM v1.9 — Import enriquecido del Libro IVA Compras
         Route::post('/libro-iva-compras/import/preview', [LibroIvaComprasImportController::class, 'preview'])

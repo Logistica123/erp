@@ -39,6 +39,7 @@ import { ConciliacionLotesPage } from './pages/ConciliacionLotesPage';
 import TransferenciasInternasPendientesPage from './pages/TransferenciasInternasPendientesPage';
 import ComprasPendientesFacturarPage from './pages/ComprasPendientesFacturarPage';
 import ConciliacionesDiferenciaPage from './pages/ConciliacionesDiferenciaPage';
+import ProcesamientoSeguroPage from './pages/ProcesamientoSeguroPage';
 import { ReclasificarPendientesPage } from './pages/ReclasificarPendientesPage';
 import { FacturasCompraPage } from './pages/FacturasCompraPage';
 import { CCPage } from './pages/CCPage';
@@ -173,6 +174,7 @@ export default function App() {
               <Route path="/erp/tesoreria/conciliacion/lotes" element={<ConciliacionLotesPage />} handle={{ crumb: 'Lotes de conciliación' }} />
               <Route path="/erp/tesoreria/transferencias-internas-pendientes" element={<TransferenciasInternasPendientesPage />} handle={{ crumb: 'Transf. internas pendientes' }} />
               <Route path="/erp/compras/pendientes-de-facturar" element={<ComprasPendientesFacturarPage />} handle={{ crumb: 'Pendientes de facturar' }} />
+              <Route path="/erp/compras/procesamiento-seguro" element={<ProcesamientoSeguroPage />} handle={{ crumb: 'Procesamiento de Seguro' }} />
               <Route path="/erp/contabilidad/conciliaciones-con-diferencia" element={<ConciliacionesDiferenciaPage />} handle={{ crumb: 'Conciliaciones c/ diferencia' }} />
               <Route path="/erp/contabilidad/reclasificar-pendientes" element={<ReclasificarPendientesPage />} handle={{ crumb: 'Reclasificar pendientes' }} />
 

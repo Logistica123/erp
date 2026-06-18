@@ -38,14 +38,32 @@ class ProcesamientoSeguroService
         $parser = $this->factory->resolver($texto);
         $data = $parser->parse($texto);
 
-        $hash = hash_file('sha256', $pathPdf);
-        $data['contenido_hash'] = $hash;
-        $ya = DB::table('erp_seguros_comprobantes')
-            ->where('empresa_id', $empresaId)->where('contenido_hash', $hash)->first();
+        $data['contenido_hash'] = hash_file('sha256', $pathPdf);
+        // Duplicado = MISMA identidad de comprobante (CUIT + tipo + PV + número),
+        // no por hash del archivo (el mismo comprobante puede venir en PDFs con
+        // bytes distintos). Así el preliminar coincide con el control final.
+        $ya = $this->buscarExistente(
+            $empresaId, (string) ($data['cuit_aseguradora'] ?? ''), (int) ($data['tipo_comprobante_id'] ?? 0),
+            (int) ($data['punto_venta'] ?? 0), (int) ($data['numero'] ?? 0)
+        );
         $data['duplicado'] = (bool) $ya;
         $data['duplicado_id'] = $ya->id ?? null;
 
         return $data;
+    }
+
+    /** Busca un comprobante ya cargado con la misma identidad. */
+    private function buscarExistente(int $empresaId, string $cuit, int $tipo, int $pv, int $numero): ?object
+    {
+        $cuit = preg_replace('/\D/', '', $cuit);
+        if ($cuit === '' || $numero === 0) return null;
+        return DB::table('erp_seguros_comprobantes')
+            ->where('empresa_id', $empresaId)
+            ->where('cuit_aseguradora', $cuit)
+            ->where('tipo_comprobante', $tipo)
+            ->where('punto_venta', $pv)
+            ->where('numero', $numero)
+            ->first();
     }
 
     /**
@@ -61,10 +79,11 @@ class ProcesamientoSeguroService
             }
         }
         $hash = (string) $data['contenido_hash'];
-        $dup = DB::table('erp_seguros_comprobantes')
-            ->where('empresa_id', $empresaId)->where('contenido_hash', $hash)->first();
+        $cuitDup = preg_replace('/\D/', '', (string) $data['cuit_aseguradora']);
+        $dup = $this->buscarExistente($empresaId, $cuitDup, (int) $data['tipo_comprobante_id'],
+            (int) ($data['punto_venta'] ?? 0), (int) ($data['numero'] ?? 0));
         if ($dup) {
-            throw new DomainException("COMPROBANTE_DUPLICADO: este PDF ya fue cargado (comprobante de seguro #{$dup->id}).");
+            throw new DomainException("COMPROBANTE_DUPLICADO: ya existe un comprobante con ese CUIT/tipo/PV/número (seguro #{$dup->id}).");
         }
 
         $id = DB::table('erp_seguros_comprobantes')->insertGetId([

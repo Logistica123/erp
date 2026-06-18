@@ -66,6 +66,8 @@ class ProcesamientoSeguroController
             'items.*.cuit_aseguradora' => ['required', 'string'],
             'items.*.fecha_emision' => ['required', 'date'],
             'items.*.fecha_imputacion' => ['nullable', 'date'],
+            'items.*.periodo_anio' => ['required', 'integer', 'min:2000', 'max:2100'],
+            'items.*.periodo_mes' => ['required', 'integer', 'min:1', 'max:12'],
             'items.*.punto_venta' => ['required', 'integer', 'min:0'],
             'items.*.numero' => ['required', 'integer', 'min:0'],
             'items.*.tipo_comprobante_id' => ['required', 'integer', 'in:90,99'],
@@ -99,9 +101,12 @@ class ProcesamientoSeguroController
     public function txt(Request $request): JsonResponse
     {
         $this->requierePermiso($request, 'compras.libro_iva.importar');
-        $data = $request->validate(['ids' => ['nullable', 'array'], 'ids.*' => ['integer']]);
+        $data = $request->validate([
+            'ids' => ['nullable', 'array'], 'ids.*' => ['integer'],
+            'periodo_anio' => ['nullable', 'integer'], 'periodo_mes' => ['nullable', 'integer'],
+        ]);
         try {
-            $txt = $this->service->emitirTxt($data['ids'] ?? []);
+            $txt = $this->service->emitirTxt($data['ids'] ?? [], 1, $data['periodo_anio'] ?? null, $data['periodo_mes'] ?? null);
         } catch (DomainException $e) {
             return $this->domainError($e);
         }

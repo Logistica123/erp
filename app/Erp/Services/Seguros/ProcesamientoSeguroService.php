@@ -73,6 +73,8 @@ class ProcesamientoSeguroService
             'cuit_aseguradora' => preg_replace('/\D/', '', (string) $data['cuit_aseguradora']),
             'fecha_emision' => $data['fecha_emision'],
             'fecha_imputacion' => $data['fecha_imputacion'] ?? null,
+            'periodo_anio' => isset($data['periodo_anio']) ? (int) $data['periodo_anio'] : null,
+            'periodo_mes' => isset($data['periodo_mes']) ? (int) $data['periodo_mes'] : null,
             'poliza' => $data['poliza'] ?? null,
             'comprobante_ref' => $data['comprobante_ref'] ?? null,
             'tipo_comprobante' => (int) $data['tipo_comprobante_id'],
@@ -141,13 +143,14 @@ class ProcesamientoSeguroService
      * Emite el TXT del Libro IVA Digital (CBTE + ALICUOTAS) para los comprobantes
      * de seguro indicados (o todos), reusando el formato del generador F.8001 con
      * objetos propios — sin tocar erp_facturas_compra.
-     * @param  int[]  $ids  vacío = todos
+     * @param  int[]  $ids  vacío = todos (o todos los del período si se pasa)
      * @return array{cbte:string,alicuotas:string,cant:int}
      */
-    public function emitirTxt(array $ids = [], int $empresaId = 1): array
+    public function emitirTxt(array $ids = [], int $empresaId = 1, ?int $periodoAnio = null, ?int $periodoMes = null): array
     {
         $q = DB::table('erp_seguros_comprobantes')->where('empresa_id', $empresaId);
         if (! empty($ids)) $q->whereIn('id', $ids);
+        if ($periodoAnio && $periodoMes) $q->where('periodo_anio', $periodoAnio)->where('periodo_mes', $periodoMes);
         $rows = $q->orderBy('id')->get();
         if ($rows->isEmpty()) throw new DomainException('SIN_COMPROBANTES');
 

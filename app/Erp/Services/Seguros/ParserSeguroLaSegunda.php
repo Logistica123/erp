@@ -46,6 +46,15 @@ class ParserSeguroLaSegunda implements ParserSeguroInterface
         // El signo del Premio final define alta (99) vs baja/NC (90).
         $esBaja = $premioFinal['raw'] < 0;
 
+        // Punto de venta + número del código del comprobante del PDF
+        // (formato SUC-PV-POLIZA-NUMERO, ej. 001-001-0067743063-000054 → PV 1, Nro 54).
+        $ref = $this->comprobanteRef($texto);
+        $pv = 0; $numero = 0;
+        if ($ref && preg_match('/(\d+)-(\d+)-(\d+)-(\d+)/', $ref, $mm)) {
+            $pv = (int) $mm[2];
+            $numero = (int) $mm[4];
+        }
+
         $netoGravado21 = round(abs($prima['val']) + abs($recargo['val']), 2);
         $totalIva21    = round(abs($iva21['val']) + abs($ivaRFinanc['val']), 2);
         $percepIva     = round(abs($iva3['val']), 2);
@@ -57,7 +66,9 @@ class ParserSeguroLaSegunda implements ParserSeguroInterface
             'cuit_aseguradora' => self::CUIT_ASEGURADORA,
             'fecha_emision' => $this->fecha($texto),
             'poliza' => $this->poliza($texto),
-            'comprobante_ref' => $this->comprobanteRef($texto),
+            'comprobante_ref' => $ref,
+            'punto_venta' => $pv,
+            'numero' => $numero,
             'tipo_comprobante_id' => $esBaja ? 90 : 99,
             'tipo_label' => $esBaja ? 'Nota de Crédito (090)' : 'Factura/Otros (099)',
             'es_baja' => $esBaja,

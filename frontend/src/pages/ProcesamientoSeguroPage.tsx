@@ -11,17 +11,21 @@ type Analisis = {
   aseguradora?: string; cuit_aseguradora?: string; fecha_emision?: string | null;
   poliza?: string | null; comprobante_ref?: string | null;
   tipo_comprobante_id?: number; tipo_label?: string; es_baja?: boolean;
+  punto_venta?: number; numero?: number;
   imp_neto_gravado_21?: number; imp_iva_21?: number; imp_percepciones_iva?: number;
   imp_otros_tributos?: number; imp_total?: number; control_cuadra?: boolean;
   contenido_hash?: string; duplicado?: boolean; duplicado_id?: number | null;
   crudos?: Record<string, number>;
 };
-type Fila = Analisis & { _pv: string; _numero: string; _fechaImput: string };
+type Fila = Analisis & { _pv: string; _numero: string };
 type Comprobante = {
   id: number; aseguradora: string; cuit_aseguradora: string; fecha_emision: string;
   poliza: string | null; tipo_comprobante: number; punto_venta: number; numero: number;
   imp_total: string; nombre_archivo: string | null;
+  periodo_anio: number | null; periodo_mes: number | null;
 };
+
+const MESES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 function descargarTxt(nombre: string, contenido: string) {
   const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' });
@@ -35,12 +39,21 @@ export default function ProcesamientoSeguroPage() {
   const [err, setErr] = useState('');
   const [filas, setFilas] = useState<Fila[]>([]);
   const [sel, setSel] = useState<Set<number>>(new Set());
+  const [periodo, setPeriodo] = useState('');        // 'YYYY-MM' para la carga
+  const [filtroPeriodo, setFiltroPeriodo] = useState(''); // filtro del listado / emisión TXT
 
   const { data: lista } = useQuery<{ data: Comprobante[] }>({
     queryKey: ['seguros-comprobantes'],
     queryFn: () => api.get('/api/erp/compras/seguros'),
   });
   const comprobantes = lista?.data ?? [];
+  const periodosDisponibles = Array.from(new Set(
+    comprobantes.filter((c) => c.periodo_anio && c.periodo_mes)
+      .map((c) => `${c.periodo_anio}-${String(c.periodo_mes).padStart(2, '0')}`),
+  )).sort().reverse();
+  const comprobantesFiltrados = filtroPeriodo
+    ? comprobantes.filter((c) => `${c.periodo_anio}-${String(c.periodo_mes).padStart(2, '0')}` === filtroPeriodo)
+    : comprobantes;
 
   const analizar = useMutation({
     mutationFn: (files: FileList) => {
@@ -52,7 +65,7 @@ export default function ProcesamientoSeguroPage() {
       setErr('');
       setFilas((prev) => [
         ...prev,
-        ...r.data.map((a) => ({ ...a, _pv: '', _numero: '', _fechaImput: a.fecha_emision ?? '' })),
+        ...r.data.map((a) => ({ ...a, _pv: a.punto_venta ? String(a.punto_venta) : '', _numero: a.numero ? String(a.numero) : '' })),
       ]);
     },
     onError: (e: ApiError) => setErr(e.message),
@@ -79,10 +92,13 @@ export default function ProcesamientoSeguroPage() {
   });
 
   const emitir = useMutation({
-    mutationFn: (ids: number[]) => api.post<{ data: { cbte: string; alicuotas: string; cant: number } }>('/api/erp/compras/seguros/txt', { ids }),
+    mutationFn: (body: { ids: number[]; periodo_anio?: number; periodo_mes?: number }) =>
+      api.post<{ data: { cbte: string; alicuotas: string; cant: number } }>('/api/erp/compras/seguros/txt', body),
     onSuccess: (r) => {
-      descargarTxt('LIBRO_IVA_SEGUROS_CBTE.txt', r.data.cbte);
-      descargarTxt('LIBRO_IVA_SEGUROS_ALICUOTAS.txt', r.data.alicuotas);
+      if (!r.data.cant) { setErr('No hay comprobantes para emitir con ese filtro.'); return; }
+      const suf = filtroPeriodo ? `_${filtroPeriodo}` : '';
+      descargarTxt(`LIBRO_IVA_SEGUROS_CBTE${suf}.txt`, r.data.cbte);
+      descargarTxt(`LIBRO_IVA_SEGUROS_ALICUOTAS${suf}.txt`, r.data.alicuotas);
     },
     onError: (e: ApiError) => setErr(e.message),
   });
@@ -91,10 +107,12 @@ export default function ProcesamientoSeguroPage() {
     setFilas((prev) => prev.map((f, i) => (i === idx ? { ...f, ...patch } : f)));
   const quitarFila = (idx: number) => setFilas((prev) => prev.filter((_, i) => i !== idx));
 
+  const pAnio = periodo ? Number(periodo.slice(0, 4)) : 0;
+  const pMes = periodo ? Number(periodo.slice(5, 7)) : 0;
   const listas = filas.filter((f) => f.analisis_ok && !f.duplicado && f._pv !== '' && f._numero !== '');
   const cargarTodos = () => cargar.mutate(listas.map((f) => ({
     aseguradora: f.aseguradora, cuit_aseguradora: f.cuit_aseguradora,
-    fecha_emision: f.fecha_emision, fecha_imputacion: f._fechaImput || f.fecha_emision,
+    fecha_emision: f.fecha_emision, periodo_anio: pAnio, periodo_mes: pMes,
     punto_venta: Number(f._pv), numero: Number(f._numero), tipo_comprobante_id: f.tipo_comprobante_id,
     poliza: f.poliza, comprobante_ref: f.comprobante_ref, contenido_hash: f.contenido_hash,
     nombre_archivo: f.nombre_archivo, imp_neto_gravado_21: f.imp_neto_gravado_21, imp_iva_21: f.imp_iva_21,
@@ -131,10 +149,14 @@ export default function ProcesamientoSeguroPage() {
 
       {filas.length > 0 && (
         <Card className="mt-4">
-          <CardHeader title={`2 · Revisar (${filas.length}) — completá PV y Número`} actions={
-            <div className="flex gap-2">
+          <CardHeader title={`2 · Revisar (${filas.length})`} actions={
+            <div className="flex gap-2 items-center text-[12px]">
+              <label className="flex items-center gap-1">Período imputación:
+                <input type="month" value={periodo} onChange={(e) => setPeriodo(e.target.value)}
+                  className="px-2 py-1 border border-line-strong rounded bg-white" />
+              </label>
               <Button variant="secondary" size="sm" onClick={() => setFilas([])}>Limpiar</Button>
-              <Button variant="primary" size="sm" disabled={!listas.length || cargar.isPending} onClick={cargarTodos}>
+              <Button variant="primary" size="sm" disabled={!listas.length || !periodo || cargar.isPending} onClick={cargarTodos}>
                 {cargar.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Cargar {listas.length}/{filas.length}
               </Button>
             </div>
@@ -178,26 +200,40 @@ export default function ProcesamientoSeguroPage() {
 
       <Card className="mt-4">
         <CardHeader title={`Comprobantes cargados (${comprobantes.length})`} actions={
-          <Button variant="primary" size="sm" disabled={!comprobantes.length || emitir.isPending}
-            onClick={() => emitir.mutate(sel.size ? Array.from(sel) : [])}>
-            {emitir.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-            Emitir TXT {sel.size ? `(${sel.size} sel.)` : '(todos)'}
-          </Button>
+          <div className="flex gap-2 items-center text-[12px]">
+            <label className="flex items-center gap-1">Período:
+              <select value={filtroPeriodo} onChange={(e) => setFiltroPeriodo(e.target.value)}
+                className="px-2 py-1 border border-line-strong rounded bg-white">
+                <option value="">Todos</option>
+                {periodosDisponibles.map((p) => <option key={p} value={p}>{MESES[Number(p.slice(5, 7))]} {p.slice(0, 4)}</option>)}
+              </select>
+            </label>
+            <Button variant="primary" size="sm" disabled={!comprobantes.length || emitir.isPending}
+              onClick={() => emitir.mutate({
+                ids: sel.size ? Array.from(sel) : [],
+                periodo_anio: filtroPeriodo ? Number(filtroPeriodo.slice(0, 4)) : undefined,
+                periodo_mes: filtroPeriodo ? Number(filtroPeriodo.slice(5, 7)) : undefined,
+              })}>
+              {emitir.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              Emitir TXT {sel.size ? `(${sel.size} sel.)` : filtroPeriodo ? '(período)' : '(todos)'}
+            </Button>
+          </div>
         } />
         <CardBody>
-          {comprobantes.length === 0 ? (
-            <div className="text-[12px] text-ink-2 py-4 text-center">No hay comprobantes cargados todavía.</div>
+          {comprobantesFiltrados.length === 0 ? (
+            <div className="text-[12px] text-ink-2 py-4 text-center">No hay comprobantes cargados{filtroPeriodo ? ' en ese período' : ''} todavía.</div>
           ) : (
             <table className="w-full text-[12px]">
               <thead><tr className="text-left text-[11px] uppercase text-ink-2 border-b border-line">
-                <th className="py-1 w-6"></th><th>Fecha</th><th>Aseguradora</th><th>CUIT</th><th>Tipo</th><th>PV-Nro</th><th className="text-right">Total</th><th></th>
+                <th className="py-1 w-6"></th><th>Período</th><th>Fecha cbte</th><th>Aseguradora</th><th>CUIT</th><th>Tipo</th><th>PV-Nro</th><th className="text-right">Total</th><th></th>
               </tr></thead>
               <tbody>
-                {comprobantes.map((c, i) => (
+                {comprobantesFiltrados.map((c, i) => (
                   <tr key={c.id} className={i % 2 ? 'bg-surface-row' : ''}>
                     <td className="py-1"><input type="checkbox" checked={sel.has(c.id)} onChange={() => toggle(c.id)} /></td>
+                    <td>{c.periodo_mes ? `${MESES[c.periodo_mes]} ${c.periodo_anio}` : '—'}</td>
                     <td>{c.fecha_emision?.slice(0, 10)}</td>
-                    <td className="max-w-[220px] truncate" title={c.aseguradora}>{c.aseguradora}</td>
+                    <td className="max-w-[200px] truncate" title={c.aseguradora}>{c.aseguradora}</td>
                     <td className="tabular">{c.cuit_aseguradora}</td>
                     <td><span className={c.tipo_comprobante === 90 ? 'text-danger' : 'text-success'}>{String(c.tipo_comprobante).padStart(3, '0')}</span></td>
                     <td className="tabular">{c.punto_venta}-{c.numero}</td>

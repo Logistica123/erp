@@ -48,12 +48,12 @@ class ParserSeguroLaSegunda implements ParserSeguroInterface
 
         // Punto de venta + número del código del comprobante del PDF.
         // Código: 001-001-0067743063-000054
-        //   - PV = los 5 dígitos de la izquierda del bloque largo (0067743063 → 00677 → 677)
+        //   - PV = los ÚLTIMOS 5 dígitos del bloque largo (0067743063 → 43063)
         //   - Número = último grupo (000054 → 54), es el número de endoso.
         $ref = $this->comprobanteRef($texto);
         $pv = 0; $numero = 0;
         if ($ref && preg_match('/(\d+)-(\d+)-(\d+)-(\d+)/', $ref, $mm)) {
-            $pv = (int) substr($mm[3], 0, 5);
+            $pv = (int) substr($mm[3], -5);
             $numero = (int) $mm[4];
         }
 

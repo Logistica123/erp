@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { fmtMoney } from '@/lib/cn';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
+import { useApi } from '@/hooks/useApi';
 import { useToast } from '@/hooks/useToast';
 
 type Asiento = {
@@ -49,12 +50,18 @@ export function LibroDiarioPage() {
   const [borrarDef, setBorrarDef] = useState<Asiento | null>(null);
 
   // Permisos del usuario (para el botón de borrado definitivo).
-  const { data: misPermisos } = useQuery<{ data: { codigo: string; sensible: boolean }[] }>({
-    queryKey: ['mi-permisos'],
-    queryFn: () => api.get('/api/erp/mi-permisos'),
-    staleTime: 5 * 60 * 1000,
-  });
-  const puedeEliminarDef = (misPermisos?.data ?? []).some(
+  // IMPORTANTE: comparte queryKey ['mi-permisos'] con FacturacionPage /
+  // FacturasCompraPage / ConfiguracionIvaPage, que usan useApi y cachean el
+  // ARRAY (resp.data). Hay que usar useApi acá también para que el shape en
+  // cache sea el mismo; con useQuery crudo + acceso .data el botón aparecía o
+  // desaparecía según el orden de navegación (la cache compartida quedaba como
+  // array y .data daba undefined).
+  const { data: misPermisos } = useApi<Array<{ codigo: string; sensible: boolean }>>(
+    ['mi-permisos'],
+    '/api/erp/mi-permisos',
+    { staleTime: 5 * 60 * 1000 },
+  );
+  const puedeEliminarDef = !!misPermisos?.some(
     (p) => p.codigo === 'contabilidad.asientos.eliminar_definitivo',
   );
 

@@ -17,6 +17,7 @@ class ParserSeguroFactory
         return [
             new ParserSeguroLaSegunda(),
             new ParserSeguroSanCristobal(),
+            new ParserSeguroMapfre(),
         ];
     }
 

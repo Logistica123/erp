@@ -143,7 +143,7 @@ export default function ProcesamientoSeguroPage() {
               {analizar.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Elegir PDFs (uno o varios)
             </span>
           </label>
-          <span className="text-[11px] text-ink-2 ml-2">Aseguradoras soportadas: La Segunda, San Cristóbal.</span>
+          <span className="text-[11px] text-ink-2 ml-2">Aseguradoras soportadas: La Segunda, San Cristóbal, Mapfre.</span>
         </CardBody>
       </Card>
 

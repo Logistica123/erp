@@ -56,9 +56,9 @@ export default function ProcesamientoSeguroPage() {
     : comprobantes;
 
   const analizar = useMutation({
-    mutationFn: (files: FileList) => {
+    mutationFn: (files: File[]) => {
       const fd = new FormData();
-      Array.from(files).forEach((f) => fd.append('archivos[]', f));
+      files.forEach((f) => fd.append('archivos[]', f));
       return api.post<{ data: Analisis[] }>('/api/erp/compras/seguros/analizar', fd);
     },
     onSuccess: (r) => {
@@ -138,7 +138,7 @@ export default function ProcesamientoSeguroPage() {
         <CardBody>
           <label className="inline-flex items-center gap-2 cursor-pointer">
             <input type="file" accept="application/pdf" multiple className="hidden"
-              onChange={(e) => { if (e.target.files?.length) analizar.mutate(e.target.files); e.currentTarget.value = ''; }} />
+              onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) analizar.mutate(fs); e.currentTarget.value = ''; }} />
             <span className="px-3 py-1.5 bg-navy-700 text-white rounded text-[12px] inline-flex items-center gap-1">
               {analizar.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Elegir PDFs (uno o varios)
             </span>

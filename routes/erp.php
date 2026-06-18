@@ -584,15 +584,19 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/libro-iva/importaciones/{id}/conciliar-masivo', [\App\Erp\Http\Controllers\LibroIvaController::class, 'conciliarMasivo'])
             ->whereNumber('id')->name('erp.libro-iva.conciliar-masivo');
 
-        // Procesamiento de Seguro — PDF póliza → Libro IVA Compras + TXT.
+        // Procesamiento de Seguro — módulo autónomo: PDF póliza → tabla propia + TXT Libro IVA Digital.
         Route::get('/compras/seguros/soportadas', [ProcesamientoSeguroController::class, 'soportadas'])
             ->name('erp.seguros.soportadas');
+        Route::get('/compras/seguros', [ProcesamientoSeguroController::class, 'index'])
+            ->name('erp.seguros.index');
         Route::post('/compras/seguros/analizar', [ProcesamientoSeguroController::class, 'analizar'])
             ->name('erp.seguros.analizar');
         Route::post('/compras/seguros/cargar', [ProcesamientoSeguroController::class, 'cargar'])
             ->name('erp.seguros.cargar');
-        Route::get('/compras/seguros/{id}/txt', [ProcesamientoSeguroController::class, 'txt'])
-            ->whereNumber('id')->name('erp.seguros.txt');
+        Route::post('/compras/seguros/txt', [ProcesamientoSeguroController::class, 'txt'])
+            ->name('erp.seguros.txt');
+        Route::delete('/compras/seguros/{id}', [ProcesamientoSeguroController::class, 'eliminar'])
+            ->whereNumber('id')->name('erp.seguros.eliminar');
 
         // ADDENDUM v1.9 — Import enriquecido del Libro IVA Compras
         Route::post('/libro-iva-compras/import/preview', [LibroIvaComprasImportController::class, 'preview'])

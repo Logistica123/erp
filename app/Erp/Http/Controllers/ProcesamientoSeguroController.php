@@ -2,7 +2,6 @@
 
 namespace App\Erp\Http\Controllers;
 
-use App\Erp\Models\VentasCompras\FacturaCompra;
 use App\Erp\Services\Seguros\ParserSeguroFactory;
 use App\Erp\Services\Seguros\ProcesamientoSeguroService;
 use DomainException;
@@ -10,8 +9,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Procesamiento de Seguro (Compras): subir PDF → analizar → revisar → cargar al
- * Libro IVA Compras y emitir el TXT del Libro IVA Digital.
+ * Procesamiento de Seguro — módulo AUTÓNOMO. Sube PDFs de pólizas, los guarda
+ * en su propia tabla (sin impactar el resto del ERP), detecta duplicados y
+ * emite el TXT del Libro IVA Digital para importar a AFIP.
  */
 class ProcesamientoSeguroController
 {
@@ -20,26 +20,33 @@ class ProcesamientoSeguroController
         private readonly ParserSeguroFactory $factory,
     ) {}
 
-    /** Aseguradoras soportadas (para la UI). */
     public function soportadas(Request $request): JsonResponse
     {
         return response()->json(['ok' => true, 'data' => $this->factory->soportadas()]);
     }
 
-    /** Sube el PDF y devuelve el detalle extraído (preview, sin guardar). */
+    /** Lista los comprobantes de seguro ya cargados en el módulo. */
+    public function index(Request $request): JsonResponse
+    {
+        $this->requierePermiso($request, 'compras.libro_iva.importar');
+        return response()->json(['ok' => true, 'data' => $this->service->listar()]);
+    }
+
+    /** Sube el PDF y devuelve el detalle extraído + flag de duplicado (sin guardar). */
     public function analizar(Request $request): JsonResponse
     {
         $this->requierePermiso($request, 'compras.libro_iva.importar');
         $request->validate(['archivo' => ['required', 'file', 'mimes:pdf', 'max:20480']]);
         try {
             $data = $this->service->analizar($request->file('archivo')->getRealPath());
+            $data['nombre_archivo'] = $request->file('archivo')->getClientOriginalName();
         } catch (DomainException $e) {
             return $this->domainError($e);
         }
         return response()->json(['ok' => true, 'data' => $data]);
     }
 
-    /** Carga el comprobante revisado en el Libro IVA Compras + emite el TXT. */
+    /** Guarda el comprobante revisado en el módulo (autónomo). */
     public function cargar(Request $request): JsonResponse
     {
         $this->requierePermiso($request, 'compras.libro_iva.importar');
@@ -53,32 +60,41 @@ class ProcesamientoSeguroController
             'tipo_comprobante_id' => ['required', 'integer', 'in:90,99'],
             'poliza' => ['nullable', 'string'],
             'comprobante_ref' => ['nullable', 'string'],
+            'contenido_hash' => ['required', 'string', 'size:64'],
+            'nombre_archivo' => ['nullable', 'string'],
             'imp_neto_gravado_21' => ['required', 'numeric'],
             'imp_iva_21' => ['required', 'numeric'],
             'imp_percepciones_iva' => ['nullable', 'numeric'],
             'imp_otros_tributos' => ['nullable', 'numeric'],
             'imp_total' => ['required', 'numeric'],
+            'crudos' => ['nullable', 'array'],
         ]);
         try {
-            $factura = $this->service->cargar($data, $request->user());
-            $txt = $this->service->emitirTxt([$factura->id]);
+            $row = $this->service->cargar($data, $request->user());
         } catch (DomainException $e) {
             return $this->domainError($e);
         }
-        return response()->json(['ok' => true, 'data' => [
-            'factura_id' => $factura->id,
-            'txt_cbte' => $txt['cbte'],
-            'txt_alicuotas' => $txt['alicuotas'],
-        ]]);
+        return response()->json(['ok' => true, 'data' => $row]);
     }
 
-    /** Re-descarga el TXT de un comprobante ya cargado. */
-    public function txt(Request $request, int $id): JsonResponse
+    public function eliminar(Request $request, int $id): JsonResponse
     {
         $this->requierePermiso($request, 'compras.libro_iva.importar');
-        FacturaCompra::findOrFail($id);
         try {
-            $txt = $this->service->emitirTxt([$id]);
+            $this->service->eliminar($id, $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true]);
+    }
+
+    /** Emite el TXT (CBTE + ALICUOTAS) de los comprobantes indicados (o todos). */
+    public function txt(Request $request): JsonResponse
+    {
+        $this->requierePermiso($request, 'compras.libro_iva.importar');
+        $data = $request->validate(['ids' => ['nullable', 'array'], 'ids.*' => ['integer']]);
+        try {
+            $txt = $this->service->emitirTxt($data['ids'] ?? []);
         } catch (DomainException $e) {
             return $this->domainError($e);
         }

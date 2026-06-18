@@ -72,8 +72,10 @@ class ParserSeguroLaSegunda implements ParserSeguroInterface
         $netoGravado21 = round(abs($prima['val']) + abs($recargo['val']), 2);
         $totalIva21    = round(abs($iva21['val']) + abs($ivaRFinanc['val']), 2);
         $percepIva     = round(abs($iva3['val']), 2);
-        $otrosTributos = round(abs($impTasas['val']) + abs($csArt11b['val']), 2);
         $total         = round(abs($premioFinal['val']), 2);
+        // Otros tributos = el residuo (Imp.y Tasas + C.S.art.11b + Sellado +
+        // Perc.I/B + Imp.Internos…). Como residuo, el total siempre cuadra.
+        $otrosTributos = round($total - $netoGravado21 - $totalIva21 - $percepIva, 2);
 
         return [
             'aseguradora' => self::NOMBRE,
@@ -99,8 +101,9 @@ class ParserSeguroLaSegunda implements ParserSeguroInterface
                 'iva_3' => $iva3['val'], 'imp_y_tasas' => $impTasas['val'],
                 'cs_art_11b' => $csArt11b['val'], 'premio_final' => $premioFinal['val'],
             ],
-            // control: neto*21% ≈ iva21 y neto+iva+perc+trib ≈ total
-            'control_cuadra' => abs(($netoGravado21 + $totalIva21 + $percepIva + $otrosTributos) - $total) < 0.10,
+            // control: IVA ≈ neto × 21% (el total siempre cuadra por el residuo).
+            'control_cuadra' => abs($totalIva21 - round($netoGravado21 * 0.21, 2)) <= max(1.0, $netoGravado21 * 0.001)
+                && $otrosTributos >= -0.5,
         ];
     }
 

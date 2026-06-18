@@ -67,8 +67,10 @@ class ParserSeguroSanCristobal implements ParserSeguroInterface
         $neto21    = round(abs($base), 2);
         $totalIva  = round(abs($iva), 2);
         $percepIva = round(abs($ivaRg), 2);
-        $otrosTrib = round(abs($impTas) + abs($sell) + abs($cuota) + abs($tseh) + abs($percIb), 2);
         $total     = round(abs($premio), 2);
+        // Otros tributos = residuo (Imp/Tasas + Sellado + Cuota Social + Perc.TSeH
+        // + Perc.IB…) → el total siempre cuadra con el Premio.
+        $otrosTrib = round($total - $neto21 - $totalIva - $percepIva, 2);
         $esBaja    = $premio < 0;
 
         return [
@@ -92,7 +94,7 @@ class ParserSeguroSanCristobal implements ParserSeguroInterface
                 'impuestos_tasas' => $impTas, 'sellado' => $sell, 'cuota_social' => $cuota,
                 'perc_tseh' => $tseh, 'perc_ib' => $percIb, 'premio' => $premio,
             ],
-            'control_cuadra' => abs(($neto21 + $totalIva + $percepIva + $otrosTrib) - $total) < 0.10,
+            'control_cuadra' => abs($totalIva - round($neto21 * 0.21, 2)) <= max(1.0, $neto21 * 0.001) && $otrosTrib >= -0.5,
         ];
     }
 

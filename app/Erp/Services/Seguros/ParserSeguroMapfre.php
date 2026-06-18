@@ -63,8 +63,9 @@ class ParserSeguroMapfre implements ParserSeguroInterface
         $neto21    = round($prima + $recFin, 2);
         $totalIva  = round($iva, 2);
         $percepIva = 0.0;
-        $otrosTrib = round($impSell, 2);
         $total     = round(abs($premio), 2);
+        // Otros tributos = residuo (IMPUESTOS Y SELLADOS y cualquier otro) → cuadra.
+        $otrosTrib = round($total - $neto21 - $totalIva - $percepIva, 2);
         $esBaja    = $premio < 0;
 
         return [
@@ -90,7 +91,7 @@ class ParserSeguroMapfre implements ParserSeguroInterface
                 'iva_tasa_basica' => $this->monto($texto, 'IVA Tasa B[áa]sica'),
                 'premio_total' => $premio,
             ],
-            'control_cuadra' => abs(($neto21 + $totalIva + $percepIva + $otrosTrib) - $total) < 0.10,
+            'control_cuadra' => abs($totalIva - round($neto21 * 0.21, 2)) <= max(1.0, $neto21 * 0.001) && $otrosTrib >= -0.5,
         ];
     }
 

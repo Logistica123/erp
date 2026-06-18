@@ -41,6 +41,7 @@ export default function ProcesamientoSeguroPage() {
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [periodo, setPeriodo] = useState('');        // 'YYYY-MM' para la carga
   const [filtroPeriodo, setFiltroPeriodo] = useState(''); // filtro del listado / emisión TXT
+  const [txtListo, setTxtListo] = useState<{ cbte: string; alicuotas: string; cant: number; suf: string } | null>(null);
 
   const { data: lista } = useQuery<{ data: Comprobante[] }>({
     queryKey: ['seguros-comprobantes'],
@@ -96,9 +97,8 @@ export default function ProcesamientoSeguroPage() {
       api.post<{ data: { cbte: string; alicuotas: string; cant: number } }>('/api/erp/compras/seguros/txt', body),
     onSuccess: (r) => {
       if (!r.data.cant) { setErr('No hay comprobantes para emitir con ese filtro.'); return; }
-      const suf = filtroPeriodo ? `_${filtroPeriodo}` : '';
-      descargarTxt(`LIBRO_IVA_SEGUROS_CBTE${suf}.txt`, r.data.cbte);
-      descargarTxt(`LIBRO_IVA_SEGUROS_ALICUOTAS${suf}.txt`, r.data.alicuotas);
+      setErr('');
+      setTxtListo({ ...r.data, suf: filtroPeriodo ? `_${filtroPeriodo}` : '' });
     },
     onError: (e: ApiError) => setErr(e.message),
   });
@@ -250,6 +250,25 @@ export default function ProcesamientoSeguroPage() {
           )}
         </CardBody>
       </Card>
+
+      {txtListo && (
+        <Card className="mt-4">
+          <CardHeader title={`TXT generado (${txtListo.cant} comprobante${txtListo.cant === 1 ? '' : 's'})`} actions={
+            <Button variant="ghost" size="sm" onClick={() => setTxtListo(null)}><X className="w-3 h-3" /></Button>
+          } />
+          <CardBody>
+            <p className="text-[12px] text-ink-2 mb-3">Descargá los dos archivos para importar al Libro IVA Digital de AFIP:</p>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => descargarTxt(`LIBRO_IVA_SEGUROS_CBTE${txtListo.suf}.txt`, txtListo.cbte)}>
+                <Download className="w-3 h-3" /> Descargar CBTE.txt
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => descargarTxt(`LIBRO_IVA_SEGUROS_ALICUOTAS${txtListo.suf}.txt`, txtListo.alicuotas)}>
+                <Download className="w-3 h-3" /> Descargar ALICUOTAS.txt
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

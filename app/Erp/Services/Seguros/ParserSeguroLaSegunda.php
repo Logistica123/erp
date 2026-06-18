@@ -34,6 +34,18 @@ class ParserSeguroLaSegunda implements ParserSeguroInterface
     /** @return array<string,mixed> */
     public function parse(string $texto): array
     {
+        // Sólo se procesan recibos/pólizas con "Detalle de facturación" (Prima /
+        // Premio final). Otros documentos de La Segunda (ej. Certificado de
+        // Coberturas) se rechazan para no cargar comprobantes en cero.
+        if (! preg_match('/Detalle de facturaci/iu', $texto) || ! preg_match('/Premio\s+final/iu', $texto)) {
+            throw new \DomainException('FORMATO_NO_SOPORTADO: el PDF no tiene "Detalle de facturación" (Prima/Premio) — no es un comprobante facturable (¿certificado de cobertura?).');
+        }
+        // Debe traer el código de comprobante (PV + número) en el formato esperado.
+        $refCheck = $this->comprobanteRef($texto);
+        if (! $refCheck || ! preg_match('/(\d+)-(\d+)-(\d+)-(\d+)/', $refCheck)) {
+            throw new \DomainException('COMPROBANTE_NO_ENCONTRADO: no se encontró el número de comprobante (punto de venta y número) en la ubicación esperada.');
+        }
+
         $prima      = $this->monto($texto, 'Prima');
         $recargo    = $this->monto($texto, 'Recargo Financiero');
         $iva21      = $this->monto($texto, 'IVA 21%');

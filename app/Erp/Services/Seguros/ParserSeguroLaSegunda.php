@@ -46,12 +46,14 @@ class ParserSeguroLaSegunda implements ParserSeguroInterface
         // El signo del Premio final define alta (99) vs baja/NC (90).
         $esBaja = $premioFinal['raw'] < 0;
 
-        // Punto de venta + número del código del comprobante del PDF
-        // (formato SUC-PV-POLIZA-NUMERO, ej. 001-001-0067743063-000054 → PV 1, Nro 54).
+        // Punto de venta + número del código del comprobante del PDF.
+        // Código: 001-001-0067743063-000054
+        //   - PV = los 5 dígitos de la izquierda del bloque largo (0067743063 → 00677 → 677)
+        //   - Número = último grupo (000054 → 54), es el número de endoso.
         $ref = $this->comprobanteRef($texto);
         $pv = 0; $numero = 0;
         if ($ref && preg_match('/(\d+)-(\d+)-(\d+)-(\d+)/', $ref, $mm)) {
-            $pv = (int) $mm[2];
+            $pv = (int) substr($mm[3], 0, 5);
             $numero = (int) $mm[4];
         }
 

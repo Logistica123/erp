@@ -2086,11 +2086,22 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
   const [tipoDestino, setTipoDestino] = useState<'VENTA' | 'COMPRA'>('COMPRA');
   const [auxiliarQ, setAuxiliarQ] = useState('');
   const [auxiliar, setAuxiliar] = useState<{ id: number; nombre: string; cuit: string | null } | null>(null);
-  const [facturaId, setFacturaId] = useState<number | null>(null);
-  const [monto, setMonto] = useState<string>('');
+  // v1.47.2 — multi-select: N facturas, pueden ser de auxiliares (y tipos)
+  // distintos; la selección sobrevive al cambio de auxiliar. Monto editable
+  // por fila para imputación parcial.
+  const [seleccionadas, setSeleccionadas] = useState<Array<{
+    id: number; tipo: 'VENTA' | 'COMPRA'; etiqueta: string; auxiliar: string; monto: string;
+  }>>([]);
   const [motivo, setMotivo] = useState('');
+  const [permitirDif, setPermitirDif] = useState(false);
+  const [cuentaAjuste, setCuentaAjuste] = useState('');
 
   const montoMov = mov ? Math.max(Number(mov.debito), Number(mov.credito)) : 0;
+  const totalSel = Math.round(seleccionadas.reduce((a, s) => a + (Number(s.monto) || 0), 0) * 100) / 100;
+  const diff = Math.round((montoMov - totalSel) * 100) / 100;
+  // El backend exige línea de ajuste (permitir_diferencia + cuenta + motivo)
+  // para cualquier diferencia > $0,01 — el asiento no balancea sin ella.
+  const exacto = seleccionadas.length > 0 && Math.abs(diff) <= 0.01;
 
   // Inferir tipo destino del tipo_operativo del movimiento.
   // Solo se ejecuta cuando se abre el modal.
@@ -2098,7 +2109,6 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
     if (!mov || !open) return;
     if (Number(mov.debito) > 0) setTipoDestino('COMPRA');
     else if (Number(mov.credito) > 0) setTipoDestino('VENTA');
-    setMonto(String(montoMov));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mov?.id]);
 
@@ -2114,25 +2124,46 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
     enabled: !!auxiliar?.id,
   });
 
+  // v1.47.2 — cuentas imputables para la línea de ajuste por diferencia.
+  const { data: cuentasResp } = useQuery<{ data: Array<{ id: number; codigo: string; nombre: string }> }>({
+    queryKey: ['cuentas-imputables'], queryFn: () => api.get('/api/erp/cuentas?imputable=1'),
+    enabled: open,
+  });
+
   const submitMut = useMutation({
     mutationFn: () =>
-      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar-factura`, {
-        tipo_factura: tipoDestino,
-        factura_id: facturaId,
-        monto: Number(monto),
+      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar-multiple`, {
+        facturas: seleccionadas.map((s) => ({ id: s.id, tipo: s.tipo, monto_imputado: Number(s.monto) })),
         motivo: motivo.trim(),
+        permitir_diferencia: !exacto && permitirDif,
+        cuenta_ajuste_id: !exacto && permitirDif && cuentaAjuste ? Number(cuentaAjuste) : null,
       }),
     onSuccess: () => {
       // Reset.
-      setAuxiliarQ(''); setAuxiliar(null); setFacturaId(null);
-      setMonto(''); setMotivo('');
+      setAuxiliarQ(''); setAuxiliar(null); setSeleccionadas([]);
+      setMotivo(''); setPermitirDif(false); setCuentaAjuste('');
       onSuccess();
     },
     onError: (e: ApiError) => onError(e.message),
   });
 
   if (!mov) return null;
-  const valid = auxiliar && facturaId && Number(monto) > 0 && motivo.trim().length >= 10;
+
+  const toggleFactura = (f: { id: number; numero: number; imp_total: number; tipo_codigo: string; letra: string | null }) => {
+    setSeleccionadas((prev) => {
+      const i = prev.findIndex((s) => s.tipo === tipoDestino && s.id === f.id);
+      if (i >= 0) return prev.filter((_, j) => j !== i);
+      return [...prev, {
+        id: f.id, tipo: tipoDestino,
+        etiqueta: `${f.tipo_codigo} ${f.letra ?? ''} ${f.numero}`.replace(/\s+/g, ' '),
+        auxiliar: auxiliar?.nombre ?? '—',
+        monto: String(f.imp_total),
+      }];
+    });
+  };
+  const montosOk = seleccionadas.every((s) => Number(s.monto) > 0);
+  const valid = seleccionadas.length > 0 && montosOk && motivo.trim().length >= 10
+    && (exacto || (permitirDif && !!cuentaAjuste));
 
   return (
     <Modal open={open} onClose={onClose} title={`📝 Conciliar manualmente · Mov #${mov.id} · $${fmtMoney(montoMov)}`} size="lg">
@@ -2146,11 +2177,11 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
           <div className="text-[11px] text-ink-muted mb-1">Tipo de destino</div>
           <div className="flex gap-3">
             <label className="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" checked={tipoDestino === 'VENTA'} onChange={() => { setTipoDestino('VENTA'); setAuxiliar(null); setFacturaId(null); }} />
+              <input type="radio" checked={tipoDestino === 'VENTA'} onChange={() => { setTipoDestino('VENTA'); setAuxiliar(null); }} />
               <span>Factura de venta</span>
             </label>
             <label className="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" checked={tipoDestino === 'COMPRA'} onChange={() => { setTipoDestino('COMPRA'); setAuxiliar(null); setFacturaId(null); }} />
+              <input type="radio" checked={tipoDestino === 'COMPRA'} onChange={() => { setTipoDestino('COMPRA'); setAuxiliar(null); }} />
               <span>Factura de compra</span>
             </label>
           </div>
@@ -2161,7 +2192,7 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
             {tipoDestino === 'COMPRA' ? 'Proveedor *' : 'Cliente *'}
           </div>
           <input type="text" value={auxiliar ? `${auxiliar.nombre} (${auxiliar.cuit ?? 'sin CUIT'})` : auxiliarQ}
-            onChange={(e) => { setAuxiliar(null); setFacturaId(null); setAuxiliarQ(e.target.value); }}
+            onChange={(e) => { setAuxiliar(null); setAuxiliarQ(e.target.value); }}
             placeholder="Buscar por nombre o CUIT (mín 2 chars)..."
             className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
           {!auxiliar && auxiliarQ.length >= 2 && (auxRes?.data ?? []).length > 0 && (
@@ -2187,31 +2218,76 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
               </div>
             ) : (
               <div className="border border-line rounded max-h-[180px] overflow-y-auto">
-                {(facturasRes?.data ?? []).map((f) => (
-                  <label key={f.id}
-                    className={`flex items-center gap-2 p-1.5 border-b border-line/40 last:border-b-0 cursor-pointer ${
-                      facturaId === f.id ? 'bg-azure-soft/30' : 'hover:bg-surface-hover'
-                    }`}>
-                    <input type="radio" checked={facturaId === f.id} onChange={() => setFacturaId(f.id)} />
-                    <div className="flex-1">
-                      <div className="text-[11.5px] text-ink-2">
-                        {f.tipo_codigo} {f.letra ?? ''} {f.numero} · {f.fecha_emision?.slice(0, 10)}
+                {(facturasRes?.data ?? []).map((f) => {
+                  const sel = seleccionadas.some((s) => s.tipo === tipoDestino && s.id === f.id);
+                  return (
+                    <label key={f.id}
+                      className={`flex items-center gap-2 p-1.5 border-b border-line/40 last:border-b-0 cursor-pointer ${
+                        sel ? 'bg-azure-soft/30' : 'hover:bg-surface-hover'
+                      }`}>
+                      <input type="checkbox" checked={sel} onChange={() => toggleFactura(f)} />
+                      <div className="flex-1">
+                        <div className="text-[11.5px] text-ink-2">
+                          {f.tipo_codigo} {f.letra ?? ''} {f.numero} · {f.fecha_emision?.slice(0, 10)}
+                        </div>
                       </div>
-                    </div>
-                    <div className="font-semibold tabular text-[11.5px]">{fmtMoney(f.imp_total)}</div>
-                  </label>
-                ))}
+                      <div className="font-semibold tabular text-[11.5px]">{fmtMoney(f.imp_total)}</div>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
 
-        <div>
-          <div className="text-[11px] text-ink-muted mb-1">Monto a conciliar *</div>
-          <input type="number" step="0.01"
-            value={monto} onChange={(e) => setMonto(e.target.value)}
-            className="w-full px-2 py-1 text-[12px] border border-azure-soft rounded focus:outline-none focus:border-azure" />
-        </div>
+        {/* v1.47.2 — seleccionadas con monto editable + sumatoria/diferencia */}
+        {seleccionadas.length > 0 && (
+          <div className="border-t border-line pt-2 space-y-2">
+            <div className="text-[11px] text-ink-muted">
+              Facturas seleccionadas (el monto es editable para imputación parcial)
+            </div>
+            {seleccionadas.map((s, i) => (
+              <div key={`${s.tipo}-${s.id}`} className="flex items-center gap-2">
+                <button type="button" title="Quitar"
+                  onClick={() => setSeleccionadas(seleccionadas.filter((_, j) => j !== i))}
+                  className="text-danger text-[11px] px-1 hover:font-bold">✕</button>
+                <div className="flex-1 text-[11.5px] text-ink-2">
+                  {s.etiqueta}
+                  <span className="text-[10px] px-1 rounded bg-line ml-1.5">{s.tipo}</span>
+                  <span className="text-ink-muted ml-1.5">{s.auxiliar}</span>
+                </div>
+                <input type="number" step="0.01" value={s.monto}
+                  onChange={(e) => setSeleccionadas(seleccionadas.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
+                  className="w-[130px] px-2 py-0.5 text-[11.5px] text-right tabular border border-azure-soft rounded focus:outline-none focus:border-azure" />
+              </div>
+            ))}
+            <div className="text-[11.5px] space-y-1 border-t border-line/60 pt-1.5">
+              <div className="flex justify-between">
+                <span>Total seleccionado ({seleccionadas.length} factura{seleccionadas.length === 1 ? '' : 's'}):</span>
+                <span className="tabular font-semibold">{fmtMoney(totalSel)}</span>
+              </div>
+              <div className="flex justify-between"><span>Movimiento (banco):</span><span className="tabular">{fmtMoney(montoMov)}</span></div>
+              <div className={`flex justify-between font-semibold ${exacto ? 'text-success' : 'text-danger'}`}>
+                <span>Diferencia:</span><span className="tabular">{fmtMoney(diff)}</span>
+              </div>
+            </div>
+            {!exacto && (
+              <div className="border border-warning/40 bg-warning-bg/20 rounded p-2 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={permitirDif} onChange={(e) => setPermitirDif(e.target.checked)} />
+                  <span>Permitir diferencia (genera línea de ajuste)</span>
+                </label>
+                {permitirDif && (
+                  <select value={cuentaAjuste} onChange={(e) => setCuentaAjuste(e.target.value)}
+                    className="w-full px-2 py-1 border border-line rounded">
+                    <option value="">Cuenta de ajuste…</option>
+                    {(cuentasResp?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div>
           <div className="text-[11px] text-ink-muted mb-1">

@@ -25,6 +25,8 @@ class ArqueoCaja extends Model
         'estado',
         'autorizado_por_user_id', 'fecha_autorizacion',
         'decision_autorizacion', 'motivo_autorizacion',
+        // v1.51 — trazabilidad de anulación.
+        'anulado_at', 'anulado_by', 'motivo_anulacion', 'asiento_reversa_id',
     ];
 
     protected $casts = [

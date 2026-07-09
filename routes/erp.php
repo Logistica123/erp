@@ -48,6 +48,13 @@ Route::prefix('api/erp')->group(function () {
     Route::get('/health', HealthController::class)->name('erp.health');
     Route::post('/auth/login', [AuthController::class, 'login'])->name('erp.auth.login');
 
+    // v1.54 — webhooks entrantes de DistriApp (Bearer + firma HMAC propios,
+    // sin sanctum: los valida FacturasCompraSyncController::verificarFirma).
+    Route::post('/compras/facturas-compra/sync-from-distriapp', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'syncFromDistriapp'])
+        ->name('erp.facturas-compra.sync-from-distriapp');
+    Route::post('/compras/facturas-compra/sync-delete-from-distriapp', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'syncDeleteFromDistriapp'])
+        ->name('erp.facturas-compra.sync-delete-from-distriapp');
+
     // Pre-MFA (token con ability "mfa:challenge")
     Route::middleware('auth:sanctum')
         ->post('/auth/mfa/verify', [AuthController::class, 'verifyMfa'])
@@ -220,6 +227,31 @@ Route::prefix('api/erp')->group(function () {
         // v1.27 Sprint C — sugerencias + conciliación contra factura.
         Route::get('/movimientos-bancarios/{id}/sugerencias', [MovimientosBancariosController::class, 'sugerencias'])
             ->whereNumber('id')->name('erp.mov-banc.sugerencias');
+        // v1.49 — conciliación contra recibos/cheques (candidatos unificados +
+        // acciones por bloque).
+        Route::get('/movimientos-bancarios/{id}/candidatos', [MovimientosBancariosController::class, 'candidatos'])
+            ->whereNumber('id')->name('erp.mov-banc.candidatos');
+        Route::get('/movimientos-bancarios/{id}/cheques-candidatos', [MovimientosBancariosController::class, 'chequesCandidatos'])
+            ->whereNumber('id')->name('erp.mov-banc.cheques-candidatos');
+        Route::get('/movimientos-bancarios/{id}/recibos-candidatos', [MovimientosBancariosController::class, 'recibosCandidatos'])
+            ->whereNumber('id')->name('erp.mov-banc.recibos-candidatos');
+        Route::post('/movimientos-bancarios/{id}/conciliar-cheques', [MovimientosBancariosController::class, 'conciliarCheques'])
+            ->whereNumber('id')->name('erp.mov-banc.conciliar-cheques');
+        Route::post('/movimientos-bancarios/{id}/vincular-asiento-descuento', [MovimientosBancariosController::class, 'vincularAsientoDescuento'])
+            ->whereNumber('id')->name('erp.mov-banc.vincular-descuento');
+        Route::post('/movimientos-bancarios/{id}/vincular-recibo-directo', [MovimientosBancariosController::class, 'vincularReciboDirecto'])
+            ->whereNumber('id')->name('erp.mov-banc.vincular-recibo');
+        // v1.50 — filtros + export + bulk + filtros guardados.
+        Route::get('/movimientos-bancarios/export', [MovimientosBancariosController::class, 'exportXlsx'])
+            ->name('erp.mov-banc.export');
+        Route::post('/movimientos-bancarios/bulk-ignorar', [MovimientosBancariosController::class, 'bulkIgnorar'])
+            ->name('erp.mov-banc.bulk-ignorar');
+        Route::get('/movimientos-bancarios/filtros-guardados', [MovimientosBancariosController::class, 'filtrosGuardados'])
+            ->name('erp.mov-banc.filtros.index');
+        Route::post('/movimientos-bancarios/filtros-guardados', [MovimientosBancariosController::class, 'guardarFiltro'])
+            ->name('erp.mov-banc.filtros.store');
+        Route::delete('/movimientos-bancarios/filtros-guardados/{id}', [MovimientosBancariosController::class, 'borrarFiltro'])
+            ->whereNumber('id')->name('erp.mov-banc.filtros.destroy');
         Route::post('/movimientos-bancarios/{id}/conciliar-multiple', [MovimientosBancariosController::class, 'conciliarMultiple'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar-multiple');
 
@@ -353,8 +385,24 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.caja.arqueos-pendientes');
         Route::post('/caja/arqueos/{id}/autorizar', [CajaController::class, 'autorizarArqueo'])
             ->whereNumber('id')->name('erp.caja.arqueo.autorizar');
+        // v1.51 — acciones directas en el listado.
+        Route::put('/caja/arqueos/{id}', [CajaController::class, 'actualizarArqueo'])
+            ->whereNumber('id')->name('erp.caja.arqueo.actualizar');
+        Route::delete('/caja/arqueos/{id}', [CajaController::class, 'borrarArqueo'])
+            ->whereNumber('id')->name('erp.caja.arqueo.borrar');
+        Route::post('/caja/arqueos/{id}/anular', [CajaController::class, 'anularArqueo'])
+            ->whereNumber('id')->name('erp.caja.arqueo.anular');
         Route::get('/caja/denominaciones-catalogo', [CajaController::class, 'denominacionesCatalogo'])
             ->name('erp.caja.denominaciones-catalogo');
+        // v1.52 — carga de saldo inicial (Cajas y Bancos).
+        Route::get('/tesoreria/cargas-saldo-inicial', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'index'])
+            ->name('erp.tesoreria.cargas-saldo-inicial.index');
+        Route::get('/tesoreria/cargas-saldo-inicial/cuentas-destino', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'cuentasDestino'])
+            ->name('erp.tesoreria.cargas-saldo-inicial.cuentas-destino');
+        Route::post('/tesoreria/cargas-saldo-inicial', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'store'])
+            ->name('erp.tesoreria.cargas-saldo-inicial.store');
+        Route::post('/tesoreria/cargas-saldo-inicial/{id}/revertir', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'revertir'])
+            ->whereNumber('id')->name('erp.tesoreria.cargas-saldo-inicial.revertir');
         Route::get('/users-lookup', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'usersLookup'])
             ->name('erp.users-lookup');
         Route::get('/caja/operadores', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'index'])
@@ -403,6 +451,11 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.prestamos.index');
         Route::post('/prestamos', [\App\Erp\Http\Controllers\PrestamosController::class, 'store'])
             ->name('erp.prestamos.store');
+        // Importar plan de facilidades ARCA/AFIP desde el PDF "Mis Facilidades".
+        Route::post('/prestamos/plan-afip/analizar', [\App\Erp\Http\Controllers\PrestamosController::class, 'analizarPlanAfip'])
+            ->name('erp.prestamos.plan-afip.analizar');
+        Route::post('/prestamos/plan-afip/importar', [\App\Erp\Http\Controllers\PrestamosController::class, 'importarPlanAfip'])
+            ->name('erp.prestamos.plan-afip.importar');
         Route::get('/prestamos/{id}', [\App\Erp\Http\Controllers\PrestamosController::class, 'show'])
             ->whereNumber('id')->name('erp.prestamos.show');
         Route::post('/prestamos/{id}/cuotas/{cuotaId}/pagar', [\App\Erp\Http\Controllers\PrestamosController::class, 'pagarCuota'])
@@ -471,6 +524,18 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.cheques-recibidos.cobrar');
         Route::post('/tesoreria/cheques-recibidos/{id}/rechazar', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'rechazar'])
             ->whereNumber('id')->name('erp.cheques-recibidos.rechazar');
+        Route::post('/tesoreria/cheques-recibidos/{id}/editar', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'editar'])
+            ->whereNumber('id')->name('erp.cheques-recibidos.editar');
+        Route::post('/tesoreria/cheques-recibidos/{id}/descontar', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'descontar'])
+            ->whereNumber('id')->name('erp.cheques-recibidos.descontar');
+        Route::post('/tesoreria/cheques-recibidos/{id}/endosar', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'endosar'])
+            ->whereNumber('id')->name('erp.cheques-recibidos.endosar');
+        Route::get('/tesoreria/cheques-recibidos/facturas-endosables', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'facturasEndosables'])
+            ->name('erp.cheques-recibidos.facturas-endosables');
+        Route::get('/tesoreria/cheques-recibidos/pendientes-a-fecha', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'pendientesAFecha'])
+            ->name('erp.cheques-recibidos.pendientes-a-fecha');
+        Route::post('/tesoreria/cheques-recibidos/{id}/anular', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'anular'])
+            ->whereNumber('id')->name('erp.cheques-recibidos.anular');
         Route::post('/tesoreria/cheques-recibidos/marcar-vencidos', [\App\Erp\Http\Controllers\ChequesRecibidosController::class, 'marcarVencidos'])
             ->name('erp.cheques-recibidos.marcar-vencidos');
 
@@ -836,6 +901,15 @@ Route::prefix('api/erp')->group(function () {
             ->whereNumber('id')->name('erp.fc.show');
         Route::patch('/facturas-compra/{id}', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'update'])
             ->whereNumber('id')->name('erp.fc.update');
+        // v1.54 — acciones de facturas sincronizadas desde DistriApp.
+        Route::get('/facturas-compra/{id}/preview-autorizacion', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'previewAutorizacion'])
+            ->whereNumber('id')->name('erp.facturas-compra.preview-autorizacion');
+        Route::post('/facturas-compra/{id}/autorizar', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'autorizar'])
+            ->whereNumber('id')->name('erp.facturas-compra.autorizar');
+        Route::post('/facturas-compra/{id}/desautorizar', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'desautorizar'])
+            ->whereNumber('id')->name('erp.facturas-compra.desautorizar');
+        Route::delete('/facturas-compra/{id}/sync', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'borrar'])
+            ->whereNumber('id')->name('erp.facturas-compra.sync-borrar');
         Route::post('/facturas-compra/{id}/controlar', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'controlar'])
             ->whereNumber('id')->name('erp.fc.controlar');
         Route::post('/facturas-compra/{id}/observar', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'observar'])
@@ -864,6 +938,15 @@ Route::prefix('api/erp')->group(function () {
                 ->name('erp.integ.da.liqs-distrib');
             Route::post('/contabilizar-facturas', [\App\Erp\Http\Controllers\Integracion\DistriAppController::class, 'contabilizarFacturas'])
                 ->name('erp.integ.da.contab-facturas');
+
+            // Completar clientes "de fantasía" de la plataforma con datos fiscales
+            // reales (escribe de vuelta en basepersonal: clientes + tax_profiles).
+            Route::get('/clientes-plataforma', [\App\Erp\Http\Controllers\Integracion\DistriAppController::class, 'clientesPlataforma'])
+                ->name('erp.integ.da.clientes-plataforma');
+            Route::get('/condiciones-iva', [\App\Erp\Http\Controllers\Integracion\DistriAppController::class, 'condicionesIva'])
+                ->name('erp.integ.da.condiciones-iva');
+            Route::post('/clientes-plataforma/{clienteId}/completar', [\App\Erp\Http\Controllers\Integracion\DistriAppController::class, 'completarCliente'])
+                ->name('erp.integ.da.completar-cliente');
         });
 
         // ====================================================================

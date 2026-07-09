@@ -29,12 +29,16 @@ class Recibo extends Model
     public $timestamps = false; // Manejamos created_at + emitido_at + anulado_at manualmente.
 
     protected $fillable = [
-        'empresa_id', 'numero_correlativo', 'fecha_emision',
+        'empresa_id', 'numero_correlativo', 'fecha_emision', 'fecha_cobro',
         'punto_venta', 'numero', 'numero_legacy', 'detalle_cobro', // v1.32
         'cliente_auxiliar_id', 'factura_venta_id',
         'total_factura', 'total_nc_aplicadas', 'total_retenciones',
         // v1.32 — Retenciones simples
         'retencion_iva_total', 'retencion_iibb_total', 'retencion_ganancias_total',
+        // "Otro" — medio/compensación especial (suma al cobro, va a 1.1.6.99).
+        'otro_monto', 'otro_observacion',
+        // Redondeo — ajuste de cobranza (admite negativo), va a 5.6.06.
+        'redondeo_monto',
         // v1.32 — Snapshot empresa
         'snapshot_empresa_razon_social', 'snapshot_empresa_cuit',
         'snapshot_empresa_direccion_1', 'snapshot_empresa_direccion_2',
@@ -54,6 +58,7 @@ class Recibo extends Model
 
     protected $casts = [
         'fecha_emision' => 'date',
+        'fecha_cobro' => 'date',
         'snapshot_empresa_inicio_actividad' => 'date',
         'total_factura' => 'decimal:2',
         'total_nc_aplicadas' => 'decimal:2',
@@ -61,6 +66,8 @@ class Recibo extends Model
         'retencion_iva_total' => 'decimal:2',
         'retencion_iibb_total' => 'decimal:2',
         'retencion_ganancias_total' => 'decimal:2',
+        'otro_monto' => 'decimal:2',
+        'redondeo_monto' => 'decimal:2',
         'monto_cobrable' => 'decimal:2',
         'monto_cobrado' => 'decimal:2',
         'saldo_factura_post' => 'decimal:2',
@@ -98,6 +105,11 @@ class Recibo extends Model
     public function retenciones(): HasMany
     {
         return $this->hasMany(ReciboRetencion::class);
+    }
+
+    public function cheques(): HasMany
+    {
+        return $this->hasMany(ChequeRecibido::class, 'recibo_id');
     }
 
     // v1.32 — Multi-comprobante imputado.

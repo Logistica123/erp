@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Check, Loader2, Plus, Upload, X, Zap, Search, Trash2, RefreshCw } from 'lucide-react';
+import { AlertCircle, Check, Loader2, Plus, Upload, X, Zap, Link2, Trash2, RefreshCw, Download, SlidersHorizontal } from 'lucide-react';
+import { auth } from '@/lib/auth';
+import { parseMontoEs } from '@/lib/montos';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -15,7 +17,9 @@ type MovimientoBancario = {
   concepto: string;
   debito: string;
   credito: string;
-  estado: 'PENDIENTE' | 'ETIQUETADO' | 'CONCILIADO' | 'IGNORADO';
+  estado: 'PENDIENTE' | 'ETIQUETADO' | 'CONCILIADO' | 'IGNORADO'
+    | 'CONFIRMADO_CHEQUES_COBRADOS' | 'CONFIRMADO_DESCUENTO_CHEQUE' | 'CONFIRMADO_RECIBO_DIRECTO'
+    | 'CONFIRMADO_RECIBO_CON_CHEQUES';
   cuenta_bancaria_id: number;
   cuenta_bancaria: { id: number; codigo: string; nombre: string };
   asiento_id: number | null;
@@ -64,6 +68,35 @@ type SugerenciasResp = {
     | 'TIPO_SIN_FACTURAS'
     | 'MOV_SIN_IMPORTE';
 };
+// v1.49 — candidatos de cheques / descuentos / recibos (GET /candidatos).
+type ChequeCandidato = {
+  cheque_id: number; numero_cheque: string; banco_emisor: string;
+  cliente_id: number | null; cliente_nombre: string | null;
+  importe: number; fecha_emision: string; fecha_vencimiento: string;
+  estado_actual: string; recibo_origen_id: number | null; recibo_numero: string | null;
+  match_score: number;
+};
+type DescuentoCandidato = {
+  asiento_id: number; cheque_id: number; numero_cheque: string; banco_emisor: string;
+  entidad_descuento: string | null; cliente_nombre: string | null;
+  importe_cheque: number; neto: number; fecha: string;
+};
+type ChequeAnidado = {
+  cheque_id: number; numero_cheque: string; banco_emisor: string; importe: number;
+  fecha_pago: string; estado_actual: string; ya_vinculado_otro_mov: boolean; se_auto_confirma: boolean;
+};
+type ReciboCandidato = {
+  recibo_id: number; numero_recibo: string; cliente_id: number | null; cliente_nombre: string | null;
+  fecha_emision: string; fecha_cobro: string; monto_cobrado: number;
+  medio_cobro: string; medio_es_cheques?: boolean; detalle_cobro: string | null;
+  asiento_id: number | null; cheques?: ChequeAnidado[]; match_score: number;
+};
+type CandidatosV149 = {
+  recibos: ReciboCandidato[];
+  cheques_sueltos: ChequeCandidato[];
+  descuentos_cheque: DescuentoCandidato[];
+};
+
 type Cuenta = { id: number; codigo: string; nombre: string; imputable: boolean; admite_cc: boolean; admite_auxiliar: boolean };
 type Auxiliar = { id: number; codigo: string; nombre: string; tipo: string };
 type CC = { id: number; codigo: string; nombre: string };
@@ -90,20 +123,83 @@ export function ConciliacionPage() {
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkAccion, setBulkAccion] = useState<'CONCILIAR_CONTRA_CUENTA' | 'IGNORAR' | null>(null);
+  // v1.50 Bloque A — chips + filtros avanzados.
+  const [tipoChip, setTipoChip] = useState<'' | 'DEBITO' | 'CREDITO'>('');
+  const [categorias, setCategorias] = useState<Set<string>>(new Set());
+  const [fDesde, setFDesde] = useState('');
+  const [fHasta, setFHasta] = useState('');
+  const [impDesde, setImpDesde] = useState('');
+  const [impHasta, setImpHasta] = useState('');
+  const [filtrosOpen, setFiltrosOpen] = useState(false);
 
   const { data: cuentasBanc } = useQuery<{ data: CuentaBancaria[] }>({
     queryKey: ['cuentas-bancarias'],
     queryFn: () => api.get('/api/erp/cuentas-bancarias'),
   });
-  const { data: movs, isLoading } = useQuery<{ data: MovimientoBancario[] }>({
-    queryKey: ['mov-banc', cuentaBancariaId, estado],
-    queryFn: () => {
-      const qs = new URLSearchParams();
-      if (cuentaBancariaId) qs.set('cuenta_bancaria_id', String(cuentaBancariaId));
-      if (estado) qs.set('estado', estado);
-      return api.get(`/api/erp/movimientos-bancarios?${qs}`);
-    },
+  const catsKey = Array.from(categorias).sort().join(',');
+  const armarQs = () => {
+    const qs = new URLSearchParams();
+    if (cuentaBancariaId) qs.set('cuenta_bancaria_id', String(cuentaBancariaId));
+    if (estado) qs.set('estado', estado);
+    if (tipoChip) qs.set('tipo', tipoChip);
+    categorias.forEach((c) => qs.append('categorias[]', c));
+    if (fDesde) qs.set('desde', fDesde);
+    if (fHasta) qs.set('hasta', fHasta);
+    if (impDesde) qs.set('importe_desde', String(parseMontoEs(impDesde)));
+    if (impHasta) qs.set('importe_hasta', String(parseMontoEs(impHasta)));
+    return qs;
+  };
+  type MetaTotales = { total_movs: number; total_debitos: number; total_creditos: number; total_neto: number };
+  const { data: movs, isLoading } = useQuery<{ data: MovimientoBancario[]; meta?: Partial<MetaTotales> }>({
+    queryKey: ['mov-banc', cuentaBancariaId, estado, tipoChip, catsKey, fDesde, fHasta, impDesde, impHasta],
+    queryFn: () => api.get(`/api/erp/movimientos-bancarios?${armarQs()}`),
   });
+  const meta = movs?.meta;
+
+  // v1.50 — filtros guardados por usuario.
+  const { data: filtrosGuardados } = useQuery<{ data: Array<{ id: number; nombre: string; filtros_json: string }> }>({
+    queryKey: ['mov-banc-filtros'],
+    queryFn: () => api.get('/api/erp/movimientos-bancarios/filtros-guardados'),
+  });
+  const guardarFiltroMut = useMutation({
+    mutationFn: (nombre: string) => api.post('/api/erp/movimientos-bancarios/filtros-guardados', {
+      nombre,
+      filtros: { cuentaBancariaId, estado, tipoChip, categorias: Array.from(categorias), fDesde, fHasta, impDesde, impHasta },
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mov-banc-filtros'] }),
+    onError: (e: ApiError) => setErr(e.message),
+  });
+  const aplicarFiltroGuardado = (json: string) => {
+    try {
+      const f = JSON.parse(json);
+      setCuentaBancariaId(f.cuentaBancariaId ?? '');
+      setEstado((f.estado ?? '') as typeof estado);
+      setTipoChip(f.tipoChip ?? '');
+      setCategorias(new Set(f.categorias ?? []));
+      setFDesde(f.fDesde ?? ''); setFHasta(f.fHasta ?? '');
+      setImpDesde(f.impDesde ?? ''); setImpHasta(f.impHasta ?? '');
+      setFiltrosOpen(true);
+    } catch { /* json inválido: ignorar */ }
+  };
+
+  // v1.50 — export xlsx del listado filtrado (o de la selección).
+  const [exportando, setExportando] = useState(false);
+  const exportarExcel = (soloSeleccion: boolean) => {
+    const qs = armarQs();
+    if (soloSeleccion) selected.forEach((id) => qs.append('ids[]', String(id)));
+    const token = auth.getToken();
+    setExportando(true);
+    fetch(`/api/erp/movimientos-bancarios/export?${qs}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); })
+      .then((blob) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `conciliacion_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        a.click();
+      })
+      .catch(() => setErr('No se pudo exportar el Excel.'))
+      .finally(() => setExportando(false));
+  };
 
   // v1.27 Sprint A — mutación conciliar directo (tipos auto).
   const conciliarDirectoMut = useMutation({
@@ -116,6 +212,18 @@ export function ConciliacionPage() {
     },
     onError: (e: ApiError) => setErr(e.message),
   });
+
+  // v1.49 — reversa de vinculaciones contra cheques/descuento/recibo.
+  const revertirV149Mut = useMutation({
+    mutationFn: ({ movId, motivo }: { movId: number; motivo: string }) =>
+      api.post(`/api/erp/movimientos-bancarios/${movId}/desconciliar`, { motivo }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); setErr(null); },
+    onError: (e: ApiError) => setErr(e.message),
+  });
+  const revertirV149 = (movId: number) => {
+    const motivo = prompt('Motivo de la reversa:');
+    if (motivo && motivo.trim().length >= 3) revertirV149Mut.mutate({ movId, motivo: motivo.trim() });
+  };
 
   // v1.27 §16 — permisos del operador (para mostrar/ocultar botón Borrar).
   const { data: misPermisos } = useQuery<{ data?: Array<{ codigo: string }> } | Array<{ codigo: string }>>({
@@ -179,9 +287,107 @@ export function ConciliacionPage() {
         <div className="mb-4 p-3 bg-danger-bg text-danger border border-danger/30 rounded-md text-[12px]">{err}</div>
       )}
 
-      {selected.size > 0 && (
-        <div className="mb-3 p-3 bg-navy-50 border border-navy-200 rounded-md flex items-center gap-3 text-[12px]">
+      {/* v1.50 Bloque A — chips de filtro rápido + filtros avanzados + sumatoria */}
+      <div className="mb-3 space-y-2">
+        <div className="flex flex-wrap gap-1.5 items-center text-[11.5px]">
+          {([['', 'Todos'], ['DEBITO', 'Débitos'], ['CREDITO', 'Créditos']] as const).map(([v, l]) => (
+            <button key={l} type="button" onClick={() => setTipoChip(v)}
+              className={`px-2.5 py-1 rounded-full border transition ${tipoChip === v
+                ? 'bg-navy-800 text-white border-navy-800'
+                : 'bg-white border-line-strong text-ink-2 hover:bg-surface-hover'}`}>
+              {l}
+            </button>
+          ))}
+          <span className="text-line-strong mx-1">|</span>
+          {([['SIN_ETIQUETAR', 'Sin etiquetar'], ['IMPUESTOS', 'Impuestos'], ['COMISIONES', 'Comisiones'],
+            ['SERVICIOS', 'Servicios'], ['SUELDOS', 'Sueldos'], ['TRANSFERENCIAS_INTERNAS', 'Transf. internas'],
+            ['CHEQUES', 'Cheques'], ['COBROS', 'Cobros']] as const).map(([v, l]) => (
+            <button key={v} type="button"
+              onClick={() => {
+                const n = new Set(categorias);
+                n.has(v) ? n.delete(v) : n.add(v);
+                setCategorias(n);
+              }}
+              className={`px-2.5 py-1 rounded-full border transition ${categorias.has(v)
+                ? 'bg-azure text-white border-azure'
+                : 'bg-white border-line-strong text-ink-2 hover:bg-surface-hover'}`}>
+              {l}
+            </button>
+          ))}
+          <button type="button" onClick={() => setFiltrosOpen(!filtrosOpen)}
+            className="ml-auto px-2.5 py-1 rounded-full border border-line-strong bg-white text-ink-2 hover:bg-surface-hover inline-flex items-center gap-1">
+            <SlidersHorizontal className="w-3 h-3" /> Filtros avanzados {filtrosOpen ? '▴' : '▾'}
+          </button>
+        </div>
+
+        {filtrosOpen && (
+          <div className="p-3 border border-line rounded-md bg-surface-row/40 flex flex-wrap items-end gap-3 text-[11.5px]">
+            <label className="flex flex-col gap-0.5">Desde
+              <input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)}
+                className="px-2 py-1 border border-line-strong rounded bg-white" />
+            </label>
+            <label className="flex flex-col gap-0.5">Hasta
+              <input type="date" value={fHasta} onChange={(e) => setFHasta(e.target.value)}
+                className="px-2 py-1 border border-line-strong rounded bg-white" />
+            </label>
+            <label className="flex flex-col gap-0.5">Importe desde
+              <input type="text" inputMode="decimal" value={impDesde} onChange={(e) => setImpDesde(e.target.value)}
+                placeholder="0,00" className="px-2 py-1 border border-line-strong rounded bg-white w-[110px]" />
+            </label>
+            <label className="flex flex-col gap-0.5">Importe hasta
+              <input type="text" inputMode="decimal" value={impHasta} onChange={(e) => setImpHasta(e.target.value)}
+                placeholder="0,00" className="px-2 py-1 border border-line-strong rounded bg-white w-[110px]" />
+            </label>
+            <Button size="sm" variant="ghost" onClick={() => {
+              setTipoChip(''); setCategorias(new Set()); setFDesde(''); setFHasta('');
+              setImpDesde(''); setImpHasta(''); setEstado('');
+            }}>Limpiar filtros</Button>
+            <span className="mx-1 text-line-strong">|</span>
+            <select className="px-2 py-1 border border-line-strong rounded bg-white"
+              value="" onChange={(e) => {
+                const f = (filtrosGuardados?.data ?? []).find((x) => String(x.id) === e.target.value);
+                if (f) aplicarFiltroGuardado(f.filtros_json);
+              }}>
+              <option value="">Filtros guardados…</option>
+              {(filtrosGuardados?.data ?? []).map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+            </select>
+            <Button size="sm" variant="secondary" disabled={guardarFiltroMut.isPending}
+              onClick={() => {
+                const nombre = prompt('Nombre del filtro (ej: "Impuestos abril"):');
+                if (nombre?.trim()) guardarFiltroMut.mutate(nombre.trim());
+              }}>Guardar filtro actual</Button>
+          </div>
+        )}
+
+        {meta && (
+          <div className="flex flex-wrap gap-4 text-[11.5px] text-ink-2 px-1">
+            <span><strong>{meta.total_movs ?? 0}</strong> movs en el filtro</span>
+            <span>Débitos: <strong className="tabular text-danger">{fmtMoney(meta.total_debitos ?? 0)}</strong></span>
+            <span>Créditos: <strong className="tabular text-success">{fmtMoney(meta.total_creditos ?? 0)}</strong></span>
+            <span>Neto: <strong className="tabular">{fmtMoney(meta.total_neto ?? 0)}</strong></span>
+            <button type="button" className="text-azure hover:underline inline-flex items-center gap-1"
+              disabled={exportando} onClick={() => exportarExcel(false)}>
+              <Download className="w-3 h-3" /> {exportando ? 'Exportando…' : 'Exportar filtro a Excel'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {selected.size > 0 && (() => {
+        const selMovs = (movs?.data ?? []).filter((m) => selected.has(m.id));
+        const selDeb = selMovs.reduce((a, m) => a + Number(m.debito), 0);
+        const selCred = selMovs.reduce((a, m) => a + Number(m.credito), 0);
+        return (
+        <div className="mb-3 p-3 bg-navy-50 border border-navy-200 rounded-md flex items-center gap-3 text-[12px] flex-wrap sticky top-0 z-10 shadow-sm">
           <span className="font-medium text-navy-800">{selected.size} mov{selected.size > 1 ? 's' : ''} seleccionado{selected.size > 1 ? 's' : ''}</span>
+          <span className="text-[11.5px] text-ink-2">
+            Débitos: <strong className="tabular">{fmtMoney(selDeb)}</strong> ·
+            Créditos: <strong className="tabular">{fmtMoney(selCred)}</strong> ·
+            Neto: <strong className="tabular">{fmtMoney(selCred - selDeb)}</strong>
+          </span>
+          <Button size="sm" variant="secondary" disabled={exportando} onClick={() => exportarExcel(true)}>
+            <Download className="w-3 h-3" /> Exportar a Excel
+          </Button>
           <Button size="sm" variant="primary" onClick={() => setBulkAccion('CONCILIAR_CONTRA_CUENTA')}>
             <Check className="w-3 h-3" /> Conciliar contra cuenta…
           </Button>
@@ -198,7 +404,8 @@ export function ConciliacionPage() {
             Limpiar selección
           </button>
         </div>
-      )}
+        );
+      })()}
 
       {/* v1.27 §16 — banner global "Confirmar auto-etiquetados" cuando hay ≥1 */}
       {autoEtiquetadosIds.length > 0 && (
@@ -337,6 +544,10 @@ export function ConciliacionPage() {
                     {m.estado === 'PENDIENTE' && <Badge variant="warning">Pendiente</Badge>}
                     {m.estado === 'ETIQUETADO' && <Badge variant="info">Etiquetado</Badge>}
                     {m.estado === 'IGNORADO' && <Badge variant="neutral">Ignorado</Badge>}
+                    {m.estado === 'CONFIRMADO_CHEQUES_COBRADOS' && <Badge variant="success">Cheques cobrados</Badge>}
+                    {m.estado === 'CONFIRMADO_DESCUENTO_CHEQUE' && <Badge variant="success">Descuento vinculado</Badge>}
+                    {m.estado === 'CONFIRMADO_RECIBO_DIRECTO' && <Badge variant="success">Recibo vinculado</Badge>}
+                    {m.estado === 'CONFIRMADO_RECIBO_CON_CHEQUES' && <Badge variant="success">Recibo + cheques</Badge>}
                   </td>
                   <td className="px-[10px] py-[7px] text-right">
                     {(m.estado === 'PENDIENTE' || m.estado === 'ETIQUETADO') && (
@@ -353,7 +564,7 @@ export function ConciliacionPage() {
                         {/* v1.27 Sprint C — Sugerir facturas para transferencias */}
                         {['TRANSFERENCIA_RECIBIDA', 'TRANSFERENCIA_ENVIADA', 'PAGO_SERVICIO', 'OTRO'].includes(m.tipo_operativo) && (
                           <Button size="sm" variant="primary" onClick={() => setSugerirPara(m)}>
-                            <Search className="w-3 h-3" /> Facturas
+                            <Link2 className="w-3 h-3" /> Vincular
                           </Button>
                         )}
                         <Button size="sm" variant="secondary" onClick={() => setConciliar(m)}>
@@ -366,6 +577,19 @@ export function ConciliacionPage() {
                     )}
                     {m.estado === 'CONCILIADO' && m.asiento_id && (
                       <span className="text-[10px] text-ink-muted">→ Asiento #{m.asiento_id}</span>
+                    )}
+                    {['CONFIRMADO_CHEQUES_COBRADOS', 'CONFIRMADO_DESCUENTO_CHEQUE', 'CONFIRMADO_RECIBO_DIRECTO', 'CONFIRMADO_RECIBO_CON_CHEQUES'].includes(m.estado) && (
+                      <div className="flex items-center gap-1 justify-end">
+                        {m.asiento_id && <span className="text-[10px] text-ink-muted">→ Asiento #{m.asiento_id}</span>}
+                        {(m as { asiento_descuento_vinculado_id?: number | null }).asiento_descuento_vinculado_id && (
+                          <span className="text-[10px] text-ink-muted">→ Asiento desc. #{(m as { asiento_descuento_vinculado_id?: number | null }).asiento_descuento_vinculado_id}</span>
+                        )}
+                        <Button size="sm" variant="ghost" title="Revierte la vinculación (los cheques vuelven a cartera / se desvincula el recibo o descuento)."
+                          disabled={revertirV149Mut.isPending}
+                          onClick={() => revertirV149(m.id)}>
+                          <X className="w-3 h-3" /> Revertir
+                        </Button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -1174,6 +1398,9 @@ function ImportExtractoWizard({
     etiquetados_auto: number;
     pendientes: number;
     pasantes_mp: number;
+    // v1.49 — auto-vinculación de descuentos de cheque.
+    descuentos_vinculados?: number;
+    descuentos_ambiguos?: number;
     warnings: string[];
   };
 
@@ -1327,6 +1554,12 @@ function ImportExtractoWizard({
             {resultado.pasantes_mp > 0 && (
               <Stat label="Pasantes MP detectados" value={resultado.pasantes_mp} accent="info" />
             )}
+            {(resultado.descuentos_vinculados ?? 0) > 0 && (
+              <Stat label="Auto-vinculados a descuentos de cheques" value={resultado.descuentos_vinculados!} accent="success" />
+            )}
+            {(resultado.descuentos_ambiguos ?? 0) > 0 && (
+              <Stat label="Descuentos ambiguos (revisar manualmente)" value={resultado.descuentos_ambiguos!} accent="warning" />
+            )}
           </div>
           {resultado.warnings.length > 0 && (
             <div className="p-2 bg-amber-50 border border-amber-200 rounded text-[11px]">
@@ -1377,6 +1610,49 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
     queryKey: ['sugerencias', mov?.id],
     queryFn: () => api.get(`/api/erp/movimientos-bancarios/${mov!.id}/sugerencias?top=10`),
     enabled: !!mov,
+  });
+  // v1.49 — candidatos de cheques / descuentos / recibos (solo créditos).
+  const esCredito = !!mov && Number(mov.credito) > 0.005;
+  const { data: candResp } = useQuery<{ data: CandidatosV149 }>({
+    queryKey: ['candidatos-v149', mov?.id],
+    queryFn: () => api.get(`/api/erp/movimientos-bancarios/${mov!.id}/candidatos`),
+    enabled: esCredito,
+  });
+  const descuentos = candResp?.data?.descuentos_cheque ?? [];
+  const chequesCand = candResp?.data?.cheques_sueltos ?? [];
+  const recibosCand = candResp?.data?.recibos ?? [];
+  const [selCheques, setSelCheques] = useState<Set<number>>(new Set());
+  const [selDescuento, setSelDescuento] = useState<number | null>(null);
+  const [selRecibo, setSelRecibo] = useState<number | null>(null);
+  const [obsCheques, setObsCheques] = useState('');
+  // v1.50 D-50-2 — casos especiales colapsados por defecto.
+  const [especialesOpen, setEspecialesOpen] = useState(false);
+
+  const chequesSel = chequesCand.filter((c) => selCheques.has(c.cheque_id));
+  const sumCheques = Math.round(chequesSel.reduce((a, c) => a + Number(c.importe), 0) * 100) / 100;
+
+  const vincularDescuentoMut = useMutation({
+    mutationFn: (asientoId: number) =>
+      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/vincular-asiento-descuento`, { asiento_id: asientoId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); onSuccess(); },
+    onError: (e: ApiError) => onError(e.message),
+  });
+  const conciliarChequesMut = useMutation({
+    mutationFn: () =>
+      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/conciliar-cheques`, {
+        cheques: chequesSel.map((c) => ({ cheque_id: c.cheque_id, monto: Number(c.importe) })),
+        observaciones: obsCheques || undefined,
+      }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); onSuccess(); },
+    onError: (e: ApiError) => onError(e.message),
+  });
+  const vincularReciboMut = useMutation({
+    mutationFn: (r: ReciboCandidato) =>
+      api.post(`/api/erp/movimientos-bancarios/${mov!.id}/vincular-recibo-directo`, {
+        recibos: [{ recibo_id: r.recibo_id, monto: Number(r.monto_cobrado) }],
+      }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mov-banc'] }); onSuccess(); },
+    onError: (e: ApiError) => onError(e.message),
   });
   const { data: cuentasResp } = useQuery<{ data: Array<{ id: number; codigo: string; nombre: string }> }>({
     queryKey: ['cuentas-imputables'], queryFn: () => api.get('/api/erp/cuentas?imputable=1'), enabled: !!mov,
@@ -1451,12 +1727,122 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
   };
 
   return (
-    <Modal open onClose={onClose} title={`Sugerencias para mov #${mov.id} · $${fmtMoney(montoMov)}`} size="lg">
+    <Modal open onClose={onClose} title={`Vincular movimiento #${mov.id} · $${fmtMoney(montoMov)}`} size="lg">
       <div className="space-y-3 text-[12px]">
         <div className="text-ink-muted">
           {mov.concepto} · {mov.fecha.slice(0, 10)} · tipo: <code>{mov.tipo_operativo}</code>
         </div>
 
+        {/* ══ v1.50 §5.2 — Sección principal: RECIBOS candidatos ══ */}
+        {recibosCand.length > 0 && (
+          <div className="border-2 border-navy-800/30 rounded p-2 space-y-2 bg-white">
+            <div className="font-semibold text-[12px] text-navy-800">🧾 Recibos candidatos</div>
+            {recibosCand.map((r) => {
+              const chs = r.cheques ?? [];
+              const autoConf = chs.filter((c) => c.se_auto_confirma);
+              const resueltos = chs.filter((c) => !c.se_auto_confirma && c.estado_actual !== 'EN_CARTERA' && c.estado_actual !== 'VENCIDO_NO_COBRADO');
+              return (
+                <div key={r.recibo_id}
+                  className={`rounded border p-2 ${selRecibo === r.recibo_id ? 'border-azure bg-azure-soft/20' : 'border-line'}`}>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="v150-rec" checked={selRecibo === r.recibo_id}
+                      onChange={() => setSelRecibo(r.recibo_id)} />
+                    <span className="flex-1">
+                      <strong>RC {r.numero_recibo}</strong> · {r.cliente_nombre ?? '—'} · cobro {r.fecha_cobro.slice(0, 10)}
+                      <span className="text-ink-muted"> · Medio: {r.medio_cobro}{chs.length === 0 ? ' · Sin cheques' : ''}</span>
+                      {r.match_score === 100 && <span className="ml-1 text-[10px] px-1 rounded bg-success-bg/60 text-success">✓ match</span>}
+                    </span>
+                    <span className="tabular font-semibold">{fmtMoney(r.monto_cobrado)}</span>
+                  </label>
+                  {chs.length > 0 && (
+                    <div className="ml-6 mt-1 space-y-0.5 text-[11px] text-ink-2">
+                      {chs.map((c) => (
+                        <div key={c.cheque_id} className="flex justify-between">
+                          <span>└─ #{c.numero_cheque} · {c.banco_emisor} · vto {c.fecha_pago.slice(0, 10)} ·{' '}
+                            <span className={c.se_auto_confirma ? 'text-azure' : 'text-ink-muted'}>{c.estado_actual}</span>
+                            {c.ya_vinculado_otro_mov && <span className="text-danger"> · ya vinculado a otro mov</span>}
+                          </span>
+                          <span className="tabular">{fmtMoney(c.importe)}</span>
+                        </div>
+                      ))}
+                      {autoConf.length > 0 && (
+                        <div className="text-warning text-[10.5px] pt-0.5">
+                          ⚠️ Al vincular, {autoConf.length} cheque{autoConf.length === 1 ? ' se auto-confirma' : 's se auto-confirman'} como COBRADO con fecha del movimiento.
+                        </div>
+                      )}
+                      {resueltos.length > 0 && (
+                        <div className="text-ink-muted text-[10.5px]">
+                          ⓘ {resueltos.length} cheque{resueltos.length === 1 ? '' : 's'} ya resuelto{resueltos.length === 1 ? '' : 's'} por otro camino — no se modifican.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <Button size="sm" variant="primary"
+              disabled={!selRecibo || vincularReciboMut.isPending}
+              onClick={() => {
+                const r = recibosCand.find((x) => x.recibo_id === selRecibo);
+                if (r) vincularReciboMut.mutate(r);
+              }}>
+              {vincularReciboMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+              Vincular recibo (sin duplicar asiento)
+            </Button>
+          </div>
+        )}
+
+        {/* ── v1.50 — Cheques sueltos (no asociados a los recibos de arriba) ── */}
+        {chequesCand.length > 0 && (
+          <div className="border border-azure/40 bg-azure-soft/15 rounded p-2 space-y-1.5">
+            <div className="font-semibold text-[11.5px]">
+              📥 Cheques sueltos pendientes de acreditación <span className="font-normal text-ink-muted">(genera asiento D banco / H Valores al Cobro)</span>
+            </div>
+            <div className="max-h-[160px] overflow-y-auto space-y-1">
+              {chequesCand.map((c) => (
+                <label key={c.cheque_id} className="flex items-center gap-2 cursor-pointer text-[11.5px]">
+                  <input type="checkbox" checked={selCheques.has(c.cheque_id)}
+                    onChange={() => {
+                      const n = new Set(selCheques);
+                      n.has(c.cheque_id) ? n.delete(c.cheque_id) : n.add(c.cheque_id);
+                      setSelCheques(n);
+                    }} />
+                  <span className="flex-1">
+                    Cheque #{c.numero_cheque} · {c.banco_emisor}
+                    {c.cliente_nombre ? ` · ${c.cliente_nombre}` : ''} · vto {c.fecha_vencimiento.slice(0, 10)}
+                    {c.estado_actual === 'COBRADO' && <span className="ml-1 text-[10px] px-1 rounded bg-success-bg text-success">ya cobrado</span>}
+                  </span>
+                  <span className="tabular font-semibold">{fmtMoney(c.importe)}</span>
+                </label>
+              ))}
+            </div>
+            {selCheques.size > 0 && (
+              <>
+                <div className={`flex justify-between text-[11.5px] font-semibold border-t border-azure/30 pt-1 ${Math.abs(sumCheques - montoMov) <= 1 ? 'text-success' : 'text-danger'}`}>
+                  <span>Suma: {fmtMoney(sumCheques)}</span>
+                  <span>Diferencia: {fmtMoney(Math.round((montoMov - sumCheques) * 100) / 100)}</span>
+                </div>
+                <input type="text" placeholder="Observaciones (opcional)" value={obsCheques}
+                  onChange={(e) => setObsCheques(e.target.value)}
+                  className="w-full px-2 py-1 border border-line rounded text-[11.5px]" />
+              </>
+            )}
+            <Button size="sm" variant="primary"
+              disabled={selCheques.size === 0 || Math.abs(sumCheques - montoMov) > 1 || conciliarChequesMut.isPending}
+              onClick={() => conciliarChequesMut.mutate()}>
+              {conciliarChequesMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+              Confirmar cobro de cheques ({selCheques.size})
+            </Button>
+          </div>
+        )}
+
+        {/* ══ v1.50 §5.2 — Casos especiales, colapsados por defecto ══ */}
+        <button type="button" onClick={() => setEspecialesOpen(!especialesOpen)}
+          className="text-[11.5px] text-azure hover:underline">
+          {especialesOpen ? '− Ocultar' : '+ Ver'} otros tipos de vinculación (descuentos, facturas, anticipos)
+        </button>
+
+        <div className={especialesOpen ? 'space-y-3' : 'hidden'}>
         {/* §15 — Banner de matching de CUIT */}
         {!isLoading && resp && (
           <>
@@ -1485,21 +1871,42 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
           </>
         )}
 
+        {/* ── v1.49 §7 — Sección 1: descuento de cheque detectado ────────── */}
+        {descuentos.length > 0 && (
+          <div className="border border-success/40 bg-success-bg/15 rounded p-2 space-y-1.5">
+            <div className="font-semibold text-[11.5px]">
+              🎯 Match — Descuento de cheque detectado <span className="font-normal text-ink-muted">(el asiento ya existe, vincular sin duplicar)</span>
+            </div>
+            {descuentos.map((d) => (
+              <label key={d.asiento_id} className="flex items-center gap-2 cursor-pointer text-[11.5px]">
+                <input type="radio" name="v149-desc" checked={selDescuento === d.asiento_id}
+                  onChange={() => setSelDescuento(d.asiento_id)} />
+                <span className="flex-1">
+                  Asiento #{d.asiento_id} · {d.fecha.slice(0, 10)} · cheque #{d.numero_cheque}
+                  {d.entidad_descuento ? ` · ${d.entidad_descuento}` : ''}
+                  {d.cliente_nombre ? ` · ${d.cliente_nombre}` : ''}
+                </span>
+                <span className="tabular font-semibold">neto {fmtMoney(d.neto)}</span>
+              </label>
+            ))}
+            <div className="pt-1">
+              <Button size="sm" variant="primary"
+                disabled={!selDescuento || vincularDescuentoMut.isPending}
+                onClick={() => selDescuento && vincularDescuentoMut.mutate(selDescuento)}>
+                {vincularDescuentoMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                Vincular sin duplicar asiento
+              </Button>
+            </div>
+          </div>
+        )}
+
         {isLoading && <div className="text-ink-muted">Buscando sugerencias…</div>}
-        {!isLoading && lista.length === 0 && (
+        {!isLoading && lista.length === 0 && descuentos.length === 0 && chequesCand.length === 0 && recibosCand.length === 0 && (
           <div className="border border-warning/30 bg-warning-bg/20 rounded p-2 text-[11.5px]">
             No se encontraron facturas con saldo pendiente cerca de este monto.
             Probá la opción "Conciliar" general (referencia ASIENTO_MANUAL) para elegir cuenta manualmente.
           </div>
         )}
-        {/* §15 — Opción "Conciliar manual con motivo" siempre disponible */}
-        <div className="border-t border-line pt-2">
-          <button type="button"
-            onClick={() => setManualOpen(true)}
-            className="text-[11.5px] text-azure hover:underline">
-            ↪ Conciliar manualmente con motivo (elegir factura de otro proveedor/cliente)
-          </button>
-        </div>
 
         <div className="space-y-1 max-h-[300px] overflow-y-auto">
           {lista.map((s) => (
@@ -1631,15 +2038,27 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
           </div>
         )}
 
+        </div>{/* fin casos especiales colapsables */}
+
+        {/* v1.50 §5.2 sección 4 — vinculación manual, siempre visible */}
+        <div className="border-t border-line pt-2">
+          <button type="button"
+            onClick={() => setManualOpen(true)}
+            className="text-[11.5px] text-azure hover:underline">
+            ↪ Vincular manualmente con motivo (elegir cuenta libre / factura de otro auxiliar)
+          </button>
+        </div>
+
         <div className="flex justify-end gap-2 pt-2 border-t border-line">
           <Button variant="secondary" onClick={onClose} disabled={conciliarMut.isPending}>
             Cancelar
           </Button>
           <Button variant="primary"
             disabled={!puedeConfirmar || conciliarMut.isPending}
+            title={!especialesOpen && !puedeConfirmar ? 'Para conciliar contra facturas, abrí "otros tipos de vinculación".' : ''}
             onClick={() => conciliarMut.mutate()}>
             {conciliarMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-            Confirmar conciliación
+            Confirmar conciliación (facturas)
           </Button>
         </div>
       </div>

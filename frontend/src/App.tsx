@@ -26,6 +26,7 @@ import { RecibosPage } from './pages/RecibosPage';
 import { EcheqPage } from './pages/EcheqPage';
 import { TransferenciasPage } from './pages/TransferenciasPage';
 import { ArqueosPage } from './pages/ArqueosPage';
+import { CargasSaldoInicialPage } from './pages/CargasSaldoInicialPage';
 import { ArqueosPendientesPage } from './pages/ArqueosPendientesPage';
 import { CajaOperadoresPage } from './pages/CajaOperadoresPage';
 import { FlujoFondosPage } from './pages/FlujoFondosPage';
@@ -40,6 +41,7 @@ import TransferenciasInternasPendientesPage from './pages/TransferenciasInternas
 import ComprasPendientesFacturarPage from './pages/ComprasPendientesFacturarPage';
 import ConciliacionesDiferenciaPage from './pages/ConciliacionesDiferenciaPage';
 import ProcesamientoSeguroPage from './pages/ProcesamientoSeguroPage';
+import CompletarClientesPage from './pages/CompletarClientesPage';
 import { ReclasificarPendientesPage } from './pages/ReclasificarPendientesPage';
 import { FacturasCompraPage } from './pages/FacturasCompraPage';
 import { CCPage } from './pages/CCPage';
@@ -162,6 +164,8 @@ export default function App() {
               <Route path="/erp/echeq" element={<EcheqPage />} handle={{ crumb: 'eCheq' }} />
               <Route path="/erp/transferencias" element={<TransferenciasPage />} handle={{ crumb: 'Transferencias' }} />
               <Route path="/erp/arqueos" element={<ArqueosPage />} handle={{ crumb: 'Arqueos' }} />
+              {/* v1.52 — Carga de saldo inicial (Cajas y Bancos) */}
+              <Route path="/erp/tesoreria/cargar-saldo-inicial" element={<CargasSaldoInicialPage />} handle={{ crumb: 'Cargar saldo inicial' }} />
               <Route path="/erp/tesoreria/caja-efectivo/arqueos-pendientes" element={<ArqueosPendientesPage />} handle={{ crumb: 'Arqueos pendientes' }} />
               <Route path="/erp/tesoreria/caja-efectivo/operadores" element={<CajaOperadoresPage />} handle={{ crumb: 'Operadores de caja' }} />
               <Route path="/erp/tesoreria/flujo-de-fondos" element={<FlujoFondosPage />} handle={{ crumb: 'Flujo de fondos' }} />
@@ -223,6 +227,7 @@ export default function App() {
               {/* General — DistriApp + Libro IVA importar (cierran §9) */}
               <Route path="/erp/inicio" element={<Navigate to="/erp/dashboard" replace />} />
               <Route path="/erp/distriapp" element={<DistriappPage />} handle={{ crumb: 'DistriApp' }} />
+              <Route path="/erp/completar-clientes" element={<CompletarClientesPage />} handle={{ crumb: 'Completar clientes (plataforma)' }} />
               <Route path="/erp/libro-iva-compras" element={<LibroIvaImportarPage />} handle={{ crumb: 'Libro IVA — importar (legacy)' }} />
               <Route path="/erp/libro-iva-compras/import" element={<LibroIvaComprasImportPage />} handle={{ crumb: 'Libro IVA — import enriquecido' }} />
               <Route path="/erp/libro-iva-compras/no-tomadas" element={<LibroIvaComprasNoTomadasPage />} handle={{ crumb: 'Libro IVA — no tomadas' }} />

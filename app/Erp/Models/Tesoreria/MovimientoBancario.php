@@ -20,6 +20,10 @@ class MovimientoBancario extends Model
     public const ESTADO_CONFIRMADO = 'CONFIRMADO';
     public const ESTADO_REVERTIDO = 'REVERTIDO';
     public const ESTADO_CONCILIADO_MANUAL = 'CONCILIADO_MANUAL';
+    // v1.49 — conciliación contra recibos/cheques.
+    public const ESTADO_CONFIRMADO_CHEQUES = 'CONFIRMADO_CHEQUES_COBRADOS';
+    public const ESTADO_CONFIRMADO_DESCUENTO = 'CONFIRMADO_DESCUENTO_CHEQUE';
+    public const ESTADO_CONFIRMADO_RECIBO = 'CONFIRMADO_RECIBO_DIRECTO';
 
     protected $fillable = [
         'extracto_id', 'cuenta_bancaria_id',
@@ -42,6 +46,8 @@ class MovimientoBancario extends Model
         'es_transferencia_interna', 'mov_espejo_id',
         // v1.48 Anexo A — trazabilidad de anticipos cancelados.
         'anticipo_cancelado_por_mov_id',
+        // v1.49 — vinculación a asiento de descuento de cheque existente.
+        'asiento_descuento_vinculado_id',
     ];
 
     protected $casts = [

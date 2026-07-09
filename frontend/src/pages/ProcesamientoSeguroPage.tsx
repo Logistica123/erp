@@ -41,6 +41,7 @@ export default function ProcesamientoSeguroPage() {
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [periodo, setPeriodo] = useState('');        // 'YYYY-MM' para la carga
   const [filtroPeriodo, setFiltroPeriodo] = useState(''); // filtro del listado / emisión TXT
+  const [filtroAseguradora, setFiltroAseguradora] = useState(''); // filtro por aseguradora
   const [txtListo, setTxtListo] = useState<{ cbte: string; alicuotas: string; cant: number; suf: string } | null>(null);
 
   const { data: lista } = useQuery<{ data: Comprobante[] }>({
@@ -52,9 +53,10 @@ export default function ProcesamientoSeguroPage() {
     comprobantes.filter((c) => c.periodo_anio && c.periodo_mes)
       .map((c) => `${c.periodo_anio}-${String(c.periodo_mes).padStart(2, '0')}`),
   )).sort().reverse();
-  const comprobantesFiltrados = filtroPeriodo
-    ? comprobantes.filter((c) => `${c.periodo_anio}-${String(c.periodo_mes).padStart(2, '0')}` === filtroPeriodo)
-    : comprobantes;
+  const aseguradorasDisponibles = Array.from(new Set(comprobantes.map((c) => c.aseguradora))).sort();
+  const comprobantesFiltrados = comprobantes.filter((c) =>
+    (!filtroPeriodo || `${c.periodo_anio}-${String(c.periodo_mes).padStart(2, '0')}` === filtroPeriodo)
+    && (!filtroAseguradora || c.aseguradora === filtroAseguradora));
 
   const analizar = useMutation({
     mutationFn: (files: File[]) => {
@@ -133,6 +135,25 @@ export default function ProcesamientoSeguroPage() {
 
       {err && <div className="mb-4 p-3 bg-danger-bg text-danger rounded-md text-[12px]">{err}</div>}
 
+      {txtListo && (
+        <Card className="mb-4 border-success/40">
+          <CardHeader title={`TXT generado (${txtListo.cant} comprobante${txtListo.cant === 1 ? '' : 's'})`} actions={
+            <Button variant="ghost" size="sm" onClick={() => setTxtListo(null)}><X className="w-3 h-3" /></Button>
+          } />
+          <CardBody>
+            <p className="text-[12px] text-ink-2 mb-3">Descargá los dos archivos para importar al Libro IVA Digital de AFIP:</p>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => descargarTxt(`LIBRO_IVA_SEGUROS_CBTE${txtListo.suf}.txt`, txtListo.cbte)}>
+                <Download className="w-3 h-3" /> Descargar CBTE.txt
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => descargarTxt(`LIBRO_IVA_SEGUROS_ALICUOTAS${txtListo.suf}.txt`, txtListo.alicuotas)}>
+                <Download className="w-3 h-3" /> Descargar ALICUOTAS.txt
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       <Card>
         <CardHeader title="1 · Subir PDFs de pólizas" />
         <CardBody>
@@ -199,8 +220,15 @@ export default function ProcesamientoSeguroPage() {
       )}
 
       <Card className="mt-4">
-        <CardHeader title={`Comprobantes cargados (${comprobantes.length})`} actions={
+        <CardHeader title={`Comprobantes cargados (${comprobantesFiltrados.length}${comprobantesFiltrados.length !== comprobantes.length ? ` de ${comprobantes.length}` : ''})`} actions={
           <div className="flex gap-2 items-center text-[12px]">
+            <label className="flex items-center gap-1">Aseguradora:
+              <select value={filtroAseguradora} onChange={(e) => setFiltroAseguradora(e.target.value)}
+                className="px-2 py-1 border border-line-strong rounded bg-white max-w-[220px]">
+                <option value="">Todas</option>
+                {aseguradorasDisponibles.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
             <label className="flex items-center gap-1">Período:
               <select value={filtroPeriodo} onChange={(e) => setFiltroPeriodo(e.target.value)}
                 className="px-2 py-1 border border-line-strong rounded bg-white">
@@ -250,25 +278,6 @@ export default function ProcesamientoSeguroPage() {
           )}
         </CardBody>
       </Card>
-
-      {txtListo && (
-        <Card className="mt-4">
-          <CardHeader title={`TXT generado (${txtListo.cant} comprobante${txtListo.cant === 1 ? '' : 's'})`} actions={
-            <Button variant="ghost" size="sm" onClick={() => setTxtListo(null)}><X className="w-3 h-3" /></Button>
-          } />
-          <CardBody>
-            <p className="text-[12px] text-ink-2 mb-3">Descargá los dos archivos para importar al Libro IVA Digital de AFIP:</p>
-            <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => descargarTxt(`LIBRO_IVA_SEGUROS_CBTE${txtListo.suf}.txt`, txtListo.cbte)}>
-                <Download className="w-3 h-3" /> Descargar CBTE.txt
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => descargarTxt(`LIBRO_IVA_SEGUROS_ALICUOTAS${txtListo.suf}.txt`, txtListo.alicuotas)}>
-                <Download className="w-3 h-3" /> Descargar ALICUOTAS.txt
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
     </div>
   );
 }

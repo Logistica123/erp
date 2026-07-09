@@ -59,9 +59,13 @@ type FacturaCompra = {
   // v1.40 — OP externa + fecha de pago (referenciales, opcionales).
   op_externa: string | null;
   fecha_pago: string | null;
+  // v1.54 — sync DistriApp.
+  sincronizada_desde_distriapp?: number | boolean;
+  distriapp_factura_id?: string | null;
+  distriapp_liquidacion_id?: number | null;
 };
 
-const ESTADOS = ['RECIBIDA', 'CONTROLADA', 'OBSERVADA', 'PAGO_PARCIAL', 'PAGADA', 'ANULADA_POR_NC', 'RECHAZADA'];
+const ESTADOS = ['PENDIENTE_AUTORIZACION_ERP', 'RECIBIDA', 'CONTROLADA', 'OBSERVADA', 'PAGO_PARCIAL', 'PAGADA', 'ANULADA_POR_NC', 'RECHAZADA'];
 const ORIGENES = ['MANUAL', 'LIBRO_IVA_IMPORT', 'MIS_COMPROBANTES', 'DISTRIAPP'];
 
 /** Normaliza el campo `moneda` que viene como string (listado) o como objeto Eloquent (detalle). */
@@ -73,6 +77,7 @@ function monedaStr(m: FacturaCompra['moneda']): string {
 
 function badgeFor(estado: string) {
   switch (estado) {
+    case 'PENDIENTE_AUTORIZACION_ERP': return 'warning' as const;
     case 'CONTROLADA':
     case 'PAGADA':           return 'success' as const;
     case 'PAGO_PARCIAL':     return 'info' as const;
@@ -195,6 +200,10 @@ export function FacturasCompraPage() {
 
   const [verId, setVerId] = useState<number | null>(null);
   const [controlOpen, setControlOpen] = useState<FacturaCompra | null>(null);
+  // v1.54 — acciones de facturas sincronizadas desde DistriApp.
+  const [autorizarSync, setAutorizarSync] = useState<FacturaCompra | null>(null);
+  const [desautorizarSync, setDesautorizarSync] = useState<FacturaCompra | null>(null);
+  const [borrarSync, setBorrarSync] = useState<FacturaCompra | null>(null);
   const [observarOpen, setObservarOpen] = useState<FacturaCompra | null>(null);
   const [rechazarOpen, setRechazarOpen] = useState<FacturaCompra | null>(null);
   // v1.22 §13 — bulk select.
@@ -337,6 +346,11 @@ export function FacturasCompraPage() {
           <div className="flex items-center gap-1">
             <Badge variant={variant}>{o ?? '—'}</Badge>
             {Number(v) === 1 && <span title="Verificada contra ARCA" className="text-success">✓</span>}
+            {r.distriapp_liquidacion_id != null && (
+              <span className="text-[10px] text-ink-3" title={`DistriApp — Liquidación #${r.distriapp_liquidacion_id}`}>
+                Liq #{r.distriapp_liquidacion_id}
+              </span>
+            )}
           </div>
         );
       } },
@@ -389,6 +403,25 @@ export function FacturasCompraPage() {
     { key: 'acciones', header: '', align: 'right', width: '230px',
       render: (r) => (
         <div className="flex justify-end gap-1.5">
+          {/* v1.54 — facturas sincronizadas desde DistriApp. */}
+          {r.estado === 'PENDIENTE_AUTORIZACION_ERP' && (
+            <>
+              <Button size="sm" variant="primary" title="Autorizar y contabilizar (preview del asiento)."
+                onClick={(e) => { e.stopPropagation(); setAutorizarSync(r); }}>
+                <CheckCircle2 className="w-3 h-3" /> Autorizar
+              </Button>
+              <Button size="sm" variant="danger" title="Borrar la factura pendiente (avisa a DistriApp)."
+                onClick={(e) => { e.stopPropagation(); setBorrarSync(r); }}>
+                <Trash2 className="w-3 h-3" />
+              </Button>
+            </>
+          )}
+          {r.estado === 'CONTROLADA' && Number(r.sincronizada_desde_distriapp) === 1 && (
+            <Button size="sm" variant="outline" title="Desautorizar: reversa del asiento (fecha de hoy) y vuelve a pendiente."
+              onClick={(e) => { e.stopPropagation(); setDesautorizarSync(r); }}>
+              <Undo2 className="w-3 h-3" /> Desautorizar
+            </Button>
+          )}
           {r.estado === 'RECIBIDA' && (
             <Button size="sm" variant="primary" onClick={(e) => { e.stopPropagation(); setControlOpen(r); }}>
               <CheckCircle2 className="w-3 h-3" /> Controlar
@@ -536,6 +569,9 @@ export function FacturasCompraPage() {
 
       {verId && <DetalleModal id={verId} onClose={() => setVerId(null)} />}
       {controlOpen && <ControlarConfirm factura={controlOpen} onClose={() => setControlOpen(null)} />}
+      {autorizarSync && <AutorizarSyncModal factura={autorizarSync} onClose={() => setAutorizarSync(null)} />}
+      {desautorizarSync && <DesautorizarSyncModal factura={desautorizarSync} onClose={() => setDesautorizarSync(null)} />}
+      {borrarSync && <BorrarSyncModal factura={borrarSync} onClose={() => setBorrarSync(null)} />}
       {observarOpen && <MotivoModal factura={observarOpen} action="observar" onClose={() => setObservarOpen(null)} />}
       {rechazarOpen && <MotivoModal factura={rechazarOpen} action="rechazar" onClose={() => setRechazarOpen(null)} />}
       <CategoriaModal
@@ -869,5 +905,137 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
       <div className="text-[11px] text-ink-muted uppercase tracking-wide">{label}</div>
       <div className="text-[12.5px] text-ink-2">{value ?? '—'}</div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// v1.54 — Modales de facturas sincronizadas desde DistriApp.
+// ---------------------------------------------------------------------------
+
+type PreviewAutorizacion = {
+  factura: FacturaCompra & { observaciones?: string | null };
+  cliente_liquidacion: string | null;
+  lineas: Array<{ lado: 'D' | 'H'; cuenta: string; importe: number }>;
+  fecha_asiento: string;
+};
+
+function AutorizarSyncModal({ factura, onClose }: { factura: FacturaCompra; onClose: () => void }) {
+  const toast = useToast();
+  const invalidate = useInvalidate(['facturas-compra']);
+  const { data: preview, error: previewError } = useApi<PreviewAutorizacion>(
+    ['fc-preview-autorizacion', String(factura.id)],
+    `/api/erp/facturas-compra/${factura.id}/preview-autorizacion`,
+  );
+  const m = useApiMutation<FacturaCompra, void>(
+    () => api.post(`/api/erp/facturas-compra/${factura.id}/autorizar`),
+    {
+      onSuccess: () => { toast.success('Factura autorizada', 'Asiento contable generado.'); invalidate(); onClose(); },
+      onError: (e) => toast.error('No se pudo autorizar', errorMessage(e)),
+    },
+  );
+  return (
+    <Modal open onClose={onClose} title="Autorizar factura de compra" size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" disabled={!preview || m.isPending} onClick={() => m.mutate()}>
+            {m.isPending ? 'Autorizando…' : 'Autorizar y contabilizar'}
+          </Button>
+        </>
+      }>
+      <div className="space-y-3 text-[12.5px]">
+        <div className="bg-surface-row border border-line rounded-md p-3 grid grid-cols-2 gap-2 text-[12px]">
+          <div><span className="text-ink-3">Comprobante:</span> {factura.letra} {factura.tipo_codigo} {String(factura.punto_venta).padStart(5, '0')}-{String(factura.numero).padStart(8, '0')}</div>
+          <div><span className="text-ink-3">Fecha:</span> {fmtDate(factura.fecha_emision)}</div>
+          <div className="col-span-2"><span className="text-ink-3">Emisor:</span> {factura.razon_social_emisor} (CUIT {factura.cuit_emisor})</div>
+          <div><span className="text-ink-3">Total:</span> <strong className="tabular-nums">{fmtMoney(factura.imp_total)}</strong></div>
+          <div><span className="text-ink-3">Origen:</span> DistriApp{factura.distriapp_liquidacion_id ? ` — Liquidación #${factura.distriapp_liquidacion_id}` : ''}{preview?.cliente_liquidacion ? ` (${preview.cliente_liquidacion})` : ''}</div>
+        </div>
+        {previewError && <FormError error={errorMessage(previewError)} />}
+        {preview && (
+          <div className="border border-line rounded-md p-3">
+            <div className="text-[11px] font-semibold text-ink-2 mb-1">Asiento contable a generar · {fmtDate(preview.fecha_asiento)}</div>
+            <div className="font-mono text-[11.5px] space-y-0.5">
+              {preview.lineas.map((l, i) => (
+                <div key={i} className="flex justify-between gap-3">
+                  <span>{l.lado}&nbsp;&nbsp;{l.cuenta}</span>
+                  <span className="tabular-nums">{fmtMoney(l.importe)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="text-[10.5px] text-ink-3 mt-1">Centro de costo: GENERAL · el detalle multi-alícuota/percepciones lo arma el generador (v1.23/v1.24).</div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function DesautorizarSyncModal({ factura, onClose }: { factura: FacturaCompra; onClose: () => void }) {
+  const toast = useToast();
+  const invalidate = useInvalidate(['facturas-compra']);
+  const [motivo, setMotivo] = useState('');
+  const m = useApiMutation<FacturaCompra, void>(
+    () => api.post(`/api/erp/facturas-compra/${factura.id}/desautorizar`, { motivo: motivo.trim() }),
+    {
+      onSuccess: () => { toast.success('Factura desautorizada', 'Asiento revertido — la factura volvió a pendiente.'); invalidate(); onClose(); },
+      onError: (e) => toast.error('No se pudo desautorizar', errorMessage(e)),
+    },
+  );
+  return (
+    <Modal open onClose={onClose} title="Desautorizar factura" size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" disabled={motivo.trim().length < 10 || m.isPending} onClick={() => m.mutate()}>
+            {m.isPending ? 'Desautorizando…' : 'Desautorizar'}
+          </Button>
+        </>
+      }>
+      <div className="space-y-3 text-[12.5px]">
+        <div className="border border-warning/40 bg-warning-bg/30 rounded p-2 text-[11.5px]">
+          ⚠️ Esta acción anula el asiento contable (reversa D/H espejo <strong>con fecha de hoy</strong>),
+          la factura vuelve a PENDIENTE_AUTORIZACION_ERP y después vas a poder borrarla desde el ERP o desde DistriApp.
+        </div>
+        <div className="bg-surface-row border border-line rounded-md p-3 text-[12px]">
+          <div>Factura: <strong>{factura.letra} {factura.tipo_codigo} {String(factura.punto_venta).padStart(5, '0')}-{String(factura.numero).padStart(8, '0')}</strong> · {factura.razon_social_emisor}</div>
+          <div>Total: <strong className="tabular-nums">{fmtMoney(factura.imp_total)}</strong> · Asiento original: #{factura.asiento_numero ?? '—'}</div>
+        </div>
+        <div>
+          <label className="text-[11.5px] font-semibold text-ink-2 mb-1 block">Motivo (obligatorio, mínimo 10 caracteres) *</label>
+          <textarea rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            className="w-full border border-line rounded-md px-3 py-2 text-[12.5px] focus:outline-none focus:border-azure" />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function BorrarSyncModal({ factura, onClose }: { factura: FacturaCompra; onClose: () => void }) {
+  const toast = useToast();
+  const invalidate = useInvalidate(['facturas-compra']);
+  const m = useApiMutation<{ ok: boolean }, void>(
+    () => api.delete(`/api/erp/facturas-compra/${factura.id}/sync`),
+    {
+      onSuccess: () => { toast.success('Factura borrada', 'Se notificó a DistriApp para desvincular.'); invalidate(); onClose(); },
+      onError: (e) => toast.error('No se pudo borrar', errorMessage(e)),
+    },
+  );
+  return (
+    <ConfirmDialog
+      open onClose={onClose}
+      onConfirm={() => m.mutate(undefined as unknown as void)}
+      title="Borrar factura sincronizada"
+      message={
+        <>
+          ¿Borrar la factura <strong>{factura.letra} {factura.tipo_codigo} {String(factura.numero)}</strong> de{' '}
+          <strong>{factura.razon_social_emisor}</strong> por <strong>{fmtMoney(factura.imp_total)}</strong>?
+          <br /><br />
+          Solo se borran facturas pendientes de autorizar. Si vino de DistriApp, se le avisa para que desvincule.
+        </>
+      }
+      confirmLabel="Borrar"
+      variant="danger"
+    />
   );
 }

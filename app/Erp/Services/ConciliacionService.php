@@ -162,7 +162,16 @@ class ConciliacionService
      */
     public function desconciliar(MovimientoBancario $mov, string $motivo, User $usuario): MovimientoBancario
     {
-        if ($mov->estado !== MovimientoBancario::ESTADO_CONCILIADO) {
+        // v1.49 — los estados de conciliación contra cheques/descuento/recibo
+        // también se revierten por acá (cada uno con su reversa propia).
+        $estadosV149 = [
+            MovimientoBancario::ESTADO_CONFIRMADO_CHEQUES,
+            MovimientoBancario::ESTADO_CONFIRMADO_DESCUENTO,
+            MovimientoBancario::ESTADO_CONFIRMADO_RECIBO,
+            'CONFIRMADO_RECIBO_CON_CHEQUES', // v1.50
+        ];
+        if ($mov->estado !== MovimientoBancario::ESTADO_CONCILIADO
+            && ! in_array($mov->estado, $estadosV149, true)) {
             throw new DomainException('MOVIMIENTO_NO_CONCILIADO: estado actual '.$mov->estado);
         }
 
@@ -175,6 +184,21 @@ class ConciliacionService
             // Revertir efectos colaterales por tipo.
             foreach ($conciliaciones as $c) {
                 $this->revertirEfectosColaterales($c->referencia_tipo, $c->referencia_id);
+            }
+
+            // v1.49 — reversas específicas por tipo de vinculación.
+            if ($mov->estado === MovimientoBancario::ESTADO_CONFIRMADO_CHEQUES) {
+                app(\App\Erp\Services\Conciliacion\ConciliacionChequesService::class)->revertir($mov, $usuario);
+            } elseif ($mov->estado === MovimientoBancario::ESTADO_CONFIRMADO_DESCUENTO) {
+                // El asiento del descuento NO se anula (invariante 7): solo se
+                // desvincula. Aseguramos que el bloque de anulación de asiento
+                // de abajo no lo toque (asiento_id del mov está NULL en este flujo).
+                app(\App\Erp\Services\Conciliacion\AutoVincularDescuentosService::class)->desvincular($mov);
+            } elseif ($mov->estado === MovimientoBancario::ESTADO_CONFIRMADO_RECIBO
+                || $mov->estado === 'CONFIRMADO_RECIBO_CON_CHEQUES') {
+                // El asiento del recibo NO se toca (invariante 8). v1.50: si la
+                // vinculación auto-confirmó cheques, vuelven a su estado previo.
+                app(\App\Erp\Services\Conciliacion\ConciliacionRecibosService::class)->desvincular($mov);
             }
 
             // Anular asiento (reversa) si lo tenía.

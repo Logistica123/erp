@@ -29,14 +29,23 @@ type FacturaImputable = {
 type Recibo = {
   id: number; punto_venta: string | null; numero: string | null;
   numero_correlativo: string; numero_legacy: string | null;
-  fecha_emision: string; cliente_auxiliar_id: number;
+  fecha_emision: string; fecha_cobro?: string | null; cliente_auxiliar_id: number;
   total_factura: number; total_nc_aplicadas: number; total_retenciones: number;
   retencion_iva_total: number; retencion_iibb_total: number; retencion_ganancias_total: number;
+  otro_monto?: number | string; otro_observacion?: string | null;
+  redondeo_monto?: number | string;
   monto_cobrado: number; estado: 'BORRADOR' | 'EMITIDO' | 'CONCILIADO' | 'ANULADO';
   cliente?: Cliente;
   detalle_cobro: string | null;
 };
 type ReciboDetalle = Recibo & {
+  medio_cobro_id?: number | null;
+  observaciones?: string | null;
+  cheques?: Array<{
+    id: number; numero_cheque: string; banco_emisor: string;
+    cuit_librador: string | null; librador_nombre: string | null;
+    fecha_emision: string; fecha_pago: string; importe: number | string;
+  }>;
   comprobantes_imputados?: Array<{
     id: number; factura_venta_id: number; monto_imputado: number;
     total_factura: number; fecha_factura: string; numero_factura_snapshot: string;
@@ -84,8 +93,8 @@ const EMPRESA_DEFAULTS = {
 type Draft = {
   puntoVenta: string;
   numero: string;
-  fecha: string;
-  fechaCobro: string;
+  fecha: string;       // fecha de emisión (hoy, no editable)
+  fechaCobro: string;  // fecha real del cobro (editable, ≤ emisión)
   detalleCobro: string;
   empresaNombre: string;
   empresaCuit: string;
@@ -104,17 +113,33 @@ type Draft = {
   retencionIva: string;
   retencionIibb: string;
   retencionGanancias: string;
+  // "Otro" — medio/compensación especial (suma al cobro como una retención).
+  usaOtro: boolean;
+  otroMonto: string;
+  otroObservacion: string;
+  redondeoMonto: string; // ajuste de redondeo (admite negativo)
   importeRecibido: string;
   medioCobroId: string;
   observaciones: string;
   autoIncrementar: boolean;
-  // Datos del cheque (solo cuando medio = CHEQUES_CARTERA).
-  chequeNumero: string;
-  chequeBancoEmisor: string;
-  chequeCuitLibrador: string;
-  chequeLibradorNombre: string;
-  chequeFechaEmision: string;
-  chequeFechaPago: string;
+  // Cheques recibidos (solo cuando medio = CHEQUES_CARTERA). Pueden ser varios
+  // en un mismo recibo (ej. Urbano paga con muchos cheques chicos).
+  cheques: ChequeForm[];
+};
+
+type ChequeForm = {
+  numero: string;
+  bancoEmisor: string;
+  cuitLibrador: string;
+  libradorNombre: string;
+  fechaEmision: string;
+  fechaPago: string;
+  importe: string;
+};
+
+const CHEQUE_VACIO: ChequeForm = {
+  numero: '', bancoEmisor: '', cuitLibrador: '', libradorNombre: '',
+  fechaEmision: '', fechaPago: '', importe: '',
 };
 
 const DRAFT_INICIAL: Draft = {
@@ -140,16 +165,15 @@ const DRAFT_INICIAL: Draft = {
   retencionIva: '',
   retencionIibb: '',
   retencionGanancias: '',
+  usaOtro: false,
+  otroMonto: '',
+  otroObservacion: '',
+  redondeoMonto: '',
   importeRecibido: '',
   medioCobroId: '',
   observaciones: '',
   autoIncrementar: true,
-  chequeNumero: '',
-  chequeBancoEmisor: '',
-  chequeCuitLibrador: '',
-  chequeLibradorNombre: '',
-  chequeFechaEmision: '',
-  chequeFechaPago: '',
+  cheques: [],
 };
 
 function parseMontoEs(s: string | number | null | undefined): number {
@@ -202,6 +226,38 @@ function parseMontoEs(s: string | number | null | undefined): number {
   // Caso 4: sin separadores.
   return Number(str) || 0;
 }
+
+/** Recorta el texto a un máximo de 2 decimales (separador . o ,), sin tocar
+ * el resto de lo que tipea el usuario. "4655.5555" → "4655.55". */
+function limitarDecimales(raw: string): string {
+  const m = raw.match(/^(.*)([.,])(\d*)$/);
+  return m ? m[1] + m[2] + m[3].slice(0, 2) : raw;
+}
+
+/**
+ * Input de dinero. Mientras está enfocado muestra el texto crudo que tipea el
+ * usuario (sin reformatear), y solo formatea a 2 decimales al salir (blur). Así
+ * se evita el bug de los "ceros fantasma": al forzar toFixed(2) en cada tecla,
+ * "1.00" + "5" se volvía "1.005" y parseMontoEs lo leía como miles (1005).
+ * Limita a 2 decimales mientras se tipea.
+ */
+function MontoInput({ value, onChange, className, title }: {
+  value: number; onChange: (v: number) => void; className?: string; title?: string;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const display = text !== null ? text : (Number.isFinite(value) ? value.toFixed(2) : '');
+  return (
+    <input
+      type="text" inputMode="decimal"
+      value={display}
+      title={title}
+      className={className}
+      onFocus={(e) => { setText(Number.isFinite(value) ? String(Math.round(value * 100) / 100) : ''); e.target.select(); }}
+      onChange={(e) => { const t = limitarDecimales(e.target.value); setText(t); onChange(parseMontoEs(t)); }}
+      onBlur={() => setText(null)} />
+  );
+}
+
 function fmtFecha(s?: string | null): string {
   if (!s) return '—';
   const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})/);
@@ -327,7 +383,7 @@ export function RecibosPage() {
         puntoVenta: padPv(reciboDetalle.punto_venta ?? '00001'),
         numero: padNumero(reciboDetalle.numero ?? ''),
         fecha: String(reciboDetalle.fecha_emision).slice(0, 10),
-        fechaCobro: String(reciboDetalle.fecha_emision).slice(0, 10),
+        fechaCobro: String(reciboDetalle.fecha_cobro ?? reciboDetalle.fecha_emision).slice(0, 10),
         detalleCobro: reciboDetalle.detalle_cobro ?? '',
         empresaNombre: reciboDetalle.snapshot_empresa_razon_social ?? EMPRESA_DEFAULTS.razon_social,
         empresaCuit: reciboDetalle.snapshot_empresa_cuit ?? EMPRESA_DEFAULTS.cuit,
@@ -358,29 +414,51 @@ export function RecibosPage() {
         retencionIva: String(reciboDetalle.retencion_iva_total || ''),
         retencionIibb: String(reciboDetalle.retencion_iibb_total || ''),
         retencionGanancias: String(reciboDetalle.retencion_ganancias_total || ''),
+        usaOtro: Number(reciboDetalle.otro_monto || 0) > 0,
+        otroMonto: Number(reciboDetalle.otro_monto || 0) > 0 ? String(reciboDetalle.otro_monto) : '',
+        otroObservacion: reciboDetalle.otro_observacion ?? '',
+        redondeoMonto: Number(reciboDetalle.redondeo_monto || 0) !== 0 ? String(reciboDetalle.redondeo_monto) : '',
         importeRecibido: String(reciboDetalle.monto_cobrado),
-        medioCobroId: '',
-        observaciones: '',
+        medioCobroId: reciboDetalle.medio_cobro_id ? String(reciboDetalle.medio_cobro_id) : '',
+        observaciones: reciboDetalle.observaciones ?? '',
         autoIncrementar: true,
-        chequeNumero: '',
-        chequeBancoEmisor: '',
-        chequeCuitLibrador: '',
-        chequeLibradorNombre: '',
-        chequeFechaEmision: '',
-        chequeFechaPago: '',
+        cheques: (reciboDetalle.cheques ?? []).map((ch) => ({
+          numero: ch.numero_cheque ?? '',
+          bancoEmisor: ch.banco_emisor ?? '',
+          cuitLibrador: ch.cuit_librador ?? '',
+          libradorNombre: ch.librador_nombre ?? '',
+          fechaEmision: String(ch.fecha_emision ?? '').slice(0, 10),
+          fechaPago: String(ch.fecha_pago ?? '').slice(0, 10),
+          importe: String(ch.importe ?? ''),
+        })),
       });
     }
   }, [reciboDetalle]);
 
+  // v1.32 — Modo COMPENSACIÓN / CHEQUES. Detectamos por código del banco de la
+  // cuenta seleccionada. Se computan antes de los totales porque el importe
+  // recibido en modo cheques se deriva de la suma de los cheques cargados.
+  const medioActual = bancos.find((b) => String(b.id) === draft.medioCobroId);
+  const esCompensacion = medioActual?.codigo === 'COMP_CC';
+  const esCheque = medioActual?.codigo === 'CHEQUES_CARTERA';
+
   const totalImputado = draft.comprobantes.reduce((s, c) => s + c.imputado, 0);
   const totalNc = draft.ncAplicadas.reduce((s, n) => s + n.monto, 0);
   const totalRet = parseMontoEs(draft.retencionIva) + parseMontoEs(draft.retencionIibb) + parseMontoEs(draft.retencionGanancias);
-  const totalCobro = parseMontoEs(draft.importeRecibido) + totalRet;
+  // En modo cheques, el importe recibido = suma de los cheques cargados (cada
+  // uno con su propio importe). En los demás medios, es el campo manual.
+  const sumaCheques = draft.cheques.reduce((s, c) => s + parseMontoEs(c.importe), 0);
+  const montoCobrado = esCheque ? sumaCheques : parseMontoEs(draft.importeRecibido);
+  // "Otro" (medio especial) suma al cobro como una retención.
+  const otroMonto = (draft.usaOtro && !esCompensacion) ? parseMontoEs(draft.otroMonto) : 0;
+  // Redondeo: ajuste de cobranza (admite negativo). Suma al total cobro.
+  const redondeo = esCompensacion ? 0 : parseMontoEs(draft.redondeoMonto);
+  const totalCobro = montoCobrado + totalRet + otroMonto + redondeo;
   // Monto cobrable = total que se está saldando con este recibo (= total
   // imputado neto de NC). Las retenciones no se restan acá: forman parte del
   // total cobrado (el cliente las paga al fisco en lugar de a nosotros).
   // Así Monto cobrable == Total cobro (recibido + ret) == TOTAL IMPUTADO del
-  // recibo impreso. El cash neto que entra es `importeRecibido`.
+  // recibo impreso. El cash neto que entra es `montoCobrado`.
   const montoCobrable = Math.max(0, totalImputado - totalNc);
   // Validación del recibo: los 4 importes (Monto cobrable / Total imputado del
   // recibo impreso / Total cobro recibido+ret / TOTAL COBRO impreso) deben
@@ -388,14 +466,6 @@ export function RecibosPage() {
   // diferencia (positiva = falta cargar; negativa = sobra).
   const diferenciaCobro = Math.round((totalCobro - montoCobrable) * 100) / 100;
   const cobroCuadra = Math.abs(diferenciaCobro) < 0.01;
-
-  // v1.32 — Modo COMPENSACIÓN: NC neutralizan facturas sin movimiento de
-  // dinero. Detectamos por código del banco de la cuenta seleccionada
-  // (COMPENSACION). En este modo: importe = 0, retenciones = 0, deben haber
-  // facturas Y NC, y el total cuadra (totalImputado === totalNc).
-  const medioActual = bancos.find((b) => String(b.id) === draft.medioCobroId);
-  const esCompensacion = medioActual?.codigo === 'COMP_CC';
-  const esCheque = medioActual?.codigo === 'CHEQUES_CARTERA';
   // Cuando el usuario elige Compensación, forzamos los importes a 0.
   useEffect(() => {
     if (! esCompensacion) return;
@@ -407,6 +477,17 @@ export function RecibosPage() {
     if (Object.keys(cambios).length) setDraft({ ...draft, ...cambios });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [esCompensacion]);
+  // Al elegir "Cheques en Cartera", arrancar con una fila de cheque vacía.
+  useEffect(() => {
+    if (esCheque && draft.cheques.length === 0) {
+      setDraft((d) => ({ ...d, cheques: [{ ...CHEQUE_VACIO }] }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esCheque]);
+  const agregarCheque = () => setDraft((d) => ({ ...d, cheques: [...d.cheques, { ...CHEQUE_VACIO }] }));
+  const quitarCheque = (idx: number) => setDraft((d) => ({ ...d, cheques: d.cheques.filter((_, i) => i !== idx) }));
+  const setCheque = (idx: number, patch: Partial<ChequeForm>) =>
+    setDraft((d) => ({ ...d, cheques: d.cheques.map((c, i) => (i === idx ? { ...c, ...patch } : c)) }));
   // Validación específica de compensación: debe haber NC + facturas con totales iguales.
   const compensacionValida = esCompensacion
     ? (draft.comprobantes.length > 0 && draft.ncAplicadas.length > 0
@@ -429,7 +510,8 @@ export function RecibosPage() {
   // Construye el body común para crear/actualizar un recibo.
   const armarBodyRecibo = () => ({
     cliente_auxiliar_id: Number(draft.clienteId),
-    fecha_emision: draft.fecha,
+    fecha_emision: draft.fecha,     // emisión = hoy (el backend la fija igual)
+    fecha_cobro: draft.fechaCobro,  // fecha real del cobro (≤ emisión)
     detalle_cobro: draft.detalleCobro || null,
     comprobantes_imputados: draft.comprobantes.map((c) => ({
       factura_venta_id: c.factura_venta_id,
@@ -439,11 +521,14 @@ export function RecibosPage() {
       nc_factura_id: n.nc_factura_id,
       monto_aplicado: n.monto,
     })),
-    monto_cobrado: parseMontoEs(draft.importeRecibido),
+    monto_cobrado: montoCobrado,
     medio_cobro_id: draft.medioCobroId ? Number(draft.medioCobroId) : null,
     retencion_iva_total: parseMontoEs(draft.retencionIva),
     retencion_iibb_total: parseMontoEs(draft.retencionIibb),
     retencion_ganancias_total: parseMontoEs(draft.retencionGanancias),
+    otro_monto: otroMonto,
+    otro_observacion: otroMonto > 0 ? (draft.otroObservacion.trim() || null) : null,
+    redondeo_monto: redondeo,
     observaciones: draft.observaciones || null,
   });
 
@@ -481,6 +566,10 @@ export function RecibosPage() {
       toast.error('Sin comprobantes', 'Agregá al menos una factura.');
       return;
     }
+    if (!draft.fechaCobro || draft.fechaCobro > draft.fecha) {
+      toast.error('Fecha de cobro inválida', 'La fecha de cobro debe ser igual o anterior a la de emisión (hoy).');
+      return;
+    }
     if (!cobroCuadra) {
       toast.error('El cobro no cuadra',
         `Diferencia ${diferenciaCobro >= 0 ? '+' : ''}${fmtMoney(diferenciaCobro)} — ajustá importe recibido o retenciones para que el total cobro = monto cobrable.`);
@@ -490,6 +579,24 @@ export function RecibosPage() {
       toast.error('Compensación inválida',
         'En compensación el recibo debe tener al menos una factura y una NC, y la suma de NC debe igualar la suma de facturas (saldo cobrable = 0).');
       return;
+    }
+    if (esCheque) {
+      if (draft.cheques.length === 0) {
+        toast.error('Sin cheques', 'Agregá al menos un cheque recibido.');
+        return;
+      }
+      const incompleto = draft.cheques.findIndex((c) =>
+        !c.numero.trim() || !c.bancoEmisor.trim() || !c.fechaEmision || !c.fechaPago || parseMontoEs(c.importe) <= 0);
+      if (incompleto >= 0) {
+        toast.error('Cheque incompleto',
+          `Completá N° cheque, banco, fechas e importe del cheque #${incompleto + 1}.`);
+        return;
+      }
+      const fechaInvalida = draft.cheques.findIndex((c) => c.fechaPago < c.fechaEmision);
+      if (fechaInvalida >= 0) {
+        toast.error('Fechas del cheque', `La fecha de pago del cheque #${fechaInvalida + 1} no puede ser anterior a la de emisión.`);
+        return;
+      }
     }
     try {
       const body = { ...armarBodyRecibo(), auto_imputar_nc: false };
@@ -505,15 +612,15 @@ export function RecibosPage() {
       }
       const emitirBody: Record<string, unknown> = {};
       if (esCheque) {
-        emitirBody.cheque = {
-          numero_cheque: draft.chequeNumero.trim(),
-          banco_emisor: draft.chequeBancoEmisor.trim(),
-          cuit_librador: draft.chequeCuitLibrador.replace(/[^0-9]/g, '') || null,
-          librador_nombre: draft.chequeLibradorNombre.trim() || null,
-          fecha_emision: draft.chequeFechaEmision,
-          fecha_pago: draft.chequeFechaPago,
-          importe: parseMontoEs(draft.importeRecibido),
-        };
+        emitirBody.cheques = draft.cheques.map((c) => ({
+          numero_cheque: c.numero.trim(),
+          banco_emisor: c.bancoEmisor.trim(),
+          cuit_librador: c.cuitLibrador.replace(/[^0-9]/g, '') || null,
+          librador_nombre: c.libradorNombre.trim() || null,
+          fecha_emision: c.fechaEmision,
+          fecha_pago: c.fechaPago,
+          importe: parseMontoEs(c.importe),
+        }));
       }
       const emitido = await api.post<{ data: { recibo_id: number; estado: string } }>(`/api/erp/tesoreria/recibos/${reciboId}/emitir`, emitirBody);
       // Leo el recibo REAL persistido (puede haber asignado un número distinto
@@ -610,6 +717,17 @@ export function RecibosPage() {
                 <Printer className="w-3 h-3" /> Emitir e imprimir
               </Button>
             )}
+            {selectedReciboId && reciboDetalle && reciboDetalle.estado !== 'BORRADOR' && (
+              <Button variant="secondary" size="sm"
+                onClick={() => printRecibo(
+                  { ...draft, puntoVenta: padPv(reciboDetalle.punto_venta ?? draft.puntoVenta), numero: padNumero(reciboDetalle.numero ?? draft.numero) },
+                  { total_cobro: totalCobro, total_imputado: totalImputado - totalNc,
+                    watermark: reciboDetalle.estado === 'ANULADO' ? 'ANULADO' : null },
+                )}
+                title="Vuelve a imprimir el recibo tal como está guardado.">
+                <Printer className="w-3 h-3" /> Reimprimir
+              </Button>
+            )}
             {selectedReciboId && reciboDetalle?.estado === 'EMITIDO' && (
               <Button variant="danger" size="sm" onClick={() => setAnularTarget(reciboDetalle)}>
                 <Ban className="w-3 h-3" /> Anular
@@ -635,9 +753,8 @@ export function RecibosPage() {
                     placeholder="00000001"
                     disabled={!esEditable}
                     hint={proximoNumeroResp?.consultado_distriapp ? `Distri max=${proximoNumeroResp.max_distriapp}` : undefined} />
-                  <Field label="Fecha recibo *" type="date" value={draft.fecha}
-                    onChange={(e) => setDraft({ ...draft, fecha: e.target.value })}
-                    disabled={!esEditable} />
+                  <Field label="Fecha emisión" type="date" value={draft.fecha}
+                    disabled hint="Es la fecha de hoy (no editable)." />
                 </div>
                 <div className="text-[10.5px] text-ink-muted">
                   <label className="flex items-center gap-1">
@@ -716,17 +833,13 @@ export function RecibosPage() {
                           <td className="text-right tabular font-semibold">
                             {esEditable ? (
                               <div className="inline-flex items-center gap-1 justify-end">
-                                <input
-                                  type="text" inputMode="decimal"
-                                  value={Number.isFinite(c.imputado) ? c.imputado.toFixed(2) : ''}
-                                  onChange={(e) => {
-                                    const v = parseMontoEs(e.target.value);
-                                    setDraft({
-                                      ...draft,
-                                      comprobantes: draft.comprobantes.map((cc, idx) =>
-                                        idx === i ? { ...cc, imputado: v } : cc),
-                                    });
-                                  }}
+                                <MontoInput
+                                  value={c.imputado}
+                                  onChange={(v) => setDraft({
+                                    ...draft,
+                                    comprobantes: draft.comprobantes.map((cc, idx) =>
+                                      idx === i ? { ...cc, imputado: v } : cc),
+                                  })}
                                   title={imputadoInvalido
                                     ? `Debe ser > 0 y ≤ ${fmtMoney(c.totalFactura)}`
                                     : ''}
@@ -823,19 +936,22 @@ export function RecibosPage() {
               <CardHeader title={<div className="text-[12px] font-semibold">Cobro</div>} />
               <CardBody className="space-y-2">
                 <div className="grid grid-cols-2 gap-2 text-[11.5px]">
-                  <Field label="Fecha cobro" type="date" value={draft.fechaCobro}
+                  <Field label="Fecha cobro *" type="date" value={draft.fechaCobro}
                     onChange={(e) => setDraft({ ...draft, fechaCobro: e.target.value })}
-                    disabled={!esEditable} />
+                    max={draft.fecha}
+                    disabled={!esEditable}
+                    hint="Fecha real del cobro. Igual o anterior a la emisión." />
                   <Field label="Detalle cobro" value={draft.detalleCobro}
                     onChange={(e) => setDraft({ ...draft, detalleCobro: e.target.value })}
-                    placeholder="ECHEQ BANCO X N°..."
+                    placeholder={esEditable ? 'ECHEQ BANCO X N°...' : ''}
                     disabled={!esEditable} />
                   <Field label="Importe recibido" type="text" inputMode="decimal"
-                    value={draft.importeRecibido}
+                    value={esCheque ? sumaCheques.toFixed(2) : draft.importeRecibido}
                     onChange={(e) => setDraft({ ...draft, importeRecibido: e.target.value })}
                     placeholder={esCompensacion ? '0,00 (compensación)' : '0,00 o 13.000,26'}
-                    disabled={!esEditable || esCompensacion}
-                    hint={esCompensacion ? 'No aplica: se compensa NC contra facturas.' : undefined} />
+                    disabled={!esEditable || esCompensacion || esCheque}
+                    hint={esCompensacion ? 'No aplica: se compensa NC contra facturas.'
+                      : esCheque ? 'Se calcula como la suma de los cheques.' : undefined} />
                   <SelectField label="Medio de cobro" value={draft.medioCobroId}
                     onChange={(e) => setDraft({ ...draft, medioCobroId: e.target.value })}
                     disabled={!esEditable}
@@ -844,35 +960,63 @@ export function RecibosPage() {
                 </div>
                 {esCheque && (
                   <div className="border border-warning/50 bg-warning-bg/20 rounded p-2 space-y-2">
-                    <div className="text-[11px] font-semibold text-warning uppercase">
-                      Datos del cheque recibido
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold text-warning uppercase">
+                        Cheques recibidos ({draft.cheques.length})
+                      </div>
+                      {esEditable && (
+                        <Button variant="secondary" size="sm" onClick={agregarCheque}>
+                          <Plus className="w-3 h-3" /> Agregar cheque
+                        </Button>
+                      )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-[11.5px]">
-                      <Field label="N° cheque *" value={draft.chequeNumero}
-                        onChange={(e) => setDraft({ ...draft, chequeNumero: e.target.value })}
-                        disabled={!esEditable} placeholder="12345678" />
-                      <Field label="Banco emisor *" value={draft.chequeBancoEmisor}
-                        onChange={(e) => setDraft({ ...draft, chequeBancoEmisor: e.target.value })}
-                        disabled={!esEditable} placeholder="ICBC, Galicia…" />
-                      <Field label="CUIT librador" value={draft.chequeCuitLibrador}
-                        onChange={(e) => setDraft({ ...draft, chequeCuitLibrador: e.target.value })}
-                        disabled={!esEditable} placeholder="30-XXX-X" />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-[11.5px]">
-                      <Field label="Librador (nombre)" value={draft.chequeLibradorNombre}
-                        onChange={(e) => setDraft({ ...draft, chequeLibradorNombre: e.target.value })}
-                        disabled={!esEditable} />
-                      <Field label="Fecha emisión *" type="date" value={draft.chequeFechaEmision}
-                        onChange={(e) => setDraft({ ...draft, chequeFechaEmision: e.target.value })}
-                        disabled={!esEditable} />
-                      <Field label="Fecha pago / vencimiento *" type="date" value={draft.chequeFechaPago}
-                        onChange={(e) => setDraft({ ...draft, chequeFechaPago: e.target.value })}
-                        disabled={!esEditable}
-                        hint="Día desde el que se puede cobrar/depositar." />
+                    {draft.cheques.map((ch, idx) => (
+                      <div key={idx} className="border border-warning/30 bg-white/60 rounded p-2 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10.5px] font-semibold text-ink-2">Cheque #{idx + 1}</span>
+                          {esEditable && draft.cheques.length > 1 && (
+                            <button type="button" onClick={() => quitarCheque(idx)} title="Quitar cheque">
+                              <Trash2 className="w-3 h-3 text-danger" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                          <Field label="N° cheque *" value={ch.numero}
+                            onChange={(e) => setCheque(idx, { numero: e.target.value })}
+                            disabled={!esEditable} placeholder="12345678" />
+                          <Field label="Banco emisor *" value={ch.bancoEmisor}
+                            onChange={(e) => setCheque(idx, { bancoEmisor: e.target.value })}
+                            disabled={!esEditable} placeholder="ICBC, Galicia…" />
+                          <Field label="Importe *" type="text" inputMode="decimal" value={ch.importe}
+                            onChange={(e) => setCheque(idx, { importe: e.target.value })}
+                            disabled={!esEditable} placeholder="0,00" />
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 text-[11.5px]">
+                          <Field label="CUIT librador" value={ch.cuitLibrador}
+                            onChange={(e) => setCheque(idx, { cuitLibrador: e.target.value })}
+                            disabled={!esEditable} placeholder="30-XXX-X" />
+                          <Field label="Librador (nombre)" value={ch.libradorNombre}
+                            onChange={(e) => setCheque(idx, { libradorNombre: e.target.value })}
+                            disabled={!esEditable} />
+                          <Field label="Fecha emisión *" type="date" value={ch.fechaEmision}
+                            onChange={(e) => setCheque(idx, { fechaEmision: e.target.value })}
+                            disabled={!esEditable} />
+                          <Field label="Fecha pago / vto *" type="date" value={ch.fechaPago}
+                            onChange={(e) => setCheque(idx, { fechaPago: e.target.value })}
+                            disabled={!esEditable} />
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-[11px] font-semibold border-t border-warning/30 pt-1">
+                      <span>Suma de cheques:</span>
+                      <span className={Math.abs(sumaCheques - montoCobrable + totalRet) < 0.01 ? 'text-success tabular' : 'text-ink-2 tabular'}>
+                        {fmtMoney(sumaCheques)}
+                      </span>
                     </div>
                     <div className="text-[10.5px] text-ink-muted">
-                      Al emitir el recibo se registra el cheque en cartera. Si el día de pago
-                      llega sin que se haya marcado como cobrado, aparece como vencido.
+                      Al emitir el recibo se registra cada cheque en cartera. Si el día de pago
+                      llega sin marcarse como cobrado, aparece como vencido. El importe recibido
+                      es la suma de los cheques.
                     </div>
                   </div>
                 )}
@@ -890,6 +1034,39 @@ export function RecibosPage() {
                     onChange={(e) => setDraft({ ...draft, retencionGanancias: e.target.value })}
                     disabled={!esEditable || esCompensacion} />
                 </div>
+
+                {/* "Otro" — medio/compensación especial. Suma al cobro como una
+                    retención; contablemente va a 1.1.6.99 (a reclasificar). */}
+                <label className="flex items-center gap-2 text-[11.5px] cursor-pointer select-none">
+                  <input type="checkbox" checked={draft.usaOtro}
+                    disabled={!esEditable || esCompensacion}
+                    onChange={(e) => setDraft({ ...draft, usaOtro: e.target.checked })} />
+                  Se utilizó compensación / medio especial
+                </label>
+                {draft.usaOtro && (
+                  <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                    <Field label="Otro (importe)" type="text" inputMode="decimal"
+                      value={draft.otroMonto}
+                      onChange={(e) => setDraft({ ...draft, otroMonto: e.target.value })}
+                      disabled={!esEditable} placeholder="0,00" />
+                    <div className="col-span-2">
+                      <Field label="Observación" value={draft.otroObservacion}
+                        onChange={(e) => setDraft({ ...draft, otroObservacion: e.target.value })}
+                        disabled={!esEditable} placeholder="Detalle del medio/compensación especial" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Redondeo — ajuste de cobranza (admite negativo), va a 5.6.06. */}
+                <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                  <Field label="Redondeo" type="text" inputMode="text"
+                    value={draft.redondeoMonto}
+                    onChange={(e) => setDraft({ ...draft, redondeoMonto: e.target.value })}
+                    disabled={!esEditable || esCompensacion}
+                    placeholder="0,00 (admite negativo)"
+                    hint="Ajuste de redondeo (imputa a Redondeos)." />
+                </div>
+
                 <div className="text-[11.5px] space-y-0.5 bg-azure-soft/10 border border-azure-soft rounded p-2">
                   <div className="flex justify-between"><span>Total imputado (facturas):</span><span className="tabular">{fmtMoney(totalImputado)}</span></div>
                   {totalNc > 0 && <div className="flex justify-between text-success"><span>− NC aplicadas:</span><span className="tabular">−{fmtMoney(totalNc)}</span></div>}
@@ -902,8 +1079,20 @@ export function RecibosPage() {
                       <span className="tabular">{fmtMoney(totalRet)}</span>
                     </div>
                   )}
+                  {otroMonto > 0 && (
+                    <div className="flex justify-between text-ink-muted text-[11px]">
+                      <span>Otro (medio/compensación especial):</span>
+                      <span className="tabular">{fmtMoney(otroMonto)}</span>
+                    </div>
+                  )}
+                  {Math.abs(redondeo) > 0.001 && (
+                    <div className="flex justify-between text-ink-muted text-[11px]">
+                      <span>Redondeo:</span>
+                      <span className="tabular">{fmtMoney(redondeo)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold">
-                    <span>Total cobro (recibido + ret):</span><span className="tabular">{fmtMoney(totalCobro)}</span>
+                    <span>Total cobro (recibido + ret + otro + red.):</span><span className="tabular">{fmtMoney(totalCobro)}</span>
                   </div>
                   {!cobroCuadra && (
                     <div className="mt-1 -mx-2 -mb-2 px-2 py-1.5 border-t border-danger/40 bg-danger-bg/60 text-danger flex justify-between items-center font-semibold">

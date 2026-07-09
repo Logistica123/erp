@@ -259,7 +259,7 @@ class ContabilizadorFacturas
      *
      * Para NOTA_CREDITO recibida (signo=-1): invertido — Debe Proveedores, Haber Gasto/IVA CF.
      */
-    public function contabilizarCompra(int $facturaId, int $empresaId = 1, int $usuarioId = 1): \App\Erp\Models\Asiento
+    public function contabilizarCompra(int $facturaId, int $empresaId = 1, int $usuarioId = 1, ?int $cuentaGastoId = null): \App\Erp\Models\Asiento
     {
         $f = DB::table('erp_facturas_compra as f')
             ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'f.tipo_comprobante_id')
@@ -267,7 +267,7 @@ class ContabilizadorFacturas
             ->where('f.empresa_id', $empresaId)
             ->where('f.id', $facturaId)
             ->whereNull('f.deleted_at')
-            ->select('f.*', 'tc.clase as cbte_clase', 'tc.signo as cbte_signo', 'a.nombre as proveedor_nombre')
+            ->select('f.*', 'tc.clase as cbte_clase', 'tc.signo as cbte_signo', 'a.nombre as proveedor_nombre', 'a.tipo as auxiliar_tipo')
             ->first();
 
         if (! $f) {
@@ -286,14 +286,22 @@ class ContabilizadorFacturas
             ->where('empresa_id', $empresaId)->where('codigo', 'GENERAL')->value('id')
             ?? DB::table('erp_centros_costo')->where('empresa_id', $empresaId)->where('codigo', 'CENTRAL')->value('id');
 
-        $cuentaProv = $this->cuentaId($empresaId, self::CUENTA_PROVEEDORES);
+        // v1.54 — contrapartida según tipo de auxiliar: Distribuidor → 2.1.1.03
+        // (misma convención que OrdenPagoService, para que el saldo del auxiliar
+        // nazca y se cancele en la misma cuenta).
+        $codigoContrapartida = strtoupper((string) ($f->auxiliar_tipo ?? '')) === 'DISTRIBUIDOR'
+            ? '2.1.1.03'
+            : self::CUENTA_PROVEEDORES;
+        $cuentaProv = $this->cuentaId($empresaId, $codigoContrapartida);
         // v1.24 — mapeo concepto AFIP → cuenta contable cargado de
         // erp_configuracion_iva_mapeo (super_admin/contador pueden ajustarlo
         // desde la pantalla `/erp/contabilidad/configuracion-iva`).
         $mapeo = $this->cargarMapeoIva($empresaId);
         $cuentaIvaCfFallback = $this->cuentaIdOptional($empresaId, self::CUENTA_IVA_CF) ?? null;
         $cuentaRetIva = $this->cuentaIdOptional($empresaId, self::CUENTA_RETENCIONES_IVA_SUFRIDAS) ?? $cuentaIvaCfFallback;
-        $cuentaGasto = $this->resolverCuentaGasto($empresaId, $f->centro_costo_id, $f->auxiliar_id);
+        // v1.54 — override de cuenta de gasto (sync DistriApp mapea el cliente
+        // de la liquidación a 5.1.1.0X); sin override, resolución estándar.
+        $cuentaGasto = $cuentaGastoId ?? $this->resolverCuentaGasto($empresaId, $f->centro_costo_id, $f->auxiliar_id);
 
         $netoSinIva = round(
             (float) $f->imp_neto_gravado + (float) $f->imp_no_gravado + (float) $f->imp_exento, 2

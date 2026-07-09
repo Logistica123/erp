@@ -84,7 +84,10 @@ class RecibosController
             ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
             ->where('fv.empresa_id', $empresaId)
             ->whereIn('fv.estado', ['EMITIDA', 'COBRO_PARCIAL', 'CONTROLADA'])
-            ->where('tc.clase', 'FACTURA')
+            // FACTURA y NOTA_DEBITO: ambas son deuda del cliente (signo +1) e
+            // imputables en un recibo. (Las NC, signo -1, van por su propio
+            // listado que reduce el monto cobrable.)
+            ->whereIn('tc.clase', ['FACTURA', 'NOTA_DEBITO'])
             ->whereNull('fv.deleted_at')
             ->groupBy('fv.auxiliar_id')
             ->pluck(DB::raw('COUNT(*)'), 'fv.auxiliar_id')
@@ -163,7 +166,10 @@ class RecibosController
             ->where('fv.empresa_id', $empresaId)
             ->whereIn('fv.auxiliar_id', $auxIds)
             ->whereIn('fv.estado', ['EMITIDA', 'COBRO_PARCIAL', 'CONTROLADA'])
-            ->where('tc.clase', 'FACTURA')
+            // FACTURA y NOTA_DEBITO: ambas son deuda del cliente (signo +1) e
+            // imputables en un recibo. (Las NC, signo -1, van por su propio
+            // listado que reduce el monto cobrable.)
+            ->whereIn('tc.clase', ['FACTURA', 'NOTA_DEBITO'])
             ->whereNull('fv.deleted_at')
             ->orderBy('fv.fecha_emision') // FIFO
             ->limit(500)
@@ -254,6 +260,7 @@ class RecibosController
             'ncAplicadas.nc:id,tipo_comprobante_id,numero,imp_total',
             'retenciones.cuentaContable:id,codigo,nombre',
             'medioCobro:id,nombre,banco_id',
+            'cheques', // v1.32 — para mostrar el detalle del cheque en recibos emitidos
             'asiento:id,numero',
         ])->where('empresa_id', $empresaId)->findOrFail($id);
         return response()->json(['ok' => true, 'data' => $recibo]);
@@ -264,7 +271,8 @@ class RecibosController
         $this->mustHave($request, 'tesoreria.recibos.crear');
         $data = $request->validate([
             'cliente_auxiliar_id' => ['required', 'integer', 'exists:erp_auxiliares,id'],
-            'fecha_emision' => ['nullable', 'date'],
+            'fecha_emision' => ['nullable', 'date'], // ignorada: la emisión es hoy
+            'fecha_cobro' => ['nullable', 'date', 'before_or_equal:today'],
             'detalle_cobro' => ['nullable', 'string', 'max:200'],
             'comprobantes_imputados' => ['required', 'array', 'min:1'],
             'comprobantes_imputados.*.factura_venta_id' => ['required', 'integer', 'exists:erp_facturas_venta,id'],
@@ -280,6 +288,11 @@ class RecibosController
             'retencion_iva_total' => ['nullable', 'numeric', 'min:0'],
             'retencion_iibb_total' => ['nullable', 'numeric', 'min:0'],
             'retencion_ganancias_total' => ['nullable', 'numeric', 'min:0'],
+            // "Otro" — medio/compensación especial (suma al cobro, va a 1.1.6.99).
+            'otro_monto' => ['nullable', 'numeric', 'min:0'],
+            'otro_observacion' => ['nullable', 'string', 'max:255'],
+            // Redondeo — ajuste de cobranza (admite valores negativos).
+            'redondeo_monto' => ['nullable', 'numeric'],
             // v1.31 — Retenciones detalladas (opcional, coexisten).
             'retenciones' => ['nullable', 'array'],
             'retenciones.*.tipo' => ['required', 'in:GANANCIAS,IVA,IIBB,SUSS,OTRO'],
@@ -316,7 +329,8 @@ class RecibosController
 
         $data = $request->validate([
             'cliente_auxiliar_id' => ['required', 'integer', 'exists:erp_auxiliares,id'],
-            'fecha_emision' => ['nullable', 'date'],
+            'fecha_emision' => ['nullable', 'date'], // ignorada: la emisión es hoy
+            'fecha_cobro' => ['nullable', 'date', 'before_or_equal:today'],
             'detalle_cobro' => ['nullable', 'string', 'max:200'],
             'comprobantes_imputados' => ['required', 'array', 'min:1'],
             'comprobantes_imputados.*.factura_venta_id' => ['required', 'integer', 'exists:erp_facturas_venta,id'],
@@ -330,6 +344,11 @@ class RecibosController
             'retencion_iva_total' => ['nullable', 'numeric', 'min:0'],
             'retencion_iibb_total' => ['nullable', 'numeric', 'min:0'],
             'retencion_ganancias_total' => ['nullable', 'numeric', 'min:0'],
+            // "Otro" — medio/compensación especial (suma al cobro, va a 1.1.6.99).
+            'otro_monto' => ['nullable', 'numeric', 'min:0'],
+            'otro_observacion' => ['nullable', 'string', 'max:255'],
+            // Redondeo — ajuste de cobranza (admite valores negativos).
+            'redondeo_monto' => ['nullable', 'numeric'],
             'retenciones' => ['nullable', 'array'],
             'retenciones.*.tipo' => ['required', 'in:GANANCIAS,IVA,IIBB,SUSS,OTRO'],
             'retenciones.*.jurisdiccion_codigo' => ['nullable', 'string', 'size:3'],
@@ -355,9 +374,20 @@ class RecibosController
         $recibo = Recibo::with(['ncAplicadas', 'retenciones'])
             ->where('empresa_id', $empresaId)->findOrFail($id);
 
-        // Datos opcionales del cheque (cuando el medio de cobro es
-        // CHEQUES_CARTERA). El service exige que vengan si el medio lo requiere.
-        $cheque = $request->validate([
+        // Datos opcionales de los cheques (cuando el medio de cobro es
+        // CHEQUES_CARTERA). Pueden ser varios en un mismo recibo. El service
+        // exige que vengan si el medio lo requiere y que sumen el cobro.
+        // Back-compat: se sigue aceptando `cheque` (objeto único).
+        $validated = $request->validate([
+            'cheques' => ['nullable', 'array', 'min:1'],
+            'cheques.*.numero_cheque' => ['required', 'string', 'max:30'],
+            'cheques.*.banco_emisor' => ['required', 'string', 'max:100'],
+            'cheques.*.cuit_librador' => ['nullable', 'string', 'max:13'],
+            'cheques.*.librador_nombre' => ['nullable', 'string', 'max:200'],
+            'cheques.*.fecha_emision' => ['required', 'date'],
+            'cheques.*.fecha_pago' => ['required', 'date', 'after_or_equal:cheques.*.fecha_emision'],
+            'cheques.*.importe' => ['required', 'numeric', 'min:0.01'],
+            'cheques.*.observaciones' => ['nullable', 'string', 'max:500'],
             'cheque' => ['nullable', 'array'],
             'cheque.numero_cheque' => ['required_with:cheque', 'string', 'max:30'],
             'cheque.banco_emisor' => ['required_with:cheque', 'string', 'max:100'],
@@ -367,10 +397,12 @@ class RecibosController
             'cheque.fecha_pago' => ['required_with:cheque', 'date', 'after_or_equal:cheque.fecha_emision'],
             'cheque.importe' => ['required_with:cheque', 'numeric', 'min:0.01'],
             'cheque.observaciones' => ['nullable', 'string', 'max:500'],
-        ])['cheque'] ?? null;
+        ]);
+        $cheques = $validated['cheques']
+            ?? (isset($validated['cheque']) ? [$validated['cheque']] : null);
 
         try {
-            $asiento = $this->svc->emitir($recibo, $request->user(), $cheque);
+            $asiento = $this->svc->emitir($recibo, $request->user(), $cheques);
             return response()->json(['ok' => true, 'data' => [
                 'recibo_id' => $recibo->id,
                 'asiento_id' => $asiento->id,

@@ -110,16 +110,56 @@ class CtaCorrienteService
         if (empty($facturaIds)) {
             return [];
         }
-        $rows = DB::table('erp_cobro_items as ci')
+        $aplic = [];
+
+        // v1.32 — Cobros vía recibos (multi-comprobante), recibos NO anulados.
+        // El monto_imputado ya incluye la parte cubierta por NC (compensación),
+        // así que las NC aplicadas A la factura NO se suman de nuevo acá.
+        $conRecibo = [];
+        $rec = DB::table('erp_recibos_comprobantes_imputados as rci')
+            ->join('erp_recibos as r', 'r.id', '=', 'rci.recibo_id')
+            ->whereIn('rci.factura_venta_id', $facturaIds)
+            ->where('r.estado', '!=', 'ANULADO')
+            ->where('r.fecha_emision', '<=', $fecha)
+            ->groupBy('rci.factura_venta_id')
+            ->select('rci.factura_venta_id as fid', DB::raw('SUM(rci.monto_imputado) AS m'))
+            ->get();
+        foreach ($rec as $x) {
+            $aplic[$x->fid] = (float) $x->m;
+            $conRecibo[$x->fid] = true;
+        }
+
+        // Cobros legacy (erp_cobro_items), solo para facturas sin recibo (no
+        // doble contar las que ya se cobraron por el modelo nuevo).
+        $cob = DB::table('erp_cobro_items as ci')
             ->join('erp_cobros as cb', 'cb.id', '=', 'ci.cobro_id')
             ->where('ci.tipo_item', 'FACTURA_VENTA')
             ->whereIn('ci.factura_id', $facturaIds)
             ->where('cb.fecha', '<=', $fecha)
             ->whereNotIn('cb.estado', ['ANULADO', 'RECHAZADO'])
             ->groupBy('ci.factura_id')
-            ->select('ci.factura_id', DB::raw('SUM(ci.importe) AS aplicado'))
+            ->select('ci.factura_id as fid', DB::raw('SUM(ci.importe) AS m'))
             ->get();
-        return $rows->pluck('aplicado', 'factura_id')->map(fn ($v) => (float) $v)->all();
+        foreach ($cob as $x) {
+            if (! isset($conRecibo[$x->fid])) {
+                $aplic[$x->fid] = ($aplic[$x->fid] ?? 0) + (float) $x->m;
+            }
+        }
+
+        // NC consumidas: cada NC reduce su PROPIO saldo por lo que se imputó de
+        // ella a facturas (erp_imputaciones_nc.nc_id). Sin esto, las NC ya
+        // aplicadas seguían figurando como pendientes en la cuenta corriente.
+        $nc = DB::table('erp_imputaciones_nc')
+            ->whereIn('nc_id', $facturaIds)
+            ->where('fecha_imputacion', '<=', $fecha)
+            ->groupBy('nc_id')
+            ->select('nc_id as fid', DB::raw('SUM(importe) AS m'))
+            ->get();
+        foreach ($nc as $x) {
+            $aplic[$x->fid] = ($aplic[$x->fid] ?? 0) + (float) $x->m;
+        }
+
+        return $aplic;
     }
 
     private function aplicacionesPagos(array $facturaIds, string $fecha): array

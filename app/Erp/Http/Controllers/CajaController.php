@@ -51,7 +51,7 @@ class CajaController
         ]);
 
         $query = ArqueoCaja::query()
-            ->with(['caja:id,codigo,nombre', 'asientoAjuste:id,numero,fecha', 'realizadoPor:id,name'])
+            ->with(['caja:id,codigo,nombre', 'asientoAjuste:id,numero,fecha', 'realizadoPor:id,name', 'denominaciones'])
             ->when($data['caja_id'] ?? null, fn ($q, $v) => $q->where('caja_id', $v))
             ->when($data['desde'] ?? null, fn ($q, $v) => $q->where('fecha', '>=', $v))
             ->when($data['hasta'] ?? null, fn ($q, $v) => $q->where('fecha', '<=', $v))
@@ -83,6 +83,61 @@ class CajaController
         }
 
         return response()->json(['ok' => true, 'data' => $arqueo->fresh(['caja', 'asientoAjuste', 'denominaciones'])], 201);
+    }
+
+    /**
+     * v1.51 Bloque B — Editar un arqueo pendiente (mismo body que el POST).
+     * PUT /api/erp/caja/arqueos/{id}
+     */
+    public function actualizarArqueo(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'caja_id' => ['required', 'integer', 'exists:erp_cajas,id'],
+            'fecha' => ['required', 'date'],
+            'saldo_fisico' => ['required', 'numeric'],
+            'motivo' => ['nullable', 'string', 'max:300'],
+            'denominaciones' => ['nullable', 'array'],
+            'denominaciones.*.valor' => ['required_with:denominaciones', 'numeric', 'min:0.01'],
+            'denominaciones.*.cantidad' => ['required_with:denominaciones', 'integer', 'min:0'],
+        ]);
+        $arqueo = ArqueoCaja::findOrFail($id);
+        try {
+            $arqueo = $this->service->actualizar($arqueo, [...$data, 'usuario_id' => $request->user()->id]);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $arqueo->fresh(['caja', 'asientoAjuste', 'denominaciones'])]);
+    }
+
+    /**
+     * v1.51 Bloque C — Borrar un arqueo pendiente (físico, con denominaciones).
+     * DELETE /api/erp/caja/arqueos/{id}
+     */
+    public function borrarArqueo(Request $request, int $id): JsonResponse
+    {
+        $arqueo = ArqueoCaja::findOrFail($id);
+        try {
+            $this->service->borrar($arqueo, $request->user()->id);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * v1.51 Bloque D — Anular un arqueo cerrado (reversa del asiento si tiene).
+     * POST /api/erp/caja/arqueos/{id}/anular  body: { motivo (≥10 chars) }
+     */
+    public function anularArqueo(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate(['motivo' => ['required', 'string', 'min:10', 'max:255']]);
+        $arqueo = ArqueoCaja::findOrFail($id);
+        try {
+            $arqueo = $this->service->anular($arqueo, $data['motivo'], $request->user()->id);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $arqueo->fresh(['caja', 'asientoAjuste'])]);
     }
 
     /**

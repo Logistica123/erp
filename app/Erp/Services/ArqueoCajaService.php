@@ -205,6 +205,188 @@ class ArqueoCajaService
     }
 
     /**
+     * v1.51 Bloque B — Actualiza un arqueo en PENDIENTE_AUTORIZACION (o
+     * BORRADOR). Reprocesa igual que registrar(): recalcula saldo teórico
+     * desde la caja, valida grilla/motivo y re-evalúa los 3 caminos (puede
+     * pasar a CIERRA_OK o auto-ajustarse si la nueva diferencia ≤ tolerancia).
+     * No se puede cambiar el realizado_por (D del spec §5.2).
+     *
+     * @param  array{caja_id:int, fecha:string, saldo_fisico:float|string,
+     *               motivo?:?string, denominaciones?:array, usuario_id:int}  $data
+     */
+    public function actualizar(ArqueoCaja $arqueo, array $data): ArqueoCaja
+    {
+        if (! in_array($arqueo->estado, ['PENDIENTE_AUTORIZACION', 'BORRADOR'], true)) {
+            throw new DomainException("ARQUEO_NO_EDITABLE: estado actual {$arqueo->estado} — solo se editan pendientes.");
+        }
+        $caja = Caja::findOrFail($data['caja_id']);
+        if (! $caja->activo) {
+            throw new DomainException("CAJA_INACTIVA: la caja {$caja->codigo} está desactivada.");
+        }
+        $this->validarOperador((int) $data['usuario_id'], (int) $caja->id);
+
+        $fecha = Carbon::parse($data['fecha'])->toDateString();
+        $saldoFisico = round((float) $data['saldo_fisico'], 2);
+        $denominaciones = $data['denominaciones'] ?? [];
+
+        $sumaDenom = 0.0;
+        foreach ($denominaciones as $d) {
+            $sumaDenom += round(((float) $d['valor']) * (int) $d['cantidad'], 2);
+        }
+        if (! empty($denominaciones) && abs(round($sumaDenom, 2) - $saldoFisico) > 0.01) {
+            throw new DomainException(sprintf(
+                'GRILLA_INCONSISTENTE: suma de denominaciones $%.2f ≠ saldo_fisico $%.2f',
+                round($sumaDenom, 2), $saldoFisico,
+            ));
+        }
+
+        // UNIQUE (caja, fecha): si cambió a un par ya usado por OTRO arqueo, rebotar claro.
+        $dup = ArqueoCaja::where('caja_id', $caja->id)->where('fecha', $fecha)
+            ->where('id', '!=', $arqueo->id)->exists();
+        if ($dup) {
+            throw new DomainException('ARQUEO_DUPLICADO: ya existe otro arqueo de esa caja en esa fecha.');
+        }
+
+        $saldoTeorico = (float) $caja->saldo_actual;
+        $diferencia = round($saldoFisico - $saldoTeorico, 2);
+        if (abs($diferencia) > 0.01 && strlen(trim((string) ($data['motivo'] ?? ''))) < 10) {
+            throw new DomainException('ARQUEO_MOTIVO_REQUERIDO: con diferencia distinta de cero se requiere motivo (mín 10 chars).');
+        }
+
+        $abs = abs($diferencia);
+        $estado = $abs < 0.01
+            ? 'CIERRA_OK'
+            : ($abs <= self::TOLERANCIA_AUTOAJUSTE ? 'CERRADO_CON_AJUSTE' : 'PENDIENTE_AUTORIZACION');
+
+        return DB::transaction(function () use ($arqueo, $caja, $data, $fecha, $saldoFisico, $saldoTeorico, $diferencia, $estado, $denominaciones) {
+            DB::statement('SET @erp_current_user_id = ?', [$data['usuario_id']]);
+
+            $arqueo->update([
+                'caja_id' => $caja->id,
+                'fecha' => $fecha,
+                'saldo_teorico' => $saldoTeorico,
+                'saldo_fisico' => $saldoFisico,
+                'motivo' => $data['motivo'] ?? null,
+                'estado' => $estado,
+            ]);
+
+            DB::table('erp_arqueos_caja_denominaciones')->where('arqueo_id', $arqueo->id)->delete();
+            $this->guardarDenominaciones($arqueo->id, $denominaciones);
+
+            if ($estado === 'CERRADO_CON_AJUSTE') {
+                $asiento = $this->asientoDiferencia($caja, $fecha, $diferencia, $data['usuario_id'],
+                    $data['motivo'] ?? 'Diferencia de arqueo (auto-ajuste ≤ tolerancia)');
+                $arqueo->update(['asiento_ajuste_id' => $asiento->id]);
+                $caja->update(['saldo_actual' => $saldoFisico]);
+            }
+
+            $this->audit->logEvento(
+                accion: 'ARQUEO_EDITADO',
+                modulo: 'tesoreria',
+                descripcion: sprintf('Arqueo #%d editado · caja %s al %s · físico=%.2f · dif=%.2f · estado=%s',
+                    $arqueo->id, $caja->codigo, $fecha, $saldoFisico, $diferencia, $estado),
+                empresaId: $caja->empresa_id,
+            );
+
+            return $arqueo->fresh();
+        });
+    }
+
+    /**
+     * v1.51 Bloque C — Borra físicamente un arqueo pendiente (sin asiento) con
+     * sus denominaciones en cascada.
+     */
+    public function borrar(ArqueoCaja $arqueo, int $usuarioId): void
+    {
+        if (! in_array($arqueo->estado, ['PENDIENTE_AUTORIZACION', 'BORRADOR'], true)) {
+            throw new DomainException("ARQUEO_NO_BORRABLE: estado actual {$arqueo->estado} — los cerrados se anulan, no se borran.");
+        }
+        $caja = Caja::findOrFail($arqueo->caja_id);
+        DB::transaction(function () use ($arqueo, $usuarioId, $caja) {
+            DB::statement('SET @erp_current_user_id = ?', [$usuarioId]);
+            DB::table('erp_arqueos_caja_denominaciones')->where('arqueo_id', $arqueo->id)->delete();
+            $arqueo->delete();
+            $this->audit->logEvento(
+                accion: 'ARQUEO_BORRADO',
+                modulo: 'tesoreria',
+                descripcion: sprintf('Arqueo #%d borrado · caja %s al %s · físico=%.2f',
+                    $arqueo->id, $caja->codigo, $arqueo->fecha->toDateString(), (float) $arqueo->saldo_fisico),
+                empresaId: $caja->empresa_id,
+            );
+        });
+    }
+
+    /**
+     * v1.51 Bloque D — Anula un arqueo cerrado. Si generó asiento de ajuste,
+     * crea la reversa (D/H espejo) con FECHA DEL DÍA (no la del arqueo, para
+     * no tocar períodos cerrados) y revierte el saldo operativo de la caja.
+     * El arqueo queda ANULADO y visible (trazabilidad).
+     */
+    public function anular(ArqueoCaja $arqueo, string $motivo, int $usuarioId): ArqueoCaja
+    {
+        if (! in_array($arqueo->estado, ['CIERRA_OK', 'CERRADO_CON_AJUSTE', 'CERRADO_CON_DISCREPANCIA'], true)) {
+            throw new DomainException("ARQUEO_NO_ANULABLE: estado actual {$arqueo->estado} — solo se anulan arqueos cerrados.");
+        }
+        if (strlen(trim($motivo)) < 10) {
+            throw new DomainException('MOTIVO_ANULACION_CORTO: mínimo 10 caracteres.');
+        }
+        $caja = Caja::findOrFail($arqueo->caja_id);
+
+        return DB::transaction(function () use ($arqueo, $caja, $motivo, $usuarioId) {
+            DB::statement('SET @erp_current_user_id = ?', [$usuarioId]);
+
+            $reversaId = null;
+            if ($arqueo->asiento_ajuste_id) {
+                $original = DB::table('erp_movimientos_asiento')->where('asiento_id', $arqueo->asiento_ajuste_id)->get();
+                $cab = DB::table('erp_asientos')->where('id', $arqueo->asiento_ajuste_id)->first(['diario_id']);
+                $reversa = $this->asientoService->crearBorrador([
+                    'empresa_id' => $caja->empresa_id,
+                    'diario_id' => (int) $cab->diario_id,
+                    'fecha' => now()->toDateString(), // día de la anulación (LEEME #2)
+                    'glosa' => sprintf('Reversa ajuste arqueo #%d caja %s: %s', $arqueo->id, $caja->codigo, $motivo),
+                    'origen' => 'AJUSTE',
+                    'origen_id' => $caja->id,
+                    'origen_tabla' => 'erp_cajas',
+                    'usuario_id' => $usuarioId,
+                    'movimientos' => $original->map(fn ($m) => [
+                        'cuenta_id' => (int) $m->cuenta_id,
+                        'centro_costo_id' => $m->centro_costo_id,
+                        'auxiliar_id' => $m->auxiliar_id,
+                        'debe' => (float) $m->haber, // intercambiados
+                        'haber' => (float) $m->debe,
+                        'glosa' => 'Reversa: '.$m->glosa,
+                    ])->all(),
+                ]);
+                $reversa = $this->asientoService->contabilizar($reversa);
+                $reversaId = $reversa->id;
+
+                // El ajuste había dejado saldo_actual = saldo_fisico (sumó la
+                // diferencia): revertirla sobre el saldo operativo actual.
+                $diferencia = round((float) $arqueo->saldo_fisico - (float) $arqueo->saldo_teorico, 2);
+                $caja->update(['saldo_actual' => round((float) $caja->saldo_actual - $diferencia, 2)]);
+            }
+
+            $arqueo->update([
+                'estado' => 'ANULADO',
+                'anulado_at' => now(),
+                'anulado_by' => $usuarioId,
+                'motivo_anulacion' => trim($motivo),
+                'asiento_reversa_id' => $reversaId,
+            ]);
+
+            $this->audit->logEvento(
+                accion: 'ARQUEO_ANULADO',
+                modulo: 'tesoreria',
+                descripcion: sprintf('Arqueo #%d caja %s ANULADO%s — %s',
+                    $arqueo->id, $caja->codigo, $reversaId ? " (reversa #{$reversaId})" : ' (sin asiento)', $motivo),
+                empresaId: $caja->empresa_id,
+            );
+
+            return $arqueo->fresh();
+        });
+    }
+
+    /**
      * D-42-2 — Valida que el user esté en la lista de operadores autorizados
      * de la caja. super_admin queda exento (puede operar cualquier caja para
      * resolver emergencias).
@@ -360,7 +542,7 @@ class ArqueoCajaService
     {
         $ccFallback = DB::table('erp_centros_costo')
             ->where('empresa_id', $empresaId)
-            ->where('codigo', 'CENTRAL')
+            ->where('codigo', 'GENERAL')
             ->value('id');
 
         foreach ($movs as &$m) {

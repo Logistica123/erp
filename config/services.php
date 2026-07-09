@@ -42,4 +42,10 @@ return [
         'timeout' => env('ARCA_GATEWAY_TIMEOUT', 60),
     ],
 
+    // v1.54 — webhooks de sync de facturas de compra con DistriApp.
+    'distriapp' => [
+        'webhook_secret' => env('DISTRIAPP_WEBHOOK_SECRET'),
+        'base_url' => env('DISTRIAPP_BASE_URL'),
+    ],
+
 ];

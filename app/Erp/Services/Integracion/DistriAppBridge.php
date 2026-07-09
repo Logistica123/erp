@@ -230,6 +230,230 @@ class DistriAppBridge
     }
 
     /**
+     * Lista clientes de la plataforma (basepersonal.clientes) para completarlos
+     * desde el ERP. Incluye el estado fiscal actual (tax_profiles) y si ya está
+     * vinculado a un auxiliar del ERP. Filtra por nombre/código/documento.
+     *
+     * @return array<int, object>
+     */
+    public function clientesPlataforma(string $termino = '', int $limite = 50): array
+    {
+        $termino = trim($termino);
+        $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $termino).'%';
+        $soloDigitos = preg_replace('/[^0-9]/', '', $termino);
+
+        $sql = "SELECT c.id, c.codigo, c.nombre, c.documento_fiscal, c.direccion,
+                       tp.razon_social, tp.iva_condition,
+                       tp.fiscal_address_street, tp.fiscal_address_number,
+                       tp.fiscal_address_floor, tp.fiscal_address_unit,
+                       tp.fiscal_address_locality, tp.fiscal_address_postal_code,
+                       tp.fiscal_address_province,
+                       a.id AS erp_auxiliar_id, a.condicion_iva_id AS erp_condicion_iva_id,
+                       a.sincronizado_plataforma_at
+                  FROM basepersonal.clientes c
+                  LEFT JOIN basepersonal.tax_profiles tp
+                         ON tp.entity_type = 'cliente' AND tp.entity_id = c.id
+                  LEFT JOIN erp_auxiliares a
+                         ON a.tabla_ref = 'basepersonal.clientes' AND a.id_ref = c.id
+                        AND a.tipo = 'Cliente'
+                 WHERE c.deleted_at IS NULL";
+        $params = [];
+        if ($termino !== '') {
+            $sql .= " AND (c.nombre LIKE ? OR c.codigo LIKE ?
+                          OR REPLACE(REPLACE(c.documento_fiscal, '-', ''), ' ', '') LIKE ?)";
+            $params = [$like, $like, $soloDigitos !== '' ? $soloDigitos.'%' : $like];
+        }
+        $sql .= ' ORDER BY c.nombre LIMIT '.(int) $limite;
+
+        return DB::select($sql, $params);
+    }
+
+    /**
+     * Completa los datos fiscales reales de un cliente de la plataforma desde el
+     * ERP. Escribe en AMBOS lados de forma atómica (misma conexión MySQL ⇒ una
+     * sola transacción cubre erp_logistica_prod + basepersonal):
+     *   1) Upsert del auxiliar ERP (guarda los datos fiscales completos + vínculo).
+     *   2) UPDATE in-place de basepersonal.clientes (solo nombre/documento/dirección;
+     *      NUNCA cambia id/codigo ⇒ no rompe FKs, pre-altas ni liquidaciones).
+     *   3) Upsert de basepersonal.tax_profiles (razón social, CUIT, domicilio fiscal,
+     *      condición IVA).
+     *
+     * @param  array{
+     *   razon_social:string, cuit:?string, condicion_iva_id:?int,
+     *   domicilio_calle:?string, domicilio_nro:?string, domicilio_piso:?string,
+     *   domicilio_depto:?string, localidad:?string, provincia:?string, cod_postal:?string,
+     * }  $input
+     * @return array{auxiliar_id:int, cliente_plataforma_id:int}
+     */
+    public function completarCliente(int $clienteId, array $input, int $empresaId = 1, ?int $usuarioId = null): array
+    {
+        $cli = DB::selectOne(
+            'SELECT id, codigo FROM basepersonal.clientes WHERE id = ? AND deleted_at IS NULL',
+            [$clienteId],
+        );
+        if (! $cli) {
+            throw new \DomainException('CLIENTE_PLATAFORMA_NO_ENCONTRADO: no existe el cliente #'.$clienteId.' en la plataforma.');
+        }
+
+        $razon = trim((string) ($input['razon_social'] ?? ''));
+        if ($razon === '') {
+            throw new \DomainException('RAZON_SOCIAL_REQUERIDA: cargá la razón social / nombre real del cliente.');
+        }
+        $cuit = ! empty($input['cuit']) ? preg_replace('/[^0-9]/', '', (string) $input['cuit']) : null;
+        if ($cuit !== null && strlen($cuit) !== 11) {
+            throw new \DomainException('CUIT_INVALIDO: el CUIT/CUIL debe tener 11 dígitos (o dejarse vacío).');
+        }
+
+        // Resolver condición IVA del catálogo ERP (nombre + flag inscripto).
+        $ivaCondNombre = null;
+        $ivaInscripto = null;
+        $condId = ! empty($input['condicion_iva_id']) ? (int) $input['condicion_iva_id'] : null;
+        if ($condId) {
+            $cond = DB::table('erp_condiciones_iva')->where('id', $condId)->first(['codigo_interno', 'nombre']);
+            if (! $cond) {
+                throw new \DomainException('CONDICION_IVA_INVALIDA: la condición IVA seleccionada no existe.');
+            }
+            $ivaCondNombre = $cond->nombre;
+            $ivaInscripto = $cond->codigo_interno === 'RI' ? 1 : 0;
+        }
+
+        $dir = $this->componerDireccion($input);
+
+        return DB::transaction(function () use ($clienteId, $empresaId, $usuarioId, $cli, $razon, $cuit, $condId, $ivaCondNombre, $ivaInscripto, $dir, $input) {
+            // ── 1) Upsert auxiliar ERP ──────────────────────────────────────
+            $aux = DB::table('erp_auxiliares')
+                ->where('empresa_id', $empresaId)->where('tipo', 'Cliente')
+                ->where('tabla_ref', 'basepersonal.clientes')->where('id_ref', $clienteId)
+                ->first();
+
+            // OJO: razon_social_normalizada es columna GENERADA (la calcula la DB),
+            // no se escribe acá.
+            $auxAttrs = [
+                'nombre' => $razon,
+                'cuit' => $cuit,
+                'domicilio_calle' => $input['domicilio_calle'] ?? null,
+                'domicilio_nro' => $input['domicilio_nro'] ?? null,
+                'domicilio_piso' => $input['domicilio_piso'] ?? null,
+                'domicilio_depto' => $input['domicilio_depto'] ?? null,
+                'localidad' => $input['localidad'] ?? null,
+                'provincia' => $input['provincia'] ?? null,
+                'cod_postal' => $input['cod_postal'] ?? null,
+                'condicion_iva_id' => $condId,
+                'tabla_ref' => 'basepersonal.clientes',
+                'id_ref' => $clienteId,
+                'activo' => 1,
+                'sincronizado_plataforma_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($aux) {
+                DB::table('erp_auxiliares')->where('id', $aux->id)->update($auxAttrs);
+                $auxId = $aux->id;
+            } else {
+                // Si ya existe un auxiliar Cliente por CUIT (del importador), lo
+                // reusamos y le vinculamos el cliente de la plataforma.
+                $porCuit = $cuit
+                    ? DB::table('erp_auxiliares')->where('empresa_id', $empresaId)
+                        ->where('tipo', 'Cliente')->where('cuit', $cuit)->whereNull('id_ref')->first()
+                    : null;
+                if ($porCuit) {
+                    DB::table('erp_auxiliares')->where('id', $porCuit->id)->update($auxAttrs);
+                    $auxId = $porCuit->id;
+                } else {
+                    $codigo = $cuit ? 'CLI-'.$cuit : 'DA-CLI-'.str_pad((string) $clienteId, 5, '0', STR_PAD_LEFT);
+                    $auxId = DB::table('erp_auxiliares')->insertGetId([
+                        'empresa_id' => $empresaId, 'tipo' => 'Cliente', 'codigo' => $codigo,
+                        ...$auxAttrs, 'created_at' => now(),
+                    ]);
+                }
+            }
+
+            // ── 2) UPDATE in-place de basepersonal.clientes ─────────────────
+            // Solo columnas descriptivas. NUNCA id/codigo ⇒ no rompe nada.
+            DB::update(
+                'UPDATE basepersonal.clientes
+                    SET nombre = ?, documento_fiscal = ?, direccion = ?, updated_at = NOW()
+                  WHERE id = ?',
+                [$razon, $cuit, $dir, $clienteId],
+            );
+
+            // ── 3) Upsert basepersonal.tax_profiles ─────────────────────────
+            $cols = [
+                'cuit' => $cuit,
+                'razon_social' => $razon,
+                'iva_condition' => $ivaCondNombre,
+                'iva_inscripto' => $ivaInscripto,
+                'fiscal_address_street' => $input['domicilio_calle'] ?? null,
+                'fiscal_address_number' => $input['domicilio_nro'] ?? null,
+                'fiscal_address_floor' => $input['domicilio_piso'] ?? null,
+                'fiscal_address_unit' => $input['domicilio_depto'] ?? null,
+                'fiscal_address_locality' => $input['localidad'] ?? null,
+                'fiscal_address_postal_code' => $input['cod_postal'] ?? null,
+                'fiscal_address_province' => $input['provincia'] ?? null,
+            ];
+            $tp = DB::selectOne(
+                "SELECT id FROM basepersonal.tax_profiles WHERE entity_type = 'cliente' AND entity_id = ?",
+                [$clienteId],
+            );
+            if ($tp) {
+                $set = implode(', ', array_map(fn ($k) => "$k = ?", array_keys($cols)));
+                DB::update(
+                    "UPDATE basepersonal.tax_profiles SET $set, updated_at = NOW() WHERE id = ?",
+                    [...array_values($cols), $tp->id],
+                );
+            } else {
+                $insCols = array_merge(['entity_type', 'entity_id'], array_keys($cols));
+                $insVals = array_merge(['cliente', $clienteId], array_values($cols));
+                $ph = implode(', ', array_fill(0, count($insCols), '?'));
+                DB::insert(
+                    'INSERT INTO basepersonal.tax_profiles ('.implode(', ', $insCols).', created_at, updated_at) '
+                    ."VALUES ($ph, NOW(), NOW())",
+                    $insVals,
+                );
+            }
+
+            // Auditoría de la corrida (tabla puente del ERP). El enum `flujo` no
+            // tiene una opción de cliente, usamos DASHBOARD como catch-all.
+            DB::table('erp_integracion_log')->insert([
+                'timestamp' => now(),
+                'flujo' => 'DASHBOARD',
+                'distriapp_tabla' => 'basepersonal.clientes',
+                'distriapp_id' => $clienteId,
+                'estado' => 'OK',
+                'mensaje' => 'Cliente completado desde el ERP: '.$razon.($cuit ? ' (CUIT '.$cuit.')' : ''),
+                'payload' => json_encode([
+                    'auxiliar_id' => $auxId,
+                    'razon_social' => $razon,
+                    'cuit' => $cuit,
+                    'usuario_id' => $usuarioId,
+                ], JSON_UNESCAPED_UNICODE),
+            ]);
+
+            return ['auxiliar_id' => (int) $auxId, 'cliente_plataforma_id' => $clienteId];
+        });
+    }
+
+    /** Compone la dirección de texto único de la plataforma desde las partes. */
+    private function componerDireccion(array $i): ?string
+    {
+        $calle = trim((string) ($i['domicilio_calle'] ?? ''));
+        $linea1 = trim($calle.' '.trim((string) ($i['domicilio_nro'] ?? '')));
+        $extra = array_filter([
+            ($i['domicilio_piso'] ?? '') ? 'Piso '.$i['domicilio_piso'] : '',
+            ($i['domicilio_depto'] ?? '') ? 'Dpto '.$i['domicilio_depto'] : '',
+        ]);
+        if ($extra) $linea1 = trim($linea1.' '.implode(' ', $extra));
+        $partes = array_filter([
+            $linea1,
+            trim((string) ($i['localidad'] ?? '')),
+            trim((string) ($i['provincia'] ?? '')),
+            ($i['cod_postal'] ?? '') ? '(CP '.$i['cod_postal'].')' : '',
+        ], fn ($p) => $p !== '');
+        $dir = trim(implode(', ', $partes));
+        return $dir !== '' ? $dir : null;
+    }
+
+    /**
      * Facturas emitidas en DistriApp con CAE (vista erp_v_facturas_distriapp).
      *
      * @return Collection<int, object>

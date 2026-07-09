@@ -13,6 +13,8 @@ class ChequeRecibido extends Model
     public const ESTADO_COBRADO = 'COBRADO';
     public const ESTADO_RECHAZADO = 'RECHAZADO';
     public const ESTADO_VENCIDO = 'VENCIDO_NO_COBRADO';
+    public const ESTADO_DESCONTADO = 'DESCONTADO';
+    public const ESTADO_ENDOSADO = 'ENDOSADO';
 
     protected $fillable = [
         'empresa_id', 'recibo_id',
@@ -20,6 +22,10 @@ class ChequeRecibido extends Model
         'fecha_emision', 'fecha_pago', 'importe',
         'estado',
         'cuenta_bancaria_deposito_id', 'fecha_deposito', 'fecha_acreditacion', 'mov_bancario_id',
+        'descuento_entidad', 'descuento_intereses', 'descuento_iva', 'descuento_comision',
+        'descuento_sellado', 'descuento_percepcion_iva', 'descuento_percepcion_iibb', 'descuento_otros',
+        'descuento_neto', 'asiento_id',
+        'endoso_op_id',
         'fecha_rechazo', 'motivo_rechazo',
         'observaciones', 'created_by_user_id',
     ];

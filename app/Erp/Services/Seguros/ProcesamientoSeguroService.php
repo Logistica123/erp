@@ -146,8 +146,14 @@ class ProcesamientoSeguroService
     /** @return array<int,object> */
     public function listar(int $empresaId = 1): array
     {
+        // Orden: aseguradora → PV → número ascendente, para detectar de un
+        // vistazo los números de comprobante faltantes.
         return DB::table('erp_seguros_comprobantes')
-            ->where('empresa_id', $empresaId)->orderByDesc('id')->get()->all();
+            ->where('empresa_id', $empresaId)
+            ->orderBy('aseguradora')
+            ->orderBy('punto_venta')
+            ->orderBy('numero')
+            ->get()->all();
     }
 
     public function eliminar(int $id, User $usuario, int $empresaId = 1): void

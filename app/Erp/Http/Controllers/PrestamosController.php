@@ -2,6 +2,7 @@
 
 namespace App\Erp\Http\Controllers;
 
+use App\Erp\Services\Prestamos\ParserPlanAfip;
 use App\Erp\Services\PrestamosService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -10,6 +11,43 @@ use Illuminate\Http\Request;
 class PrestamosController
 {
     public function __construct(private readonly PrestamosService $service) {}
+
+    /** Analiza un PDF "Mis Facilidades" de ARCA/AFIP y devuelve el preview (sin guardar). */
+    public function analizarPlanAfip(Request $request): JsonResponse
+    {
+        $request->validate(['archivo' => ['required', 'file', 'mimetypes:application/pdf']]);
+        $texto = $this->pdfATexto($request->file('archivo')->getRealPath());
+        try {
+            $plan = (new ParserPlanAfip())->parse($texto);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $plan]);
+    }
+
+    /** Importa el plan AFIP del PDF como préstamo RECIBIDO con su cronograma. */
+    public function importarPlanAfip(Request $request): JsonResponse
+    {
+        $request->validate([
+            'archivo' => ['required', 'file', 'mimetypes:application/pdf'],
+            'empresa_id' => ['nullable', 'integer'],
+        ]);
+        $empresaId = (int) ($request->input('empresa_id') ?: ($request->header('X-Empresa-Id') ?: 1));
+        $texto = $this->pdfATexto($request->file('archivo')->getRealPath());
+        try {
+            $res = $this->service->importarPlanAfip($texto, $empresaId, $request->user()->id);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $res], 201);
+    }
+
+    private function pdfATexto(string $path): string
+    {
+        $out = []; $rc = 0;
+        @exec('pdftotext -layout '.escapeshellarg($path).' - 2>/dev/null', $out, $rc);
+        return implode("\n", $out);
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -62,6 +100,7 @@ class PrestamosController
             'importe_pagado' => ['required', 'numeric', 'min:0.01'],
             'op_pago_id' => ['nullable', 'integer'],
             'recibo_cobro_id' => ['nullable', 'integer'],
+            'medio_pago_id' => ['nullable', 'integer', 'exists:erp_cuentas_bancarias,id'],
             'observaciones' => ['nullable', 'string', 'max:500'],
         ]);
         try {

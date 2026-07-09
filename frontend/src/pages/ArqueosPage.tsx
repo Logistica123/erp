@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Calculator, Plus, ClipboardList, Users } from 'lucide-react';
+import { Calculator, Plus, ClipboardList, Users, Check, Pencil, Trash2, Ban } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -25,6 +25,10 @@ type Arqueo = {
   decision_autorizacion?: string | null;
   asiento_ajuste?: { id: number; numero: number; fecha: string } | null;
   realizado_por?: { id: number; name: string } | null;
+  // v1.51
+  denominaciones?: Array<{ valor_billete: number | string; cantidad: number }>;
+  motivo_anulacion?: string | null;
+  asiento_reversa_id?: number | null;
   created_at: string;
 };
 
@@ -36,7 +40,12 @@ const ESTADO_VARIANT: Record<string, 'success' | 'warning' | 'danger' | 'info' |
   PENDIENTE_AUTORIZACION: 'warning',
   CERRADO_CON_DISCREPANCIA: 'warning',
   RECHAZADO: 'danger',
+  ANULADO: 'neutral',
 };
+
+/** v1.51 — estados que admiten cada acción del listado. */
+const PUEDE_EDITAR_BORRAR = ['PENDIENTE_AUTORIZACION', 'BORRADOR'];
+const PUEDE_ANULAR = ['CIERRA_OK', 'CERRADO_CON_AJUSTE', 'CERRADO_CON_DISCREPANCIA'];
 
 export function ArqueosPage() {
   const [cajaId, setCajaId] = useState('');
@@ -61,6 +70,11 @@ export function ArqueosPage() {
   );
 
   const [nuevoOpen, setNuevoOpen] = useState(false);
+  // v1.51 — acciones directas.
+  const [autorizarA, setAutorizarA] = useState<Arqueo | null>(null);
+  const [editarA, setEditarA] = useState<Arqueo | null>(null);
+  const [borrarA, setBorrarA] = useState<Arqueo | null>(null);
+  const [anularA, setAnularA] = useState<Arqueo | null>(null);
 
   const columns: Column<Arqueo>[] = [
     { key: 'fecha', header: 'Fecha', width: '90px', render: (r) => fmtDate(r.fecha) },
@@ -86,6 +100,37 @@ export function ArqueosPage() {
       render: (r) => r.realizado_por?.name ?? '—' },
     { key: 'asiento_ajuste', header: 'Asiento', width: '90px',
       render: (r) => r.asiento_ajuste ? `#${r.asiento_ajuste.numero}` : '—' },
+    // v1.51 — acciones contextuales según estado.
+    { key: 'acciones', header: '', width: '210px', align: 'right',
+      render: (r) => {
+        const e = r.estado ?? '';
+        return (
+          <div className="flex gap-1 justify-end">
+            {PUEDE_EDITAR_BORRAR.includes(e) && (
+              <>
+                <Button size="sm" variant="primary" title="Autorizar con ajuste (genera el asiento de sobrante/faltante)."
+                  onClick={() => setAutorizarA(r)}>
+                  <Check className="w-3 h-3" /> Autorizar
+                </Button>
+                <Button size="sm" variant="secondary" title="Editar el arqueo pendiente."
+                  onClick={() => setEditarA(r)}>
+                  <Pencil className="w-3 h-3" />
+                </Button>
+                <Button size="sm" variant="danger" title="Borrar el arqueo pendiente (irreversible)."
+                  onClick={() => setBorrarA(r)}>
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              </>
+            )}
+            {PUEDE_ANULAR.includes(e) && (
+              <Button size="sm" variant="secondary" title="Anular: genera reversa del asiento (si tiene) y deja el arqueo marcado."
+                onClick={() => setAnularA(r)}>
+                <Ban className="w-3 h-3" /> Anular
+              </Button>
+            )}
+          </div>
+        );
+      } },
   ];
 
   return (
@@ -127,16 +172,156 @@ export function ArqueosPage() {
       </Card>
 
       {nuevoOpen && <NuevoArqueoModal cajas={cajas ?? []} onClose={() => setNuevoOpen(false)} />}
+      {editarA && <NuevoArqueoModal cajas={cajas ?? []} arqueo={editarA} onClose={() => setEditarA(null)} />}
+      {autorizarA && <AutorizarModal arqueo={autorizarA} onClose={() => setAutorizarA(null)} />}
+      {borrarA && <BorrarModal arqueo={borrarA} onClose={() => setBorrarA(null)} />}
+      {anularA && <AnularModal arqueo={anularA} onClose={() => setAnularA(null)} />}
     </div>
   );
 }
 
-function NuevoArqueoModal({ cajas, onClose }: { cajas: Caja[]; onClose: () => void }) {
+// v1.51 Bloque A — Autorizar directo con preview del asiento a generar.
+function AutorizarModal({ arqueo, onClose }: { arqueo: Arqueo; onClose: () => void }) {
+  const toast = useToast();
+  const invalidate = useInvalidate(['arqueos']);
+  const dif = Number(arqueo.diferencia);
+  const sobrante = dif > 0;
+  const m = useApiMutation<Arqueo, void>(
+    () => api.post(`/api/erp/caja/arqueos/${arqueo.id}/autorizar`, { decision: 'AJUSTAR', motivo: arqueo.motivo ?? undefined }),
+    {
+      onSuccess: () => { toast.success('Arqueo autorizado', 'Asiento de ajuste generado.'); invalidate(); onClose(); },
+      onError: (e) => toast.error('No se pudo autorizar', errorMessage(e)),
+    },
+  );
+  return (
+    <Modal open onClose={onClose} title="Autorizar arqueo de caja" size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" disabled={m.isPending} onClick={() => m.mutate()}>
+            {m.isPending ? 'Autorizando…' : 'Autorizar y generar asiento'}
+          </Button>
+        </>
+      }>
+      <div className="space-y-3 text-[12.5px]">
+        <div className="bg-surface-row border border-line rounded-md p-3 grid grid-cols-2 gap-2">
+          <div><div className="text-ink-3 text-[11px]">Caja</div><div>{arqueo.caja.codigo} {arqueo.caja.nombre}</div></div>
+          <div><div className="text-ink-3 text-[11px]">Fecha</div><div>{fmtDate(arqueo.fecha)}</div></div>
+          <div><div className="text-ink-3 text-[11px]">Saldo teórico</div><div className="tabular-nums">{fmtMoney(arqueo.saldo_teorico)}</div></div>
+          <div><div className="text-ink-3 text-[11px]">Saldo físico</div><div className="tabular-nums">{fmtMoney(arqueo.saldo_fisico)}</div></div>
+          <div className="col-span-2"><div className="text-ink-3 text-[11px]">Diferencia</div>
+            <div className={`tabular-nums font-semibold ${sobrante ? 'text-success' : 'text-danger'}`}>
+              {fmtMoney(dif)} ({sobrante ? 'sobrante a favor' : 'faltante'})
+            </div>
+          </div>
+        </div>
+        <div className="border border-line rounded-md p-3">
+          <div className="text-[11px] font-semibold text-ink-2 mb-1">Asiento contable a generar</div>
+          {sobrante ? (
+            <div className="font-mono text-[11.5px] space-y-0.5">
+              <div className="flex justify-between"><span>D&nbsp;&nbsp;Caja ({arqueo.caja.codigo})</span><span className="tabular-nums">{fmtMoney(Math.abs(dif))}</span></div>
+              <div className="flex justify-between"><span>H&nbsp;&nbsp;4.2.07 Sobrante de Caja</span><span className="tabular-nums">{fmtMoney(Math.abs(dif))}</span></div>
+            </div>
+          ) : (
+            <div className="font-mono text-[11.5px] space-y-0.5">
+              <div className="flex justify-between"><span>D&nbsp;&nbsp;5.4.09 Faltante de Caja</span><span className="tabular-nums">{fmtMoney(Math.abs(dif))}</span></div>
+              <div className="flex justify-between"><span>H&nbsp;&nbsp;Caja ({arqueo.caja.codigo})</span><span className="tabular-nums">{fmtMoney(Math.abs(dif))}</span></div>
+            </div>
+          )}
+          <div className="text-[10.5px] text-ink-3 mt-1">El saldo de la caja se ajusta al físico contado.</div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// v1.51 Bloque C — Confirmación de borrado.
+function BorrarModal({ arqueo, onClose }: { arqueo: Arqueo; onClose: () => void }) {
+  const toast = useToast();
+  const invalidate = useInvalidate(['arqueos']);
+  const m = useApiMutation<{ ok: boolean }, void>(
+    () => api.delete(`/api/erp/caja/arqueos/${arqueo.id}`),
+    {
+      onSuccess: () => { toast.success('Arqueo borrado'); invalidate(); onClose(); },
+      onError: (e) => toast.error('No se pudo borrar', errorMessage(e)),
+    },
+  );
+  return (
+    <Modal open onClose={onClose} title="Borrar arqueo de caja" size="sm"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" disabled={m.isPending} onClick={() => m.mutate()}>
+            {m.isPending ? 'Borrando…' : 'Borrar'}
+          </Button>
+        </>
+      }>
+      <div className="space-y-2 text-[12.5px]">
+        <p>¿Confirmás el borrado del arqueo?</p>
+        <div className="bg-surface-row border border-line rounded-md p-3 text-[12px]">
+          <div>Caja: <strong>{arqueo.caja.codigo}</strong></div>
+          <div>Fecha: <strong>{fmtDate(arqueo.fecha)}</strong></div>
+          <div>Saldo físico: <strong className="tabular-nums">{fmtMoney(arqueo.saldo_fisico)}</strong></div>
+        </div>
+        <p className="text-danger text-[11.5px]">Esta acción es irreversible (se borran también las denominaciones).</p>
+      </div>
+    </Modal>
+  );
+}
+
+// v1.51 Bloque D — Anulación con motivo obligatorio + reversa del asiento.
+function AnularModal({ arqueo, onClose }: { arqueo: Arqueo; onClose: () => void }) {
+  const toast = useToast();
+  const invalidate = useInvalidate(['arqueos']);
+  const [motivo, setMotivo] = useState('');
+  const m = useApiMutation<Arqueo, void>(
+    () => api.post(`/api/erp/caja/arqueos/${arqueo.id}/anular`, { motivo: motivo.trim() }),
+    {
+      onSuccess: () => { toast.success('Arqueo anulado', arqueo.asiento_ajuste ? 'Se generó el asiento de reversa.' : 'No tenía asiento — solo cambió el estado.'); invalidate(); onClose(); },
+      onError: (e) => toast.error('No se pudo anular', errorMessage(e)),
+    },
+  );
+  return (
+    <Modal open onClose={onClose} title="Anular arqueo autorizado" size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" disabled={motivo.trim().length < 10 || m.isPending} onClick={() => m.mutate()}>
+            {m.isPending ? 'Anulando…' : 'Anular'}
+          </Button>
+        </>
+      }>
+      <div className="space-y-3 text-[12.5px]">
+        {arqueo.asiento_ajuste ? (
+          <div className="border border-warning/40 bg-warning-bg/30 rounded p-2 text-[11.5px]">
+            ⚠️ El arqueo generó el asiento #{arqueo.asiento_ajuste.numero}. La anulación crea un
+            asiento de reversa (D/H espejo) <strong>con fecha de hoy</strong> y revierte el ajuste del saldo de la caja.
+          </div>
+        ) : (
+          <div className="border border-line bg-surface-row rounded p-2 text-[11.5px]">
+            El arqueo no generó asiento — la anulación solo cambia el estado.
+          </div>
+        )}
+        <div className="bg-surface-row border border-line rounded-md p-3 text-[12px]">
+          <div>Caja: <strong>{arqueo.caja.codigo}</strong> · Fecha: <strong>{fmtDate(arqueo.fecha)}</strong></div>
+          <div>Diferencia: <strong className="tabular-nums">{fmtMoney(arqueo.diferencia)}</strong></div>
+        </div>
+        <TextareaField label="Motivo de anulación *" rows={3} value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          hint="Mínimo 10 caracteres." />
+      </div>
+    </Modal>
+  );
+}
+
+// v1.51 — `arqueo` opcional: si viene, el modal edita (PUT) en vez de crear.
+function NuevoArqueoModal({ cajas, arqueo, onClose }: { cajas: Caja[]; arqueo?: Arqueo; onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidate(['arqueos']);
   const [form, setForm] = useState({
-    caja_id: '', fecha: new Date().toISOString().slice(0, 10),
-    motivo: '',
+    caja_id: arqueo ? String(arqueo.caja.id) : '',
+    fecha: arqueo ? String(arqueo.fecha).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    motivo: arqueo?.motivo ?? '',
   });
 
   // Catálogo de denominaciones ARS (v1.42).
@@ -150,9 +335,15 @@ function NuevoArqueoModal({ cajas, onClose }: { cajas: Caja[]; onClose: () => vo
     if (catalogo && Object.keys(cantidades).length === 0) {
       const init: Record<string, string> = {};
       catalogo.forEach((d) => { init[String(d.valor)] = ''; });
+      // v1.51 — pre-poblar la grilla con las denominaciones del arqueo a editar
+      // (las keys de la grilla son String(valor) del catálogo, ej "1000.00").
+      (arqueo?.denominaciones ?? []).forEach((d) => {
+        const cat = catalogo.find((c) => Number(c.valor) === Number(d.valor_billete));
+        if (cat) init[String(cat.valor)] = String(d.cantidad);
+      });
       setCantidades(init);
     }
-  }, [catalogo, cantidades]);
+  }, [catalogo, cantidades, arqueo]);
 
   const saldoFisicoCalc = useMemo(() => {
     return (catalogo ?? []).reduce((acc, d) => {
@@ -167,7 +358,9 @@ function NuevoArqueoModal({ cajas, onClose }: { cajas: Caja[]; onClose: () => vo
   const necesitaMotivo = dif !== null && Math.abs(dif) > 0.01;
 
   const m = useApiMutation<Arqueo, Record<string, unknown>>(
-    (vars) => api.post('/api/erp/caja/arqueo', vars),
+    (vars) => arqueo
+      ? api.put(`/api/erp/caja/arqueos/${arqueo.id}`, vars)
+      : api.post('/api/erp/caja/arqueo', vars),
     {
       onSuccess: (data) => {
         const estado = (data as Arqueo)?.estado ?? '';
@@ -177,9 +370,9 @@ function NuevoArqueoModal({ cajas, onClose }: { cajas: Caja[]; onClose: () => vo
             `La diferencia supera $1 (tolerancia). Un supervisor debe resolverlo.`,
           );
         } else if (estado === 'CERRADO_CON_AJUSTE') {
-          toast.success('Arqueo registrado', 'Auto-ajuste por diferencia ≤ $1 con asiento contable.');
+          toast.success(arqueo ? 'Arqueo actualizado' : 'Arqueo registrado', 'Auto-ajuste por diferencia ≤ $1 con asiento contable.');
         } else {
-          toast.success('Arqueo registrado');
+          toast.success(arqueo ? 'Arqueo actualizado' : 'Arqueo registrado');
         }
         invalidate();
         onClose();
@@ -201,7 +394,7 @@ function NuevoArqueoModal({ cajas, onClose }: { cajas: Caja[]; onClose: () => vo
     <Modal
       open
       onClose={onClose}
-      title="Registrar arqueo de caja"
+      title={arqueo ? `Editar arqueo #${arqueo.id}` : 'Registrar arqueo de caja'}
       size="lg"
       footer={
         <>
@@ -214,7 +407,7 @@ function NuevoArqueoModal({ cajas, onClose }: { cajas: Caja[]; onClose: () => vo
               motivo: form.motivo || undefined,
               denominaciones: denominacionesPayload.length ? denominacionesPayload : undefined,
             })}>
-            {m.isPending ? 'Registrando…' : 'Confirmar arqueo'}
+            {m.isPending ? 'Guardando…' : arqueo ? 'Guardar cambios' : 'Confirmar arqueo'}
           </Button>
         </>
       }

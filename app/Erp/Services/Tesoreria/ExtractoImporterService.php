@@ -150,6 +150,9 @@ class ExtractoImporterService
             'pasantes_mp' => $resumen['pasantes_mp'],
             'transferencias_internas' => $resumen['transferencias_internas'],
             'espejos_emparejados' => $espejos['emparejados'],
+            // v1.49 — auto-vinculación de descuentos de cheque.
+            'descuentos_vinculados' => $resumen['descuentos_vinculados'] ?? 0,
+            'descuentos_ambiguos' => $resumen['descuentos_ambiguos'] ?? 0,
             'warnings' => $warnings,
         ];
     }
@@ -193,6 +196,12 @@ class ExtractoImporterService
             // movimientos que quedaron PENDIENTE (ICBC-COBRO-TRF / ICBC-PAGO-TRF).
             $matchAuto = $this->aplicarMatchingAuto($extracto->id, $cuenta);
 
+            // v1.49 Bloque B — auto-vinculación de créditos a asientos de
+            // descuento de cheque existentes (match perfecto ±3 días + único
+            // candidato). Los ambiguos quedan PENDIENTE y se informan.
+            $descuentos = app(\App\Erp\Services\Conciliacion\AutoVincularDescuentosService::class)
+                ->run($extracto->id);
+
             return [
                 'extracto_id' => $extracto->id,
                 'cant_total' => count($parseado->movimientos),
@@ -200,9 +209,11 @@ class ExtractoImporterService
                 'movimientos_duplicados' => $counts['movimientos_duplicados'],
                 'etiquetados_auto' => $matching['etiquetados'],
                 'match_auto_cuit' => $matchAuto,
-                'pendientes' => $counts['movimientos_importados'] - $matching['etiquetados'] - $matchAuto,
+                'pendientes' => $counts['movimientos_importados'] - $matching['etiquetados'] - $matchAuto - $descuentos['vinculados'],
                 'pasantes_mp' => $pasantes,
                 'transferencias_internas' => $transfInternas,
+                'descuentos_vinculados' => $descuentos['vinculados'],
+                'descuentos_ambiguos' => $descuentos['ambiguos'],
             ];
         });
     }

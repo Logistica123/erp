@@ -57,6 +57,8 @@ class FacturasCompraController extends Controller
                 'f.categoria',
                 // v1.40 — OP externa + fecha de pago (importer + inline edit).
                 'f.op_externa', 'f.fecha_pago',
+                // v1.54 — sync DistriApp.
+                'f.sincronizada_desde_distriapp', 'f.distriapp_factura_id', 'f.distriapp_liquidacion_id',
             ]);
 
         $this->aplicarFiltrosIndex($q, $request);

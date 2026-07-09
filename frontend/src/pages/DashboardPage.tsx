@@ -23,6 +23,7 @@ type Stats = {
   periodo_actual: { id: number; anio: number; mes: number; estado: string } | null;
   mes: { inicio: string; fin: string; facturas: number; facturado_total: number; facturado_neto: number; iva_df: number };
   por_cobrar: { cant: number; total: number };
+  cheques_pendientes?: { cant: number; total: number; en_cartera: number; depositados: number; vencidos: number };
   contadores: { clientes: number; distribuidores: number; asientos_contabilizados: number };
   evolucion_6m: EvolMes[];
   ultimas_facturas: UltFactura[];
@@ -137,7 +138,7 @@ export function DashboardPage() {
       </div>
 
       {/* KPIs principales */}
-      <div className="grid grid-cols-4 gap-[14px] mb-[18px]">
+      <div className="grid grid-cols-5 gap-[14px] mb-[18px]">
         <Kpi
           label="Facturado del mes"
           value={fmtMoney(data.mes.facturado_total)}
@@ -151,10 +152,18 @@ export function DashboardPage() {
           accent="success"
         />
         <Kpi
-          label="Saldo a cobrar (con IVA, hoy)"
+          label="Saldo a cobrar — facturas"
           value={fmtMoney(data.por_cobrar.total)}
-          sub={`Facturas pendientes − NC · ${data.por_cobrar.cant} facturas`}
+          sub={`Facturas pendientes − NC · ${data.por_cobrar.cant} comprobantes · sin cheques`}
           accent="warning"
+        />
+        <Kpi
+          label="Cheques pendientes de cobro"
+          value={fmtMoney(data.cheques_pendientes?.total ?? 0)}
+          sub={data.cheques_pendientes
+            ? `${data.cheques_pendientes.cant} cheques · en cartera ${fmtMoney(data.cheques_pendientes.en_cartera)}${data.cheques_pendientes.depositados > 0 ? ` · depositados ${fmtMoney(data.cheques_pendientes.depositados)}` : ''}`
+            : '—'}
+          accent="azure"
         />
         <Kpi
           label="Mov. pendientes de conciliar"

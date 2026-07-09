@@ -15,12 +15,12 @@ class ChequesRecibidosController
     {
         $this->mustHave($request, 'tesoreria.cheques.ver');
         $filtros = $request->validate([
-            'estado' => ['nullable', 'in:EN_CARTERA,DEPOSITADO,COBRADO,RECHAZADO,VENCIDO_NO_COBRADO'],
+            'estado' => ['nullable', 'in:EN_CARTERA,DEPOSITADO,COBRADO,RECHAZADO,VENCIDO_NO_COBRADO,DESCONTADO,ENDOSADO'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
             'numero' => ['nullable', 'string'],
             'solo_vencidos_sin_cobrar' => ['nullable', 'boolean'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:1000'],
         ]);
         return response()->json(['ok' => true, 'data' => $this->svc->listar($filtros)]);
     }
@@ -36,11 +36,99 @@ class ChequesRecibidosController
         $this->mustHave($request, 'tesoreria.cheques.gestionar');
         $data = $request->validate([
             'cuenta_bancaria_id' => ['required', 'integer', 'exists:erp_cuentas_bancarias,id'],
-            'fecha_deposito' => ['required', 'date'],
+            'fecha_cobro' => ['required', 'date'],
             'observaciones' => ['nullable', 'string', 'max:500'],
         ]);
         try {
-            $c = $this->svc->depositar($id, (int) $data['cuenta_bancaria_id'], $data['fecha_deposito'], $request->user()->id, $data['observaciones'] ?? null);
+            $c = $this->svc->depositar($id, (int) $data['cuenta_bancaria_id'], $data['fecha_cobro'], $request->user()->id, $data['observaciones'] ?? null);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $c]);
+    }
+
+    public function descontar(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'tesoreria.cheques.gestionar');
+        $data = $request->validate([
+            'cuenta_bancaria_id' => ['required', 'integer', 'exists:erp_cuentas_bancarias,id'],
+            'entidad' => ['nullable', 'string', 'max:150'],
+            'fecha' => ['required', 'date'],
+            'intereses' => ['nullable', 'numeric', 'min:0'],
+            'iva' => ['nullable', 'numeric', 'min:0'],
+            'comision' => ['nullable', 'numeric', 'min:0'],
+            'sellado' => ['nullable', 'numeric', 'min:0'],
+            'percepcion_iva' => ['nullable', 'numeric', 'min:0'],
+            'percepcion_iibb' => ['nullable', 'numeric', 'min:0'],
+            'otros' => ['nullable', 'numeric', 'min:0'],
+            'observaciones' => ['nullable', 'string', 'max:500'],
+        ]);
+        try {
+            $c = $this->svc->descontar($id, $data, $request->user()->id);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $c]);
+    }
+
+    /** Cheques pendientes de cobro a una fecha de corte (detalle + total). */
+    public function pendientesAFecha(Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'tesoreria.cheques.ver');
+        $data = $request->validate(['fecha' => ['required', 'date']]);
+        return response()->json(['ok' => true,
+            'data' => $this->svc->pendientesAFecha(substr($data['fecha'], 0, 10))]);
+    }
+
+    public function facturasEndosables(Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'tesoreria.cheques.gestionar');
+        $data = $request->validate(['proveedor_id' => ['required', 'integer']]);
+        $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
+        return response()->json(['ok' => true,
+            'data' => $this->svc->facturasEndosables($empresaId, (int) $data['proveedor_id'])]);
+    }
+
+    public function endosar(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'tesoreria.cheques.gestionar');
+        $data = $request->validate([
+            'proveedor_auxiliar_id' => ['required', 'integer', 'exists:erp_auxiliares,id'],
+            'fecha' => ['required', 'date'],
+            'imputaciones' => ['required', 'array', 'min:1'],
+            'imputaciones.*.factura_compra_id' => ['required', 'integer'],
+            'imputaciones.*.importe' => ['required', 'numeric', 'min:0.01'],
+            'observaciones' => ['nullable', 'string', 'max:500'],
+        ]);
+        try {
+            $c = $this->svc->endosar($id, $data, $request->user()->id);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $c]);
+    }
+
+    public function editar(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'tesoreria.cheques.gestionar');
+        $data = $request->validate([
+            'fecha_cobro' => ['nullable', 'date'],
+            'cuenta_bancaria_id' => ['nullable', 'integer', 'exists:erp_cuentas_bancarias,id'],
+            'observaciones' => ['nullable', 'string', 'max:500'],
+        ]);
+        try {
+            $c = $this->svc->editarCobro($id, $data, $request->user()->id);
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $c]);
+    }
+
+    public function anular(Request $request, int $id): JsonResponse
+    {
+        $this->mustHave($request, 'tesoreria.cheques.gestionar');
+        try {
+            $c = $this->svc->anularCobro($id, $request->user()->id);
         } catch (DomainException $e) {
             return $this->domainError($e);
         }

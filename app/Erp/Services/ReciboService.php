@@ -151,9 +151,14 @@ class ReciboService
             // detallado + un total IIBB sin certificado). El operador elige cómo.
             $totalRet = $totalRetSimple + $totalRetDetalle;
             $totalNc = array_sum(array_map(fn ($n) => (float) $n['monto_aplicado'], $ncAplicadas));
+            // "Otro" — medio/compensación especial: suma al cobro como una retención.
+            $otroMonto = (float) ($data['otro_monto'] ?? 0);
+            $otroObs = $data['otro_observacion'] ?? null;
+            // Redondeo — ajuste de cobranza (puede ser negativo).
+            $redondeo = round((float) ($data['redondeo_monto'] ?? 0), 2);
 
             // Cálculos.
-            $montoCobrable = max(0.0, $totalImputado - $totalNc - $totalRet);
+            $montoCobrable = max(0.0, $totalImputado - $totalNc - $totalRet - $otroMonto - $redondeo);
             $montoCobrado = isset($data['monto_cobrado'])
                 ? (float) $data['monto_cobrado']
                 : $montoCobrable;
@@ -188,7 +193,8 @@ class ReciboService
                 'numero_correlativo' => 'B-' . bin2hex(random_bytes(8)),
                 'punto_venta' => null,
                 'numero' => null,
-                'fecha_emision' => $data['fecha_emision'] ?? today()->toDateString(),
+                'fecha_emision' => today()->toDateString(),
+                'fecha_cobro' => $this->resolverFechaCobro($data),
                 'detalle_cobro' => $data['detalle_cobro'] ?? null,
                 'cliente_auxiliar_id' => $clienteId,
                 'factura_venta_id' => $primerFactura->id, // back-compat v1.31
@@ -198,6 +204,9 @@ class ReciboService
                 'retencion_iva_total' => round($retIvaSimple, 2),
                 'retencion_iibb_total' => round($retIibbSimple, 2),
                 'retencion_ganancias_total' => round($retGanSimple, 2),
+                'otro_monto' => round($otroMonto, 2),
+                'otro_observacion' => $otroObs,
+                'redondeo_monto' => $redondeo,
                 'monto_cobrable' => round($montoCobrable, 2),
                 'monto_cobrado' => round($montoCobrado, 2),
                 'saldo_factura_post' => max(0.0, $saldoPostPrimera),
@@ -352,8 +361,11 @@ class ReciboService
             $totalRetDetalle = array_sum(array_map(fn ($r) => (float) $r['monto'], $retencionesDetalle));
             $totalRet = $totalRetSimple + $totalRetDetalle;
             $totalNc = array_sum(array_map(fn ($n) => (float) $n['monto_aplicado'], $ncAplicadas));
+            $otroMonto = (float) ($data['otro_monto'] ?? 0);
+            $otroObs = $data['otro_observacion'] ?? null;
+            $redondeo = round((float) ($data['redondeo_monto'] ?? 0), 2);
 
-            $montoCobrable = max(0.0, $totalImputado - $totalNc - $totalRet);
+            $montoCobrable = max(0.0, $totalImputado - $totalNc - $totalRet - $otroMonto - $redondeo);
             $montoCobrado = isset($data['monto_cobrado']) ? (float) $data['monto_cobrado'] : $montoCobrable;
             if ($montoCobrado > $montoCobrable + 0.01) {
                 throw new DomainException(sprintf(
@@ -375,7 +387,8 @@ class ReciboService
             //    numero_correlativo (B-xxx), punto_venta=NULL, numero=NULL,
             //    estado=BORRADOR — solo cambian los campos editables.
             $recibo->update([
-                'fecha_emision' => $data['fecha_emision'] ?? $recibo->fecha_emision,
+                'fecha_emision' => today()->toDateString(),
+                'fecha_cobro' => $this->resolverFechaCobro($data),
                 'detalle_cobro' => $data['detalle_cobro'] ?? null,
                 'cliente_auxiliar_id' => $clienteId,
                 'factura_venta_id' => $primerFactura->id, // back-compat
@@ -385,6 +398,9 @@ class ReciboService
                 'retencion_iva_total' => round($retIvaSimple, 2),
                 'retencion_iibb_total' => round($retIibbSimple, 2),
                 'retencion_ganancias_total' => round($retGanSimple, 2),
+                'otro_monto' => round($otroMonto, 2),
+                'otro_observacion' => $otroObs,
+                'redondeo_monto' => $redondeo,
                 'monto_cobrable' => round($montoCobrable, 2),
                 'monto_cobrado' => round($montoCobrado, 2),
                 'saldo_factura_post' => max(0.0, $saldoPostPrimera),
@@ -446,13 +462,14 @@ class ReciboService
      * RN-31-2 — Emite el recibo (BORRADOR → EMITIDO + genera asiento).
      */
     /**
-     * @param  ?array<string,mixed>  $chequeData  datos del cheque físico recibido
-     *                                            cuando el medio_cobro es CHEQUES_CARTERA.
-     *                                            Campos: numero_cheque, banco_emisor,
-     *                                            cuit_librador?, librador_nombre?,
-     *                                            fecha_emision, fecha_pago, importe.
+     * @param  ?array<int,array<string,mixed>>  $chequesData  cheques físicos
+     *     recibidos cuando el medio_cobro es CHEQUES_CARTERA. Puede ser uno o
+     *     varios (ej. Urbano paga con muchos cheques chicos). Cada elemento:
+     *     numero_cheque, banco_emisor, cuit_librador?, librador_nombre?,
+     *     fecha_emision, fecha_pago, importe. Por back-compat también se acepta
+     *     un único cheque como array asociativo (se normaliza a lista).
      */
-    public function emitir(Recibo $recibo, User $usuario, ?array $chequeData = null): Asiento
+    public function emitir(Recibo $recibo, User $usuario, ?array $chequesData = null): Asiento
     {
         if ($recibo->estado !== Recibo::ESTADO_BORRADOR) {
             throw new DomainException(sprintf(
@@ -460,16 +477,21 @@ class ReciboService
             ));
         }
 
-        // Si el medio de cobro es CHEQUES_CARTERA, exigir datos del cheque.
+        // Normalizar: aceptar un cheque único (assoc) o una lista de cheques.
+        if ($chequesData && array_key_exists('numero_cheque', $chequesData)) {
+            $chequesData = [$chequesData];
+        }
+
+        // Si el medio de cobro es CHEQUES_CARTERA, exigir al menos un cheque.
         $esCheque = $this->medioEsChequesCartera((int) $recibo->medio_cobro_id);
-        if ($esCheque && empty($chequeData)) {
+        if ($esCheque && empty($chequesData)) {
             throw new DomainException(
                 'CHEQUE_DATOS_REQUERIDOS: el medio de cobro "Cheques en Cartera" requiere '
-                . 'completar los datos del cheque (número, banco, librador, fechas, importe).'
+                . 'al menos un cheque (número, banco, fechas, importe).'
             );
         }
 
-        return DB::transaction(function () use ($recibo, $usuario, $chequeData, $esCheque) {
+        return DB::transaction(function () use ($recibo, $usuario, $chequesData, $esCheque) {
             $empresaId = $recibo->empresa_id;
 
             // v1.32 — Reservar número PV-NRO sincronizado con DistriApp.
@@ -640,6 +662,42 @@ class ReciboService
                 ];
             }
 
+            // Débito: "Otro" (medio/compensación especial). Suma al cobro como
+            // una retención, pero su contrapartida va a la cuenta puente 1.1.6.99
+            // "Pendientes de Identificar" para reclasificarse luego
+            // (/erp/contabilidad/reclasificar-pendientes). La observación queda
+            // como glosa de la línea.
+            $otroMonto = round((float) $recibo->otro_monto, 2);
+            if ($otroMonto > 0) {
+                $cuentaOtroId = $cuentaPorCodigoRet('1.1.6.99');
+                $movimientos[] = [
+                    'cuenta_id' => $cuentaOtroId,
+                    'centro_costo_id' => $this->admiteCc($cuentaOtroId) ? $ccGeneral : null,
+                    'auxiliar_id' => null,
+                    'debe' => $otroMonto,
+                    'haber' => 0,
+                    'glosa' => 'Otro (medio especial)'
+                        .($recibo->otro_observacion ? ' — '.$recibo->otro_observacion : '')
+                        .' — recibo '.$recibo->numero_correlativo,
+                ];
+            }
+
+            // Redondeo: ajuste contra la cuenta de resultado 5.6.06 "Redondeos".
+            // Positivo (pérdida) → débito; negativo (ganancia) → crédito. Suma al
+            // crédito a Deudores como el resto de los componentes del cobro.
+            $redondeo = round((float) $recibo->redondeo_monto, 2);
+            if (abs($redondeo) > 0.001) {
+                $cuentaRedId = $cuentaPorCodigoRet('5.6.06');
+                $movimientos[] = [
+                    'cuenta_id' => $cuentaRedId,
+                    'centro_costo_id' => $this->admiteCc($cuentaRedId) ? $ccGeneral : null,
+                    'auxiliar_id' => null,
+                    'debe' => $redondeo > 0 ? $redondeo : 0,
+                    'haber' => $redondeo < 0 ? -$redondeo : 0,
+                    'glosa' => 'Redondeo cobranza — recibo '.$recibo->numero_correlativo,
+                ];
+            }
+
             // Débito: NC aplicadas — la NC reduce el saldo del cliente
             // (es como un cobro). Se asienta como débito a "Notas de Crédito
             // a aplicar" o directamente cancelando deudor. Patrón: el NC ya
@@ -652,10 +710,20 @@ class ReciboService
             // incluir las NC aplicadas (el deudor se cancela por el total
             // = monto_cobrado + retenciones + NC).
 
-            // Crédito: cliente (Deudores) por total_factura (es lo que cancela el recibo).
+            // Crédito: cliente (Deudores). Cancela SOLO la parte cubierta por
+            // cobro + retenciones. Las NC aplicadas NO se acreditan acá: la NC
+            // ya acreditó Deudores en su propio asiento de emisión
+            // (ContabilizadorFacturas: Debe 4.1.2.01 NC emitidas / Haber 1.1.4.01
+            // Deudores). Incluirlas de nuevo duplicaba el crédito y desbalanceaba
+            // el asiento por el total exacto de NC (no había débito de
+            // contrapartida). El recibo sólo registra la APLICACIÓN de la NC
+            // (saldo imputable, vía erp_imputaciones_nc más abajo), sin volver a
+            // asentarla. monto_cobrado + retenciones = total_factura − NC, que es
+            // justo el saldo de deudor que queda por cancelar.
             $totalCancelado = (float) $recibo->monto_cobrado
                 + (float) $recibo->total_retenciones
-                + (float) $recibo->total_nc_aplicadas;
+                + $otroMonto
+                + $redondeo;
             if ($totalCancelado > 0) {
                 $movimientos[] = [
                     'cuenta_id' => $cuentaDeudoresId,
@@ -675,7 +743,9 @@ class ReciboService
             $asiento = $this->asientoService->crearBorrador([
                 'empresa_id' => $empresaId,
                 'diario_id' => $diarioId,
-                'fecha' => $recibo->fecha_emision->toDateString(),
+                // El asiento usa la FECHA DE COBRO (fecha económica del cobro),
+                // no la de emisión del recibo (hoy).
+                'fecha' => ($recibo->fecha_cobro ?? $recibo->fecha_emision)->toDateString(),
                 'glosa' => sprintf('Recibo %s · Cobro factura #%d',
                     $recibo->numero_correlativo, $recibo->factura_venta_id),
                 // erp_asientos.origen es un ENUM que NO incluye 'RECIBO'. Usamos
@@ -699,7 +769,7 @@ class ReciboService
                     'nc_id' => $nc->nc_factura_id,
                     'factura_id' => $recibo->factura_venta_id,
                     'importe' => $nc->monto_aplicado,
-                    'fecha_imputacion' => $recibo->fecha_emision->toDateString(),
+                    'fecha_imputacion' => ($recibo->fecha_cobro ?? $recibo->fecha_emision)->toDateString(),
                     'imputado_por' => $usuario->id,
                     'imputado_at' => now(),
                     'observaciones' => sprintf('Aplicación auto via Recibo %s', $recibo->numero_correlativo),
@@ -719,19 +789,36 @@ class ReciboService
 
             $recibo->update([
                 'estado' => Recibo::ESTADO_EMITIDO,
+                'fecha_emision' => today()->toDateString(), // emisión = hoy (momento real de emisión)
                 'asiento_id' => $asiento->id,
                 'emitido_at' => now(),
             ]);
 
-            // Si el medio es CHEQUES_CARTERA, crear la fila en
-            // erp_cheques_recibidos con los datos del cheque físico.
-            if ($esCheque && $chequeData) {
-                $this->cheques->crearDesdeRecibo(
-                    reciboId: $recibo->id,
-                    empresaId: $empresaId,
-                    data: $chequeData,
-                    userId: $usuario->id,
-                );
+            // Si el medio es CHEQUES_CARTERA, crear una fila en
+            // erp_cheques_recibidos por cada cheque físico. La suma de los
+            // cheques debe igualar el monto cobrado (el asiento debita la cuenta
+            // "Valores al Cobro" por ese total en una sola línea).
+            if ($esCheque && $chequesData) {
+                $sumaCheques = round(array_sum(array_map(
+                    fn ($c) => (float) ($c['importe'] ?? 0), $chequesData,
+                )), 2);
+                $cobrado = round((float) $recibo->monto_cobrado, 2);
+                if (abs($sumaCheques - $cobrado) > 0.01) {
+                    throw new DomainException(sprintf(
+                        'CHEQUES_DESCUADRAN: la suma de los cheques ($%s) debe igualar el '
+                        . 'importe recibido del recibo ($%s).',
+                        number_format($sumaCheques, 2, ',', '.'),
+                        number_format($cobrado, 2, ',', '.'),
+                    ));
+                }
+                foreach ($chequesData as $chequeData) {
+                    $this->cheques->crearDesdeRecibo(
+                        reciboId: $recibo->id,
+                        empresaId: $empresaId,
+                        data: $chequeData,
+                        userId: $usuario->id,
+                    );
+                }
             }
 
             $this->audit->logEvento(
@@ -800,19 +887,39 @@ class ReciboService
                     ->delete();
             }
 
-            // Liberar saldo de la factura: cambiar estado de COBRADA/COBRO_PARCIAL.
-            // En MVP: si era COBRADA, vuelve a EMITIDA. Si COBRO_PARCIAL, queda
-            // EMITIDA (asumiendo no hay otros recibos parciales).
-            DB::table('erp_facturas_venta')
-                ->where('id', $recibo->factura_venta_id)
-                ->update(['estado' => 'EMITIDA', 'updated_at' => now()]);
-
+            // Marcar el recibo ANULADO PRIMERO, para que saldoFactura() lo
+            // excluya al recalcular el estado de las facturas.
             $recibo->update([
                 'estado' => Recibo::ESTADO_ANULADO,
                 'anulado_at' => now(),
                 'anulado_por_user_id' => $usuario->id,
                 'anulado_motivo' => $motivo,
             ]);
+
+            // Liberar TODAS las facturas que estaban imputadas en el recibo
+            // (multi-comprobante). Antes solo se reseteaba la factura legacy
+            // (factura_venta_id), así que en recibos con varias facturas el
+            // resto quedaba pegado en COBRADA y no volvía a aparecer como
+            // disponible. Recalculamos el estado real de cada una según su
+            // saldo (puede tener otros recibos vigentes → COBRO_PARCIAL).
+            $facturaIds = DB::table('erp_recibos_comprobantes_imputados')
+                ->where('recibo_id', $recibo->id)->pluck('factura_venta_id')->all();
+            if (empty($facturaIds) && $recibo->factura_venta_id) {
+                $facturaIds = [$recibo->factura_venta_id]; // back-compat 1:1 (v1.31)
+            }
+            foreach (array_unique($facturaIds) as $fid) {
+                $impTotal = (float) DB::table('erp_facturas_venta')->where('id', $fid)->value('imp_total');
+                $saldo = $this->saldoFactura((int) $fid, $recibo->empresa_id);
+                if ($saldo <= 0.01) {
+                    $estado = 'COBRADA';
+                } elseif ($saldo >= $impTotal - 0.01) {
+                    $estado = 'EMITIDA';
+                } else {
+                    $estado = 'COBRO_PARCIAL';
+                }
+                DB::table('erp_facturas_venta')->where('id', $fid)
+                    ->update(['estado' => $estado, 'updated_at' => now()]);
+            }
 
             $this->audit->logEvento(
                 accion: 'RECIBO_ANULADO',
@@ -881,6 +988,20 @@ class ReciboService
         if (! $medioCobroId) return false;
         return DB::table('erp_cuentas_bancarias')
             ->where('id', $medioCobroId)->value('codigo') === 'CHEQUES_CARTERA';
+    }
+
+    /**
+     * Fecha de cobro = la que define el operador (fecha económica del cobro).
+     * Debe ser igual o anterior a la de emisión (hoy). Default: hoy.
+     */
+    private function resolverFechaCobro(array $data): string
+    {
+        $hoy = today()->toDateString();
+        $fc = ! empty($data['fecha_cobro']) ? substr((string) $data['fecha_cobro'], 0, 10) : $hoy;
+        if ($fc > $hoy) {
+            throw new DomainException('FECHA_COBRO_FUTURA: la fecha de cobro no puede ser posterior a la fecha de emisión (hoy).');
+        }
+        return $fc;
     }
 
     public function saldoImputableNc(int $ncId, int $empresaId = 1): float

@@ -39,23 +39,243 @@ class MovimientosBancariosController
             ->orderByDesc('fecha')
             ->orderByDesc('id');
 
+        $this->aplicarFiltrosV150($query, $request);
+
+        // v1.50 §4.6 — sumatoria del TOTAL filtrado (sin el limit del listado).
+        $tot = (clone $query)->reorder()
+            ->selectRaw('COUNT(*) c, COALESCE(SUM(debito),0) d, COALESCE(SUM(credito),0) h')
+            ->first();
+
+        $limit = min(1000, max(50, (int) $request->query('per_page', 200)));
+
+        return response()->json([
+            'data' => $query->limit($limit)->get(),
+            'meta' => [
+                'limit' => $limit,
+                'total_movs' => (int) $tot->c,
+                'total_debitos' => round((float) $tot->d, 2),
+                'total_creditos' => round((float) $tot->h, 2),
+                'total_neto' => round((float) $tot->h - (float) $tot->d, 2),
+            ],
+        ], 200, [
+            'X-Total-Movs' => (int) $tot->c,
+            'X-Total-Debitos' => round((float) $tot->d, 2),
+            'X-Total-Creditos' => round((float) $tot->h, 2),
+            'X-Total-Neto' => round((float) $tot->h - (float) $tot->d, 2),
+        ]);
+    }
+
+    /**
+     * v1.50 Bloque A — filtros del listado (chips + avanzados). Compartido por
+     * index() y exportXlsx().
+     */
+    private function aplicarFiltrosV150($query, Request $request): void
+    {
         if ($cb = $request->integer('cuenta_bancaria_id')) {
             $query->where('cuenta_bancaria_id', $cb);
         }
         if ($estado = $request->string('estado')->toString()) {
             $query->where('estado', $estado);
         }
-        if ($desde = $request->date('desde')) {
-            $query->where('fecha', '>=', $desde);
+        if (is_array($request->query('estados'))) {
+            $query->whereIn('estado', array_filter($request->query('estados')));
         }
-        if ($hasta = $request->date('hasta')) {
-            $query->where('fecha', '<=', $hasta);
+        if ($desde = $request->date('desde')) $query->where('fecha', '>=', $desde);
+        if ($hasta = $request->date('hasta')) $query->where('fecha', '<=', $hasta);
+
+        // Chips Débitos/Créditos.
+        $tipo = strtoupper($request->string('tipo')->toString());
+        if ($tipo === 'DEBITO') $query->where('debito', '>', 0);
+        if ($tipo === 'CREDITO') $query->where('credito', '>', 0);
+
+        // Rango de importes (sobre el lado con valor).
+        if (($impDesde = $request->query('importe_desde')) !== null && $impDesde !== '') {
+            $query->whereRaw('GREATEST(debito, credito) >= ?', [(float) $impDesde]);
+        }
+        if (($impHasta = $request->query('importe_hasta')) !== null && $impHasta !== '') {
+            $query->whereRaw('GREATEST(debito, credito) <= ?', [(float) $impHasta]);
         }
 
-        return response()->json([
-            'data' => $query->limit(200)->get(),
-            'meta' => ['limit' => 200],
+        if ($regla = $request->integer('regla_id')) $query->where('regla_aplicada_id', $regla);
+        if ($cta = $request->integer('cuenta_contable_id')) $query->where('cuenta_contable_propuesta_id', $cta);
+        if ($aux = $request->integer('auxiliar_id')) $query->where('auxiliar_resuelto_id', $aux);
+
+        // Chips de categoría (OR entre las seleccionadas).
+        $cats = array_filter((array) $request->query('categorias', []));
+        if ($cats) {
+            $query->where(function ($outer) use ($cats) {
+                foreach ($cats as $cat) {
+                    $outer->orWhere(fn ($w) => $this->condicionCategoria($w, strtoupper((string) $cat)));
+                }
+            });
+        }
+    }
+
+    /** Condición SQL de cada chip de categoría (v1.50 §4.1, con reglas/cuentas reales). */
+    private function condicionCategoria($q, string $cat): void
+    {
+        $cuentas = fn (array $codigos) => DB::table('erp_cuentas_contables')
+            ->whereIn('codigo', $codigos)->pluck('id');
+        $reglasLike = function (array $patrones) {
+            $r = DB::table('erp_conciliacion_reglas');
+            foreach ($patrones as $i => $p) {
+                $i === 0 ? $r->where('codigo', 'like', $p) : $r->orWhere('codigo', 'like', $p);
+            }
+            return $r->pluck('id');
+        };
+
+        switch ($cat) {
+            case 'SIN_ETIQUETAR':
+                $q->where('estado', MovimientoBancario::ESTADO_PENDIENTE);
+                break;
+            case 'IMPUESTOS':
+                $q->whereIn('cuenta_contable_propuesta_id', $cuentas(['5.4.04', '5.5.03', '5.5.07', '5.5.08', '1.1.6.11', '1.1.6.12']))
+                    ->orWhereIn('regla_aplicada_id', $reglasLike(['%IMP%', '%SIRCREB%', '%SELLADO%', '%AFIP%']));
+                break;
+            case 'COMISIONES':
+                $q->whereIn('cuenta_contable_propuesta_id', $cuentas(['5.4.02', '5.4.05', '5.4.06']))
+                    ->orWhereIn('regla_aplicada_id', $reglasLike(['%COM%']));
+                break;
+            case 'SERVICIOS':
+                $q->whereIn('cuenta_contable_propuesta_id', $cuentas(['5.2.2.01', '5.2.2.02', '5.2.2.03', '5.2.2.04', '5.2.2.05', '5.2.2.06', '5.2.2.07', '5.2.2.08', '5.2.2.09']))
+                    ->orWhereIn('regla_aplicada_id', $reglasLike(['%PAGO-SERV%', '%NOSIS%', '%PAGO-SEGURO%']));
+                break;
+            case 'SUELDOS':
+                $q->whereIn('cuenta_contable_propuesta_id', $cuentas(['5.2.1.01', '5.2.1.10']))
+                    ->orWhereIn('regla_aplicada_id', $reglasLike(['%SUELDO%', '%PAGO-PERSONAL%']));
+                break;
+            case 'TRANSFERENCIAS_INTERNAS':
+                $q->where('es_transferencia_interna', 1);
+                break;
+            case 'CHEQUES':
+                $q->whereIn('estado', [
+                    MovimientoBancario::ESTADO_CONFIRMADO_CHEQUES,
+                    MovimientoBancario::ESTADO_CONFIRMADO_DESCUENTO,
+                ])->orWhereIn('regla_aplicada_id', $reglasLike(['%CHQ%', '%CH-CAMARA%', '%ECHEQ%']));
+                break;
+            case 'COBROS':
+                $q->where('credito', '>', 0)->whereNotNull('cuit_contraparte');
+                break;
+            default:
+                // Categoría desconocida: no filtra nada (condición neutra).
+                $q->whereRaw('1=1');
+        }
+    }
+
+    /** v1.50 §4.5 — Export del listado filtrado a Excel (9 columnas). */
+    public function exportXlsx(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+
+        $query = MovimientoBancario::query()
+            ->with(['cuentaBancaria:id,codigo,nombre'])
+            ->orderBy('fecha')->orderBy('id');
+        $this->aplicarFiltrosV150($query, $request);
+        // Export de selección puntual (footer del multi-select).
+        if (is_array($request->query('ids'))) {
+            $query->whereIn('id', array_map('intval', $request->query('ids')));
+        }
+        $rows = $query->limit(5000)->get();
+
+        $reglas = DB::table('erp_conciliacion_reglas')->pluck('codigo', 'id');
+        $ctas = DB::table('erp_cuentas_contables')->pluck('codigo', 'id');
+
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Conciliación');
+        $headers = ['Fecha', 'Cuenta', 'Concepto', 'Contraparte', 'Débito', 'Crédito', 'Estado', 'Regla aplicada', 'Cuenta destino'];
+        $sheet->fromArray($headers, null, 'A1');
+        $sheet->getStyle('A1:I1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:I1')->getFill()
+            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->getStartColor()->setRGB('E7EBF0');
+
+        $i = 2;
+        foreach ($rows as $m) {
+            $sheet->fromArray([
+                $m->fecha->format('d/m/Y'),
+                $m->cuentaBancaria?->codigo,
+                $m->concepto,
+                $m->nombre_contraparte ?: ($m->cuit_contraparte ?: ''),
+                (float) $m->debito ?: null,
+                (float) $m->credito ?: null,
+                $m->estado,
+                $m->regla_aplicada_id ? ($reglas[$m->regla_aplicada_id] ?? '#'.$m->regla_aplicada_id) : '',
+                $m->cuenta_contable_propuesta_id ? ($ctas[$m->cuenta_contable_propuesta_id] ?? '') : '',
+            ], null, 'A'.$i);
+            $i++;
+        }
+        foreach (['E', 'F'] as $col) {
+            $sheet->getStyle("{$col}2:{$col}{$i}")->getNumberFormat()->setFormatCode('#,##0.00');
+        }
+        foreach (range('A', 'I') as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
+
+        $cuentaCod = $rows->first()?->cuentaBancaria?->codigo ?? 'todas';
+        $filename = sprintf('conciliacion_%s_%s.xlsx', $cuentaCod, now()->format('Y-m-d'));
+
+        return response()->stream(function () use ($spreadsheet) {
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save('php://output');
+        }, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
         ]);
+    }
+
+    /** v1.50 §4.5 — Ignorar en bulk (motivo del catálogo, como el ignorar unitario). */
+    public function bulkIgnorar(Request $request): JsonResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+        $data = $request->validate([
+            'mov_ids' => ['required', 'array', 'min:1', 'max:200'],
+            'mov_ids.*' => ['integer'],
+            'motivo_ignorado_id' => ['required', 'integer'],
+            'observacion' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $ok = 0;
+        $errores = [];
+        foreach (array_unique($data['mov_ids']) as $id) {
+            try {
+                $mov = MovimientoBancario::findOrFail($id);
+                $this->concilService->ignorar($mov, (int) $data['motivo_ignorado_id'], $data['observacion'] ?? null, $request->user());
+                $ok++;
+            } catch (\Throwable $e) {
+                $errores[] = "#{$id}: ".$e->getMessage();
+            }
+        }
+        return response()->json(['ok' => true, 'data' => ['ignorados' => $ok, 'errores' => $errores]]);
+    }
+
+    /** v1.50 §3.3 — Filtros guardados por usuario (CRUD mínimo). */
+    public function filtrosGuardados(Request $request): JsonResponse
+    {
+        $rows = DB::table('erp_movimientos_bancarios_filtros_guardados')
+            ->where('user_id', $request->user()->id)
+            ->orderBy('nombre')->get(['id', 'nombre', 'filtros_json', 'es_default']);
+        return response()->json(['ok' => true, 'data' => $rows]);
+    }
+
+    public function guardarFiltro(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'nombre' => ['required', 'string', 'max:100'],
+            'filtros' => ['required', 'array'],
+            'es_default' => ['nullable', 'boolean'],
+        ]);
+        DB::table('erp_movimientos_bancarios_filtros_guardados')->updateOrInsert(
+            ['user_id' => $request->user()->id, 'nombre' => $data['nombre']],
+            ['filtros_json' => json_encode($data['filtros'], JSON_UNESCAPED_UNICODE),
+             'es_default' => (int) ($data['es_default'] ?? 0), 'updated_at' => now()],
+        );
+        return response()->json(['ok' => true]);
+    }
+
+    public function borrarFiltro(Request $request, int $id): JsonResponse
+    {
+        DB::table('erp_movimientos_bancarios_filtros_guardados')
+            ->where('id', $id)->where('user_id', $request->user()->id)->delete();
+        return response()->json(['ok' => true]);
     }
 
     public function store(Request $request): JsonResponse
@@ -228,6 +448,117 @@ class MovimientosBancariosController
         // §15: devolvemos la respuesta enriquecida (sugerencias + cuit + contraparte + motivo_fallback).
         $r = $this->concilService->sugerirFacturasConMatchingCuit($mov, $top);
         return response()->json(['ok' => true, 'data' => $r]);
+    }
+
+    /**
+     * v1.49 §7.2 — Candidatos unificados para el modal de Sugerencias:
+     * descuento de cheque + cheques pendientes + recibos directos + facturas
+     * (formato existente del v1.48). Cada sección viene vacía si no aplica.
+     */
+    public function candidatos(Request $request, int $id): JsonResponse
+    {
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        $facturas = $this->concilService->sugerirFacturasConMatchingCuit($mov, (int) $request->query('top', 10));
+        $recibos = app(\App\Erp\Services\Conciliacion\ConciliacionRecibosService::class)->candidatos($mov);
+        $cheques = app(\App\Erp\Services\Conciliacion\ConciliacionChequesService::class)->candidatos($mov);
+
+        // v1.50 §5.4 — cheques sueltos = candidatos que NO están anidados en un
+        // recibo del listado (para no ofrecerlos dos veces).
+        $anidados = [];
+        foreach ($recibos as $r) {
+            foreach ($r['cheques'] as $ch) $anidados[] = $ch['cheque_id'];
+        }
+        $chequesSueltos = array_values(array_filter($cheques, fn ($c) => ! in_array($c['cheque_id'], $anidados, true)));
+
+        return response()->json(['ok' => true, 'data' => [
+            'mov' => [
+                'id' => $mov->id, 'fecha' => $mov->fecha->toDateString(), 'concepto' => $mov->concepto,
+                'debito' => (float) $mov->debito, 'credito' => (float) $mov->credito,
+                'cuenta_bancaria' => $mov->cuentaBancaria?->nombre,
+            ],
+            'recibos' => $recibos,
+            'cheques_sueltos' => $chequesSueltos,
+            'descuentos_cheque' => app(\App\Erp\Services\Conciliacion\AutoVincularDescuentosService::class)->candidatos($mov),
+            'facturas' => $facturas,
+            // Back-compat con el modal v1.49 (mismo dato, claves viejas).
+            'recibos_directos' => $recibos,
+            'cheques_pendientes' => $cheques,
+        ]]);
+    }
+
+    /** v1.49 §4.1 — Cheques candidatos (endpoint dedicado, útil para tests). */
+    public function chequesCandidatos(Request $request, int $id): JsonResponse
+    {
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        $data = app(\App\Erp\Services\Conciliacion\ConciliacionChequesService::class)
+            ->candidatos($mov, $request->query('fecha_desde'), $request->query('fecha_hasta'));
+        return response()->json(['ok' => true, 'data' => [
+            'cheques' => $data,
+            'monto_mov' => (float) $mov->credito,
+        ]]);
+    }
+
+    /** v1.49 §6.1 — Recibos candidatos (endpoint dedicado). */
+    public function recibosCandidatos(Request $request, int $id): JsonResponse
+    {
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        return response()->json(['ok' => true, 'data' => [
+            'recibos' => app(\App\Erp\Services\Conciliacion\ConciliacionRecibosService::class)->candidatos($mov),
+        ]]);
+    }
+
+    /** v1.49 §4.2 — Concilia el mov contra N cheques (asiento consolidado). */
+    public function conciliarCheques(Request $request, int $id): JsonResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+        $data = $request->validate([
+            'cheques' => ['required', 'array', 'min:1'],
+            'cheques.*.cheque_id' => ['required', 'integer'],
+            'cheques.*.monto' => ['required', 'numeric', 'gt:0'],
+            'observaciones' => ['nullable', 'string', 'max:500'],
+        ]);
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        try {
+            $mov = app(\App\Erp\Services\Conciliacion\ConciliacionChequesService::class)
+                ->conciliar($mov, $data['cheques'], $data['observaciones'] ?? null, $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $mov->load('asiento')]);
+    }
+
+    /** v1.49 §5.3 — Vincula el mov al asiento de un descuento existente (sin asiento nuevo). */
+    public function vincularAsientoDescuento(Request $request, int $id): JsonResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+        $data = $request->validate(['asiento_id' => ['required', 'integer']]);
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        try {
+            $mov = app(\App\Erp\Services\Conciliacion\AutoVincularDescuentosService::class)
+                ->vincular($mov, (int) $data['asiento_id'], $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $mov]);
+    }
+
+    /** v1.49 §6.2 — Vincula el mov a recibo(s) con medio directo (sin asiento nuevo). */
+    public function vincularReciboDirecto(Request $request, int $id): JsonResponse
+    {
+        $this->requierePermiso($request, 'tesoreria.extractos.conciliar');
+        $data = $request->validate([
+            'recibos' => ['required', 'array', 'min:1'],
+            'recibos.*.recibo_id' => ['required', 'integer'],
+            'recibos.*.monto' => ['required', 'numeric', 'gt:0'],
+        ]);
+        $mov = MovimientoBancario::with('cuentaBancaria')->findOrFail($id);
+        try {
+            $mov = app(\App\Erp\Services\Conciliacion\ConciliacionRecibosService::class)
+                ->vincular($mov, $data['recibos'], $request->user());
+        } catch (DomainException $e) {
+            return $this->domainError($e);
+        }
+        return response()->json(['ok' => true, 'data' => $mov]);
     }
 
     /**

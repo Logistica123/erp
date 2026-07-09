@@ -37,13 +37,38 @@ class DashboardController extends Controller
             ')
             ->first();
 
-        // Saldo a cobrar (con IVA, a hoy) — single source of truth via
-        // SaldosClientesService que lee directo de la cuenta contable
-        // 1.1.4.01 Deudores por Ventas (debe − haber). Suma facturas, resta
-        // NC y cobros automáticamente porque cada uno generó su asiento.
-        $saldoTotal = $this->saldos->saldoTotal($hoy, $empresaId);
-        $cantPendientes = count($this->saldos->saldosPorCliente($hoy, $empresaId));
-        $pendientes = (object) ['cant' => $cantPendientes, 'total' => $saldoTotal];
+        // Saldo a cobrar — cálculo OPERATIVO (facturas abiertas − cobros − NC),
+        // el mismo criterio que el reporte de Saldos Consolidados. NO se usa el
+        // saldo contable de 1.1.4.01 porque arrastra el saldo inicial de la
+        // APERTURA ($630M de deuda pre-ERP sin facturas asociadas) que nunca se
+        // cancela vía recibos y inflaba este KPI.
+        $consolidados = app(\App\Erp\Services\Reportes\SaldosConsolidadosService::class);
+        $saldoExpr = $consolidados->saldoFacturaVentaExpr('fv', 'tc');
+        $pend = DB::table('erp_facturas_venta as fv')
+            ->join('erp_tipos_comprobante as tc', 'tc.id', '=', 'fv.tipo_comprobante_id')
+            ->where('fv.empresa_id', $empresaId)
+            ->whereIn('fv.estado', \App\Erp\Services\Reportes\SaldosConsolidadosService::ESTADOS_VENTA_ABIERTA)
+            ->where('fv.fecha_emision', '<=', $hoy->toDateString())
+            ->whereNull('fv.deleted_at')
+            ->selectRaw("COUNT(CASE WHEN ABS({$saldoExpr}) > 0.01 THEN 1 END) as cant, COALESCE(SUM({$saldoExpr}), 0) as total")
+            ->first();
+        $pendientes = (object) ['cant' => (int) $pend->cant, 'total' => (float) $pend->total];
+
+        // Cheques recibidos pendientes de cobro. Viven en 1.1.4.04 "Valores al
+        // Cobro" (el recibo con cheques ya canceló Deudores), por eso NO están
+        // incluidos en el saldo a cobrar de arriba (1.1.4.01) y se muestran
+        // como KPI separado.
+        $cheques = DB::table('erp_cheques_recibidos')
+            ->where('empresa_id', $empresaId)
+            ->whereIn('estado', ['EN_CARTERA', 'DEPOSITADO', 'VENCIDO_NO_COBRADO'])
+            ->selectRaw("
+                COUNT(*) as cant,
+                COALESCE(SUM(importe), 0) as total,
+                COALESCE(SUM(CASE WHEN estado = 'EN_CARTERA' THEN importe ELSE 0 END), 0) as en_cartera,
+                COALESCE(SUM(CASE WHEN estado = 'DEPOSITADO' THEN importe ELSE 0 END), 0) as depositados,
+                COALESCE(SUM(CASE WHEN estado = 'VENCIDO_NO_COBRADO' THEN importe ELSE 0 END), 0) as vencidos
+            ")
+            ->first();
 
         // Evolución últimos 6 meses (facturado neto + total)
         $seisMeses = [];
@@ -127,6 +152,13 @@ class DashboardController extends Controller
             'por_cobrar' => [
                 'cant' => (int) $pendientes->cant,
                 'total' => (float) $pendientes->total,
+            ],
+            'cheques_pendientes' => [
+                'cant' => (int) $cheques->cant,
+                'total' => (float) $cheques->total,
+                'en_cartera' => (float) $cheques->en_cartera,
+                'depositados' => (float) $cheques->depositados,
+                'vencidos' => (float) $cheques->vencidos,
             ],
             'contadores' => [
                 'clientes' => $clientes,

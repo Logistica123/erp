@@ -2,8 +2,8 @@ import {
   ArrowLeftRight, Banknote, BookOpen, BookText, Box, Building2,
   Calculator, CalendarCheck, ClipboardList, CloudCog, Coins, Cog,
   FileBarChart, FileText, History, Landmark, LayoutDashboard, ListTree, Lock,
-  PieChart, Receipt, Scale, ScrollText, ShieldCheck, ShoppingCart,
-  Split, Sparkles, Tag, TrendingUp, Truck, UserCog, Users, Wallet, Wrench,
+  PieChart, PiggyBank, Receipt, Scale, ScrollText, ShieldCheck, ShoppingCart,
+  Split, Sparkles, Tag, TrendingUp, Truck, UserCheck, UserCog, Users, Wallet, Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -50,6 +50,7 @@ export const sections: NavSection[] = [
     label: 'Tesorería',
     items: [
       { to: '/erp/bancos', label: 'Bancos y Cajas', icon: Landmark },
+      { to: '/erp/tesoreria/cargar-saldo-inicial', label: 'Cargar saldo inicial', icon: PiggyBank },
       { to: '/erp/cobros', label: 'Cobros', icon: Wallet },
       { to: '/erp/tesoreria/recibos', label: 'Recibos', icon: Receipt },
       { to: '/erp/ordenes-pago', label: 'Órdenes de pago', icon: ArrowLeftRight },
@@ -73,6 +74,7 @@ export const sections: NavSection[] = [
     items: [
       { to: '/erp/facturacion', label: 'Facturas de venta', icon: FileText },
       { to: '/erp/cc-clientes', label: 'CC Clientes', icon: Users },
+      { to: '/erp/completar-clientes', label: 'Completar clientes (plataforma)', icon: UserCheck },
       { to: '/erp/cc-clientes/imputar-nc', label: 'Imputar NC a facturas', icon: Users },
       { to: '/erp/libro-iva-ventas', label: 'Libro IVA Ventas (import)', icon: ScrollText },
       { to: '/erp/fce', label: 'FCE MiPyME', icon: ClipboardList },

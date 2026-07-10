@@ -251,7 +251,8 @@ export default function App() {
               <Route path="/erp/admin/usuarios" element={<PlaceholderPage title="Usuarios" modulo="Administración" endpoint="GET /api/erp/usuarios" />} handle={{ crumb: 'Usuarios' }} />
               <Route path="/erp/admin/roles-permisos" element={<PlaceholderPage title="Roles y permisos" modulo="Administración" endpoint="GET /api/erp/roles" />} handle={{ crumb: 'Roles' }} />
               <Route path="/erp/admin/diarios" element={<PlaceholderPage title="Diarios contables" modulo="Administración" endpoint="GET /api/erp/diarios" />} handle={{ crumb: 'Diarios' }} />
-              <Route path="/erp/admin/centros-costo" element={<PlaceholderPage title="Centros de Costo" modulo="Administración" endpoint="GET /api/erp/centros-costo" />} handle={{ crumb: 'CC' }} />
+              {/* v1.55 Bloque C — la pantalla real ya existe en /erp/centros-costo */}
+              <Route path="/erp/admin/centros-costo" element={<Navigate to="/erp/centros-costo" replace />} handle={{ crumb: 'CC' }} />
               <Route path="/erp/admin/auxiliares" element={<PlaceholderPage title="Auxiliares" modulo="Administración" endpoint="GET /api/erp/auxiliares" />} handle={{ crumb: 'Auxiliares' }} />
               <Route path="/erp/admin/configuracion" element={<PlaceholderPage title="Configuración" modulo="Administración" endpoint="GET /api/erp/config" />} handle={{ crumb: 'Configuración' }} />
             </Route>

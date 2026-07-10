@@ -129,13 +129,22 @@ class CatalogosController
     {
         $empresaId = $this->empresaIdFromRequest($request);
 
-        return response()->json([
-            'data' => CuentaBancaria::where('empresa_id', $empresaId)
-                ->where('activo', true)
-                ->with(['banco:id,codigo,nombre', 'moneda:id,codigo'])
-                ->orderBy('codigo')
-                ->get(),
-        ]);
+        // v1.55 Bloque B — parser_soportado le permite a la UI ofrecer solo
+        // cuentas importables en "Subir extracto" (Galicia quedó fuera del
+        // factory; Cheques/Compensación nunca tuvieron parser).
+        $soportados = (new \App\Erp\Services\Tesoreria\Parsers\ParserFactory())->codigosSoportados();
+
+        $cuentas = CuentaBancaria::where('empresa_id', $empresaId)
+            ->where('activo', true)
+            ->with(['banco:id,codigo,nombre,codigo_parser', 'moneda:id,codigo'])
+            ->orderBy('codigo')
+            ->get()
+            ->each(fn ($c) => $c->setAttribute(
+                'parser_soportado',
+                in_array($c->banco?->codigo_parser, $soportados, true),
+            ));
+
+        return response()->json(['data' => $cuentas]);
     }
 
     /**

@@ -10,7 +10,7 @@ import { fmtMoney } from '@/lib/cn';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 
-type CuentaBancaria = { id: number; codigo: string; nombre: string };
+type CuentaBancaria = { id: number; codigo: string; nombre: string; parser_soportado?: boolean };
 type MovimientoBancario = {
   id: number;
   fecha: string;
@@ -1492,7 +1492,8 @@ function ImportExtractoWizard({
               className="w-full px-[9px] py-[6px] text-[13px] border border-line-strong rounded-md bg-white"
             >
               <option value="">Seleccionar cuenta…</option>
-              {cuentas.map((c) => (
+              {/* v1.55 Bloque B — solo cuentas con parser registrado (fuera Galicia). */}
+              {cuentas.filter((c) => c.parser_soportado !== false).map((c) => (
                 <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>
               ))}
             </select>
@@ -1990,6 +1991,12 @@ function SugerenciasModal({ mov, onClose, onSuccess, onError }: {
             <div className={`flex justify-between font-semibold ${exactoEf ? 'text-success' : 'text-danger'}`}>
               <span>Diferencia{usaAnt ? ' (con anticipo)' : ''}:</span><span className="tabular">{fmtMoney(diffEf)}</span>
             </div>
+            {/* v1.55 Bloque F — diferencias ≤$1 balancean solas contra 5.6.06. */}
+            {exactoEf && !usaAnt && Math.abs(diffEf) > 0.01 && (
+              <div className="text-[10.5px] text-ink-muted">
+                ⓘ Se genera una línea automática de redondeo (5.6.06) por la diferencia.
+              </div>
+            )}
             {!exactoEf && (
               <div className="border border-warning/40 bg-warning-bg/20 rounded p-2 space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -2099,9 +2106,10 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
   const montoMov = mov ? Math.max(Number(mov.debito), Number(mov.credito)) : 0;
   const totalSel = Math.round(seleccionadas.reduce((a, s) => a + (Number(s.monto) || 0), 0) * 100) / 100;
   const diff = Math.round((montoMov - totalSel) * 100) / 100;
-  // El backend exige línea de ajuste (permitir_diferencia + cuenta + motivo)
-  // para cualquier diferencia > $0,01 — el asiento no balancea sin ella.
-  const exacto = seleccionadas.length > 0 && Math.abs(diff) <= 0.01;
+  // v1.55 Bloque F — hasta $1 el backend balancea solo con una línea
+  // automática contra 5.6.06 Redondeos; más de $1 exige toggle + cuenta.
+  const exacto = seleccionadas.length > 0 && Math.abs(diff) <= 1;
+  const esRedondeoAuto = exacto && Math.abs(diff) > 0.01;
 
   // Inferir tipo destino del tipo_operativo del movimiento.
   // Solo se ejecuta cuando se abre el modal.
@@ -2270,6 +2278,11 @@ function ConciliarManualModal({ mov, open, onClose, onSuccess, onError }: {
               <div className={`flex justify-between font-semibold ${exacto ? 'text-success' : 'text-danger'}`}>
                 <span>Diferencia:</span><span className="tabular">{fmtMoney(diff)}</span>
               </div>
+              {esRedondeoAuto && (
+                <div className="text-[10.5px] text-ink-muted">
+                  ⓘ Se genera una línea automática de redondeo (5.6.06) por la diferencia.
+                </div>
+              )}
             </div>
             {!exacto && (
               <div className="border border-warning/40 bg-warning-bg/20 rounded p-2 space-y-2">

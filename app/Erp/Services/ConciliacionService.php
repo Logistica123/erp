@@ -876,6 +876,27 @@ class ConciliacionService
             $permitirDiferencia = true;
         }
 
+        // v1.55 Bloque F — diferencias chicas ($0.02–$1.00) sin toggle: línea
+        // automática contra 5.6.06 Redondeos para que el asiento balancee.
+        // Con toggle activado (o >$1) sigue el circuito manual de siempre.
+        $glosaRedondeoAuto = null;
+        if (abs($ajuste) > 0.01 && ! $permitirDiferencia && empty($anticiposACancelar)) {
+            if (abs($ajuste) <= 1.00) {
+                $cuentaRedondeoId = DB::table('erp_cuentas_contables')->where('empresa_id', $empresaId)
+                    ->where('codigo', '5.6.06')->value('id');
+                if (! $cuentaRedondeoId) throw new DomainException('CUENTA_REDONDEOS_INEXISTENTE: 5.6.06');
+                $cuentaAjusteId = $cuentaRedondeoId;
+                $glosaRedondeoAuto = sprintf('Redondeo automático — diferencia $%.2f', abs($ajuste));
+                $motivo = $motivo ?: $glosaRedondeoAuto;
+                $permitirDiferencia = true;
+            } else {
+                throw new DomainException(sprintf(
+                    'DIFERENCIA_MAYOR_A_TOLERANCIA_AUTOMATICA: mov $%.2f vs facturas $%.2f (dif $%.2f supera el $1 de redondeo automático). Requiere permitir_diferencia + cuenta de ajuste + motivo.',
+                    $montoMov, $sumImputado, $ajuste,
+                ));
+            }
+        }
+
         if (abs($ajuste) > 0.01) {
             if (! $permitirDiferencia || ! $cuentaAjusteId || ! $motivo) {
                 throw new DomainException(sprintf(
@@ -885,7 +906,7 @@ class ConciliacionService
             }
         }
 
-        return DB::transaction(function () use ($mov, $facturas, $usuario, $cuentaBanco, $empresaId, $montoMov, $esCobro, $sumImputado, $ajuste, $motivo, $cuentaAjusteId, $motivoDiferenciaId, $motivoTipo, $anticiposACancelar, $totalAnt) {
+        return DB::transaction(function () use ($mov, $facturas, $usuario, $cuentaBanco, $empresaId, $montoMov, $esCobro, $sumImputado, $ajuste, $motivo, $cuentaAjusteId, $motivoDiferenciaId, $motivoTipo, $anticiposACancelar, $totalAnt, $glosaRedondeoAuto) {
             DB::statement('SET @erp_current_user_id = ?', [$usuario->id]);
 
             $diarioBan = DB::table('erp_diarios')->where('empresa_id', $empresaId)->where('codigo', 'BAN')->value('id')
@@ -907,32 +928,40 @@ class ConciliacionService
             }
 
             $glosa = ($esCobro ? 'Cobro' : 'Pago') . ' múltiple ' . $mov->id . ' (' . count($facturas) . ' facturas)';
+            // v1.55 Bloque F — las cuentas de facturas (2.1.1.01 / 1.1.4.01)
+            // exigen centro de costo (RN-10) y este camino nunca lo seteaba:
+            // el asiento rebotaba con CC_REQUERIDO. Mismo patrón GENERAL que
+            // ConciliacionChequesService.
+            $ccGeneralId = DB::table('erp_centros_costo')->where('empresa_id', $empresaId)
+                ->where('codigo', 'GENERAL')->value('id');
             // Si el ajuste cancela anticipos, su línea lleva el auxiliar (1.1.5.01).
             $ajusteAux = $totalAnt > 0.01 ? ($lineasFactura[0]['auxiliar_id'] ?? null) : null;
-            $glosaAjuste = $totalAnt > 0.01 ? "Cancelación anticipo: {$motivo}" : "Ajuste: {$motivo}";
+            $glosaAjuste = $totalAnt > 0.01
+                ? "Cancelación anticipo: {$motivo}"
+                : ($glosaRedondeoAuto ?? "Ajuste: {$motivo}");
             $movs = [];
             // Banco siempre por el monto real del movimiento.
             if ($esCobro) {
-                $movs[] = ['cuenta_id' => $cuentaBanco->cuenta_contable_id, 'debe' => $montoMov, 'haber' => 0, 'glosa' => $glosa];
+                $movs[] = ['cuenta_id' => $cuentaBanco->cuenta_contable_id, 'centro_costo_id' => $ccGeneralId, 'debe' => $montoMov, 'haber' => 0, 'glosa' => $glosa];
                 foreach ($lineasFactura as $lf) {
-                    $movs[] = ['cuenta_id' => $lf['cuenta_id'], 'auxiliar_id' => $lf['auxiliar_id'], 'debe' => 0, 'haber' => $lf['monto'], 'glosa' => $glosa];
+                    $movs[] = ['cuenta_id' => $lf['cuenta_id'], 'auxiliar_id' => $lf['auxiliar_id'], 'centro_costo_id' => $ccGeneralId, 'debe' => 0, 'haber' => $lf['monto'], 'glosa' => $glosa];
                 }
                 if (abs($ajuste) > 0.01) {
                     // ajuste = montoMov - sumImputado. Si >0: HABER; si <0: DEBE.
                     $ajuste > 0
-                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => 0, 'haber' => $ajuste, 'glosa' => $glosaAjuste]
-                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => -$ajuste, 'haber' => 0, 'glosa' => $glosaAjuste];
+                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'centro_costo_id' => $ccGeneralId, 'debe' => 0, 'haber' => $ajuste, 'glosa' => $glosaAjuste]
+                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'centro_costo_id' => $ccGeneralId, 'debe' => -$ajuste, 'haber' => 0, 'glosa' => $glosaAjuste];
                 }
             } else {
                 foreach ($lineasFactura as $lf) {
-                    $movs[] = ['cuenta_id' => $lf['cuenta_id'], 'auxiliar_id' => $lf['auxiliar_id'], 'debe' => $lf['monto'], 'haber' => 0, 'glosa' => $glosa];
+                    $movs[] = ['cuenta_id' => $lf['cuenta_id'], 'auxiliar_id' => $lf['auxiliar_id'], 'centro_costo_id' => $ccGeneralId, 'debe' => $lf['monto'], 'haber' => 0, 'glosa' => $glosa];
                 }
                 if (abs($ajuste) > 0.01) {
                     $ajuste > 0
-                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => $ajuste, 'haber' => 0, 'glosa' => $glosaAjuste]
-                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'debe' => 0, 'haber' => -$ajuste, 'glosa' => $glosaAjuste];
+                        ? $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'centro_costo_id' => $ccGeneralId, 'debe' => $ajuste, 'haber' => 0, 'glosa' => $glosaAjuste]
+                        : $movs[] = ['cuenta_id' => $cuentaAjusteId, 'auxiliar_id' => $ajusteAux, 'centro_costo_id' => $ccGeneralId, 'debe' => 0, 'haber' => -$ajuste, 'glosa' => $glosaAjuste];
                 }
-                $movs[] = ['cuenta_id' => $cuentaBanco->cuenta_contable_id, 'debe' => 0, 'haber' => $montoMov, 'glosa' => $glosa];
+                $movs[] = ['cuenta_id' => $cuentaBanco->cuenta_contable_id, 'centro_costo_id' => $ccGeneralId, 'debe' => 0, 'haber' => $montoMov, 'glosa' => $glosa];
             }
 
             $asientoSvc = app(AsientoService::class);

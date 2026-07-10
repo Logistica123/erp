@@ -16,7 +16,8 @@ class ParserFactory
      */
     private const MAP = [
         ParserIcbc::CODIGO => ParserIcbc::class,
-        ParserGalicia::CODIGO => ParserGalicia::class,
+        // GALICIA removido en v1.55 Bloque B — banco inactivo desde 2026-06-13.
+        // Si se reactiva la cuenta, volver a registrar el parser acá.
         ParserBrubankCc::CODIGO => ParserBrubankCc::class,
         ParserBrubankRem::CODIGO => ParserBrubankRem::class,
         ParserMercadoPago::CODIGO => ParserMercadoPago::class,

@@ -7,7 +7,7 @@ use App\Erp\Models\Tesoreria\CuentaBancaria;
 /**
  * Contrato común de los parsers bancarios.
  *
- * Cada banco es una clase concreta (ParserIcbc, ParserGalicia, ...)
+ * Cada banco es una clase concreta (ParserIcbc, ParserBrubankCc, ...)
  * seleccionada por ParserFactory a partir de erp_bancos.codigo_parser.
  *
  * Responsabilidades:

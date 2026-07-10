@@ -59,6 +59,8 @@ class FacturasCompraController extends Controller
                 'f.op_externa', 'f.fecha_pago',
                 // v1.54 — sync DistriApp.
                 'f.sincronizada_desde_distriapp', 'f.distriapp_factura_id', 'f.distriapp_liquidacion_id',
+                // v1.56 — PDF del comprobante original (pedido 2026-07-09).
+                'f.adjunto_url',
             ]);
 
         $this->aplicarFiltrosIndex($q, $request);

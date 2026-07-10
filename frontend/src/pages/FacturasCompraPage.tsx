@@ -4,7 +4,7 @@ import { PeriodoTrabajadoCell, EditarPeriodoBulkModal } from '@/components/factu
 import { OpExternaCell, FechaPagoCell } from '@/components/factura/PagoInfoCells';
 import { CategoriaModal } from '@/components/factura/CategoriaModal';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange, FileDown, Undo2 } from 'lucide-react';
+import { ShoppingCart, CheckCircle2, AlertTriangle, XCircle, Plus, Trash2, CalendarRange, FileDown, Undo2, FileText } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -41,6 +41,8 @@ type FacturaCompra = {
   proveedor_cuit: string | null;
   cuit_emisor: string;
   razon_social_emisor: string;
+  // v1.56 — PDF del comprobante original (URL de DistriApp u otra fuente).
+  adjunto_url?: string | null;
   // El listado devuelve `moneda` como string (alias del JOIN, ej "ARS").
   // El detalle (show) devuelve `moneda` como objeto Eloquent (relación).
   // monedaStr() normaliza ambos casos al código del símbolo.
@@ -403,6 +405,14 @@ export function FacturasCompraPage() {
     { key: 'acciones', header: '', align: 'right', width: '230px',
       render: (r) => (
         <div className="flex justify-end gap-1.5">
+          {/* v1.56 — PDF del comprobante original. */}
+          <button
+            title={r.adjunto_url ? 'Ver PDF del comprobante' : 'PDF no disponible'}
+            disabled={!r.adjunto_url}
+            onClick={(e) => { e.stopPropagation(); if (r.adjunto_url) window.open(r.adjunto_url, '_blank', 'noopener'); }}
+            className={`p-1 ${r.adjunto_url ? 'opacity-70 hover:opacity-100 hover:text-azure' : 'opacity-25 cursor-not-allowed'}`}>
+            <FileText className="w-3.5 h-3.5" />
+          </button>
           {/* v1.54 — facturas sincronizadas desde DistriApp. */}
           {r.estado === 'PENDIENTE_AUTORIZACION_ERP' && (
             <>
@@ -848,6 +858,14 @@ function DetalleModal({ id, onClose }: { id: number; onClose: () => void }) {
               }
             />
             <Info label="CAE" value={f.cae ?? '—'} />
+            <Info label="Comprobante original" value={
+              f.adjunto_url ? (
+                <a href={f.adjunto_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-azure hover:underline">
+                  <FileText className="w-3.5 h-3.5" /> Ver PDF
+                </a>
+              ) : '—'
+            } />
             <Info label="Proveedor" value={f.razon_social_emisor} />
             <Info label="CUIT" value={f.cuit_emisor} />
             <Info label="Estado" value={<Badge variant={badgeFor(f.estado as string)}>{f.estado as string}</Badge>} />
@@ -950,6 +968,19 @@ function AutorizarSyncModal({ factura, onClose }: { factura: FacturaCompra; onCl
           <div className="col-span-2"><span className="text-ink-3">Emisor:</span> {factura.razon_social_emisor} (CUIT {factura.cuit_emisor})</div>
           <div><span className="text-ink-3">Total:</span> <strong className="tabular-nums">{fmtMoney(factura.imp_total)}</strong></div>
           <div><span className="text-ink-3">Origen:</span> DistriApp{factura.distriapp_liquidacion_id ? ` — Liquidación #${factura.distriapp_liquidacion_id}` : ''}{preview?.cliente_liquidacion ? ` (${preview.cliente_liquidacion})` : ''}</div>
+          {/* v1.56 — revisar el comprobante real antes de autorizar. */}
+          <div className="col-span-2">
+            {factura.adjunto_url ? (
+              <a href={factura.adjunto_url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-azure hover:underline">
+                <FileText className="w-3.5 h-3.5" /> Ver comprobante original (PDF)
+              </a>
+            ) : (
+              <span className="text-ink-muted inline-flex items-center gap-1">
+                <FileText className="w-3.5 h-3.5" /> PDF no disponible
+              </span>
+            )}
+          </div>
         </div>
         {previewError && <FormError error={errorMessage(previewError)} />}
         {preview && (

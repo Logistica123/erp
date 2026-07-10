@@ -14,6 +14,8 @@ use App\Erp\Http\Controllers\ConciliacionReglasController;
 use App\Erp\Http\Controllers\BalanceController;
 use App\Erp\Http\Controllers\CajaController;
 use App\Erp\Http\Controllers\ConfigController;
+use App\Erp\Http\Controllers\DiariosController;
+use App\Erp\Http\Controllers\EmpresasController;
 use App\Erp\Http\Controllers\CobrosController;
 use App\Erp\Http\Controllers\FacturasManualController;
 use App\Erp\Http\Controllers\ImputacionesNcController;
@@ -592,13 +594,46 @@ Route::prefix('api/erp')->group(function () {
         Route::post('/ordenes-pago/{id}/anular', [OrdenesPagoController::class, 'anular'])
             ->whereNumber('id')->name('erp.op.anular');
 
-        // Administración — usuarios, roles, permisos, config, cotizaciones
-        Route::get('/usuarios', [UsuariosController::class, 'index'])->name('erp.usuarios.index');
-        Route::post('/usuarios', [UsuariosController::class, 'store'])
-            ->middleware('erp.mfa.fresh')->name('erp.usuarios.store');
-        Route::patch('/usuarios/{id}/roles', [UsuariosController::class, 'updateRoles'])
-            ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.usuarios.roles');
+        // Administración — usuarios, roles, permisos, config, cotizaciones.
+        // v1.55 Bloque C: todo el ABM admin queda detrás de erp.superadmin
+        // (antes cualquier usuario con acceso_erp podía crear usuarios).
+        Route::middleware('erp.superadmin')->group(function () {
+            Route::get('/usuarios', [UsuariosController::class, 'index'])->name('erp.usuarios.index');
+            Route::post('/usuarios', [UsuariosController::class, 'store'])
+                ->middleware('erp.mfa.fresh')->name('erp.usuarios.store');
+            Route::patch('/usuarios/{id}', [UsuariosController::class, 'update'])
+                ->whereNumber('id')->name('erp.usuarios.update');
+            Route::patch('/usuarios/{id}/password', [UsuariosController::class, 'setPassword'])
+                ->middleware('erp.mfa.fresh')
+                ->whereNumber('id')->name('erp.usuarios.password');
+            Route::patch('/usuarios/{id}/roles', [UsuariosController::class, 'updateRoles'])
+                ->middleware('erp.mfa.fresh')
+                ->whereNumber('id')->name('erp.usuarios.roles');
+
+            Route::post('/roles', [RolesPermisosController::class, 'rolesStore'])->name('erp.roles.store');
+            Route::patch('/roles/{id}', [RolesPermisosController::class, 'rolesUpdate'])
+                ->whereNumber('id')->name('erp.roles.update');
+            Route::delete('/roles/{id}', [RolesPermisosController::class, 'rolesDestroy'])
+                ->whereNumber('id')->name('erp.roles.destroy');
+            Route::put('/roles/{id}/permisos', [RolesPermisosController::class, 'rolesSyncPermisos'])
+                ->whereNumber('id')->name('erp.roles.permisos');
+
+            // ABM de diarios contables (el catálogo read-only sigue en /diarios).
+            Route::get('/admin/diarios', [DiariosController::class, 'index'])->name('erp.admin.diarios.index');
+            Route::post('/admin/diarios', [DiariosController::class, 'store'])->name('erp.admin.diarios.store');
+            Route::patch('/admin/diarios/{id}', [DiariosController::class, 'update'])
+                ->whereNumber('id')->name('erp.admin.diarios.update');
+
+            // Ficha completa de la empresa (el subset read-only sigue en /empresas/actual).
+            Route::get('/admin/empresa', [EmpresasController::class, 'show'])->name('erp.admin.empresa.show');
+            Route::patch('/admin/empresa', [EmpresasController::class, 'update'])
+                ->middleware('erp.mfa.fresh')->name('erp.admin.empresa.update');
+
+            // ABM de auxiliares (el catálogo para selects sigue en /auxiliares).
+            Route::get('/auxiliares/abm', [AuxiliaresController::class, 'abmIndex'])->name('erp.auxiliares.abm');
+            Route::post('/auxiliares/{id}/reactivar', [AuxiliaresController::class, 'reactivar'])
+                ->whereNumber('id')->name('erp.auxiliares.reactivar');
+        });
 
         Route::get('/roles', [RolesPermisosController::class, 'rolesIndex'])->name('erp.roles.index');
         Route::get('/permisos', [RolesPermisosController::class, 'permisosIndex'])->name('erp.permisos.index');
@@ -612,7 +647,7 @@ Route::prefix('api/erp')->group(function () {
 
         Route::get('/config', [ConfigController::class, 'index'])->name('erp.config.index');
         Route::patch('/config/{clave}', [ConfigController::class, 'update'])
-            ->middleware('erp.mfa.fresh')->name('erp.config.update');
+            ->middleware(['erp.superadmin', 'erp.mfa.fresh'])->name('erp.config.update');
 
         Route::get('/cotizaciones', [CotizacionesController::class, 'index'])->name('erp.cotizaciones.index');
         Route::post('/cotizaciones', [CotizacionesController::class, 'store'])->name('erp.cotizaciones.store');

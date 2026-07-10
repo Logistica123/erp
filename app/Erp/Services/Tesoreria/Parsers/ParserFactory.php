@@ -21,7 +21,9 @@ class ParserFactory
         ParserBrubankCc::CODIGO => ParserBrubankCc::class,
         ParserBrubankRem::CODIGO => ParserBrubankRem::class,
         ParserMercadoPago::CODIGO => ParserMercadoPago::class,
-        ParserEfectivo::CODIGO => ParserEfectivo::class,
+        // EFECTIVO removido en v1.55 Bloque B (2ª pasada) — es pago en
+        // efectivo puro, no existe extracto que importar. Los movimientos de
+        // la caja van por Arqueos/Cierres, no por acá.
     ];
 
     public function make(string $codigoParser): ParserInterface

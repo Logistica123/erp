@@ -4,7 +4,12 @@ import { AppShell } from './layout/AppShell';
 import { ToastProvider } from './hooks/useToast';
 // AsientosPage eliminado del sidebar/rutas en v1.15 Sprint M (consolidación con Libro Diario).
 import { AuditoriaPage } from './pages/AuditoriaPage';
-import { PlaceholderPage } from './pages/PlaceholderPage';
+import { UsuariosAdminPage } from './pages/UsuariosAdminPage';
+import { RolesPermisosAdminPage } from './pages/RolesPermisosAdminPage';
+import { AuxiliaresAdminPage } from './pages/AuxiliaresAdminPage';
+import { DiariosAdminPage } from './pages/DiariosAdminPage';
+import { ConfiguracionAdminPage } from './pages/ConfiguracionAdminPage';
+import { EmpresaAdminPage } from './pages/EmpresaAdminPage';
 import { BalanceSSPage } from './pages/BalanceSSPage';
 import { BancosPage } from './pages/BancosPage';
 import { ConciliacionPage } from './pages/ConciliacionPage';
@@ -247,14 +252,14 @@ export default function App() {
 
               {/* Administración — addendum v1.7 §3.2 */}
               <Route path="/erp/admin/auditoria" element={<AuditoriaPage />} handle={{ crumb: 'Auditoría' }} />
-              <Route path="/erp/admin/empresas" element={<PlaceholderPage title="Empresas" modulo="Administración" endpoint="GET /api/erp/empresas/actual" />} handle={{ crumb: 'Empresas' }} />
-              <Route path="/erp/admin/usuarios" element={<PlaceholderPage title="Usuarios" modulo="Administración" endpoint="GET /api/erp/usuarios" />} handle={{ crumb: 'Usuarios' }} />
-              <Route path="/erp/admin/roles-permisos" element={<PlaceholderPage title="Roles y permisos" modulo="Administración" endpoint="GET /api/erp/roles" />} handle={{ crumb: 'Roles' }} />
-              <Route path="/erp/admin/diarios" element={<PlaceholderPage title="Diarios contables" modulo="Administración" endpoint="GET /api/erp/diarios" />} handle={{ crumb: 'Diarios' }} />
+              <Route path="/erp/admin/empresas" element={<EmpresaAdminPage />} handle={{ crumb: 'Empresa' }} />
+              <Route path="/erp/admin/usuarios" element={<UsuariosAdminPage />} handle={{ crumb: 'Usuarios' }} />
+              <Route path="/erp/admin/roles-permisos" element={<RolesPermisosAdminPage />} handle={{ crumb: 'Roles' }} />
+              <Route path="/erp/admin/diarios" element={<DiariosAdminPage />} handle={{ crumb: 'Diarios' }} />
               {/* v1.55 Bloque C — la pantalla real ya existe en /erp/centros-costo */}
               <Route path="/erp/admin/centros-costo" element={<Navigate to="/erp/centros-costo" replace />} handle={{ crumb: 'CC' }} />
-              <Route path="/erp/admin/auxiliares" element={<PlaceholderPage title="Auxiliares" modulo="Administración" endpoint="GET /api/erp/auxiliares" />} handle={{ crumb: 'Auxiliares' }} />
-              <Route path="/erp/admin/configuracion" element={<PlaceholderPage title="Configuración" modulo="Administración" endpoint="GET /api/erp/config" />} handle={{ crumb: 'Configuración' }} />
+              <Route path="/erp/admin/auxiliares" element={<AuxiliaresAdminPage />} handle={{ crumb: 'Auxiliares' }} />
+              <Route path="/erp/admin/configuracion" element={<ConfiguracionAdminPage />} handle={{ crumb: 'Configuración' }} />
             </Route>
             <Route path="*" element={<Navigate to="/erp/dashboard" replace />} />
           </Routes>

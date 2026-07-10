@@ -18,7 +18,54 @@ use Illuminate\Validation\Rule;
  */
 class AuxiliaresController
 {
+    /** Tipos válidos del ENUM erp_auxiliares.tipo. */
+    public const TIPOS = ['Cliente', 'Proveedor', 'Distribuidor', 'Empleado', 'Socio', 'Vehiculo', 'Sucursal', 'Colocacion', 'Bien', 'Organismo'];
+
     public function __construct(private readonly DistriAppBridge $bridge) {}
+
+    /**
+     * v1.55 Bloque C — listado para el ABM de Admin: paginado, con filtros
+     * e inactivos. El GET /auxiliares de siempre (CatalogosController) es un
+     * catálogo para selects (limit 50, solo activos) y no alcanza acá.
+     */
+    public function abmIndex(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'tipo' => ['nullable', Rule::in(self::TIPOS)],
+            'q' => ['nullable', 'string', 'max:120'],
+            'incluir_inactivos' => ['nullable', 'boolean'],
+        ]);
+
+        $empresaId = $request->user()->erpPerfil?->empresa_id ?? 1;
+
+        $auxiliares = Auxiliar::with('cuentaDefault:id,codigo,nombre')
+            ->where('empresa_id', $empresaId)
+            ->when($data['tipo'] ?? null, fn ($q, $v) => $q->where('tipo', $v))
+            ->when(! ($data['incluir_inactivos'] ?? false), fn ($q) => $q->where('activo', true))
+            ->when($data['q'] ?? null, function ($query, $q) {
+                $digitos = preg_replace('/[^0-9]/', '', $q);
+                $query->where(function ($w) use ($q, $digitos) {
+                    $w->where('nombre', 'like', "%{$q}%")
+                        ->orWhere('codigo', 'like', "%{$q}%");
+                    if ($digitos !== '') {
+                        $w->orWhere('cuit', 'like', "{$digitos}%");
+                    }
+                });
+            })
+            ->orderBy('tipo')->orderBy('nombre')
+            ->paginate(50);
+
+        return response()->json($auxiliares);
+    }
+
+    /** v1.55 Bloque C — reactivar auxiliar dado de baja (simétrico a desactivar). */
+    public function reactivar(int $id): JsonResponse
+    {
+        $aux = Auxiliar::findOrFail($id);
+        $aux->update(['activo' => true]);
+
+        return response()->json(['ok' => true, 'data' => $aux->fresh('cuentaDefault:id,codigo,nombre')]);
+    }
 
     public function buscar(Request $request): JsonResponse
     {
@@ -82,7 +129,8 @@ class AuxiliaresController
     {
         $data = $request->validate([
             'empresa_id' => ['nullable', 'integer', 'exists:erp_empresas,id'],
-            'tipo' => ['required', Rule::in(['Cliente', 'Distribuidor', 'Proveedor', 'Otro'])],
+            // v1.55 Bloque C — alta manual admite todos los tipos del ENUM.
+            'tipo' => ['required', Rule::in(self::TIPOS)],
             'desde_distriapp' => ['nullable', 'array'],
             'desde_distriapp.persona_id' => ['nullable', 'integer'],
             'desde_distriapp.cliente_id' => ['nullable', 'integer'],

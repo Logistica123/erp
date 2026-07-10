@@ -12,10 +12,14 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 
 /**
- * Administración de usuarios ERP (SPEC_01 §5.1).
+ * Administración de usuarios ERP (SPEC_01 §5.1 + v1.55 Bloque C).
  *   GET    /api/erp/usuarios
  *   POST   /api/erp/usuarios                  Crea user + erp_usuario_perfil
+ *   PATCH  /api/erp/usuarios/{id}              Edita datos / acceso / desbloquea
+ *   PATCH  /api/erp/usuarios/{id}/password     Setea password nueva
  *   PATCH  /api/erp/usuarios/{id}/roles        Asigna/desasigna roles al perfil
+ *
+ * {id} es siempre erp_usuario_perfil.id (no user.id), igual que updateRoles.
  */
 class UsuariosController
 {
@@ -74,6 +78,54 @@ class UsuariosController
         });
 
         return response()->json(['ok' => true, 'data' => $user], 201);
+    }
+
+    /** v1.55 Bloque C — editar datos, toggle acceso_erp, desbloquear. */
+    public function update(Request $request, int $usuarioPerfilId): JsonResponse
+    {
+        $perfil = UsuarioPerfil::with('user')->findOrFail($usuarioPerfilId);
+
+        $data = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'email' => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($perfil->user_id)],
+            'legajo' => ['sometimes', 'nullable', 'string', 'max:30'],
+            'acceso_erp' => ['sometimes', 'boolean'],
+            'desbloquear' => ['sometimes', 'boolean'],
+        ]);
+
+        DB::transaction(function () use ($perfil, $data) {
+            $userData = array_intersect_key($data, array_flip(['name', 'email']));
+            if ($userData) {
+                $perfil->user->update($userData);
+            }
+
+            $perfilData = array_intersect_key($data, array_flip(['legajo', 'acceso_erp']));
+            if (! empty($data['desbloquear'])) {
+                $perfilData['bloqueado_hasta'] = null;
+                $perfilData['intentos_fallidos'] = 0;
+            }
+            if ($perfilData) {
+                $perfil->update($perfilData);
+            }
+        });
+
+        return response()->json([
+            'ok' => true,
+            'data' => $perfil->fresh(['user:id,name,email', 'roles:id,codigo,nombre']),
+        ]);
+    }
+
+    /** v1.55 Bloque C — reset de password (requiere MFA fresco + super_admin). */
+    public function setPassword(Request $request, int $usuarioPerfilId): JsonResponse
+    {
+        $data = $request->validate([
+            'password' => ['required', 'string', 'min:14'],
+        ]);
+
+        $perfil = UsuarioPerfil::with('user')->findOrFail($usuarioPerfilId);
+        $perfil->user->update(['password' => Hash::make($data['password'])]);
+
+        return response()->json(['ok' => true, 'data' => ['user_id' => $perfil->user_id]]);
     }
 
     public function updateRoles(Request $request, int $usuarioPerfilId): JsonResponse

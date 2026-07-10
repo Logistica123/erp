@@ -9,6 +9,7 @@ use App\Erp\Services\AsientoService;
 use App\Erp\Services\FacturaCompraService;
 use App\Erp\Support\AuditLogger;
 use DomainException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -121,7 +122,10 @@ class SyncFacturaCompraDistriAppService
                 'punto_venta' => $pv,
                 'numero' => $nro,
                 'fecha_emision' => $fac['fecha_emision'],
-                'fecha_imputacion' => $fac['fecha_emision'],
+                // v1.56 — período de imputación = mes de emisión, salvo período
+                // cerrado → primer día del primer mes siguiente abierto (regla
+                // Libro IVA: el día no importa, manda el mes).
+                'fecha_imputacion' => $this->resolverFechaImputacion($fac['fecha_emision']),
                 'fecha_recepcion' => now()->toDateString(),
                 'fecha_vencimiento' => $fac['fecha_vto_pago'] ?? null,
                 'auxiliar_id' => $auxiliar->id,
@@ -193,8 +197,22 @@ class SyncFacturaCompraDistriAppService
 
         $cuentaGastoId = $this->previewCuentas($factura)['cuenta_gasto']->id;
 
-        return DB::transaction(function () use ($factura, $usuarioId, $cuentaGastoId) {
+        // v1.56 — si el período de la imputación se cerró mientras la factura
+        // esperaba autorización, correrla al primer mes abierto (el asiento
+        // usa fecha_imputacion y rebotaría con PERIODO_BLOQUEADO).
+        $fechaImpActual = $factura->fecha_imputacion instanceof \DateTimeInterface
+            ? $factura->fecha_imputacion->format('Y-m-d')
+            : (string) ($factura->fecha_imputacion ?: $factura->fecha_emision);
+        $fechaImpNueva = $this->resolverFechaImputacion($fechaImpActual);
+
+        return DB::transaction(function () use ($factura, $usuarioId, $cuentaGastoId, $fechaImpActual, $fechaImpNueva) {
             DB::statement('SET @erp_current_user_id = ?', [$usuarioId]);
+
+            if ($fechaImpNueva !== $fechaImpActual) {
+                $factura->update(['fecha_imputacion' => $fechaImpNueva]);
+                $this->log($factura->id, (string) $factura->distriapp_factura_id, 'REIMPUTADA', 'DISTRIAPP_A_ERP',
+                    ['de' => $fechaImpActual, 'a' => $fechaImpNueva, 'motivo' => 'PERIODO_CERRADO'], 200, $usuarioId);
+            }
 
             $asiento = $this->contabilizador->contabilizarCompra($factura->id, $factura->empresa_id, $usuarioId, $cuentaGastoId);
 
@@ -471,6 +489,30 @@ class SyncFacturaCompraDistriAppService
         $base = sprintf('%04d-%02d', (int) $anio, (int) $liq['mes']);
 
         return isset($liq['quincena']) ? $base.'-Q'.$liq['quincena'] : $base;
+    }
+
+    /**
+     * v1.56 — período de imputación: mes de la fecha dada, salvo que ese
+     * período esté CERRADO/BLOQUEADO → primer día del primer mes siguiente
+     * ABIERTO. Sin fila en erp_periodos se considera abierto (los períodos
+     * futuros pueden no estar generados todavía).
+     */
+    private function resolverFechaImputacion(string $fecha): string
+    {
+        $base = Carbon::parse($fecha)->startOfMonth();
+        for ($i = 0; $i <= 12; $i++) {
+            $mes = $base->copy()->addMonths($i);
+            $estado = DB::table('erp_periodos')
+                ->where('anio', $mes->year)->where('mes', $mes->month)
+                ->value('estado');
+            if ($estado === null || $estado === 'ABIERTO') {
+                return $i === 0 ? $fecha : $mes->format('Y-m-01');
+            }
+        }
+
+        throw new DomainException(
+            "SIN_PERIODO_ABIERTO: no hay período fiscal abierto en los 12 meses posteriores a {$fecha}."
+        );
     }
 
     private function log(?int $facturaId, string $daId, string $evento, string $direccion, ?array $payload, ?int $codigo, ?int $usuarioId = null, ?string $respuestaBody = null): void

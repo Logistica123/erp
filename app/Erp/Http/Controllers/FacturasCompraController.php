@@ -596,6 +596,20 @@ class FacturasCompraController extends Controller
         if ($proveedor = $request->integer('proveedor_id')) {
             $q->where('f.auxiliar_id', $proveedor);
         }
+        // v1.56 — filtro libre por proveedor: razón social o CUIT, matchea
+        // tanto los datos del emisor como el auxiliar (pedido 2026-07-09,
+        // testing de Sebastián con sus propias facturas).
+        if ($provQ = trim((string) $request->query('proveedor_q'))) {
+            $digitos = preg_replace('/\D/', '', $provQ);
+            $q->where(function ($sub) use ($provQ, $digitos) {
+                $sub->where('f.razon_social_emisor', 'like', "%{$provQ}%")
+                    ->orWhere('a.nombre', 'like', "%{$provQ}%");
+                if ($digitos !== '') {
+                    $sub->orWhere('f.cuit_emisor', 'like', "{$digitos}%")
+                        ->orWhere('a.cuit', 'like', "{$digitos}%");
+                }
+            });
+        }
         // Fecha de emisión.
         if ($desde = $request->query('desde')) {
             $q->where('f.fecha_emision', '>=', $desde);

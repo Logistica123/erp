@@ -151,6 +151,10 @@ class SyncFacturaCompraDistriAppService
                 'adjunto_url' => $fac['pdf_url'] ?? null,
                 'observaciones' => $this->armarObservacion($payload),
                 'periodo_trabajado_texto' => $this->periodoTrabajado($payload),
+                // v1.56 — jurisdicción IIBB resuelta en DistriApp por la
+                // sucursal del distribuidor (null si la sucursal no tiene
+                // mapping: queda visible vacía para completar a mano).
+                'jurisdiccion_codigo' => $fac['jurisdiccion_codigo'] ?? null,
                 'created_by_user_id' => null,
             ]);
 

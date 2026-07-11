@@ -124,6 +124,19 @@ export function FacturasCompraPage() {
   const [tipoGasto, setTipoGasto] = useState('');
   const [periodoTrab, setPeriodoTrab] = useState('');
   const [juris, setJuris] = useState('');
+  // v1.56 — filtro por proveedor / CUIT (pedido 2026-07-09, testing de
+  // Sebastián). Input con debounce para no refetchear por tecla.
+  const [proveedorQInput, setProveedorQInput] = useState('');
+  const [proveedorQ, setProveedorQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setProveedorQ(proveedorQInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [proveedorQInput]);
+  const { data: provSugerencias } = useApi<Array<{ nombre: string; cuit: string | null }>>(
+    ['aux-sugerencias', proveedorQInput],
+    `/api/erp/auxiliares?q=${encodeURIComponent(proveedorQInput.trim())}`,
+    { enabled: proveedorQInput.trim().length >= 2 },
+  );
   // v1.42 — paginación server-side (antes el backend limitaba a 200 y el
   // resto era invisible; ahora paginate(50) por defecto).
   const [page, setPage] = useState(1);
@@ -140,13 +153,14 @@ export function FacturasCompraPage() {
     if (tipoGasto) p.set('tipo_gasto', tipoGasto);
     if (periodoTrab) p.set('periodo_trabajado', periodoTrab);
     if (juris) p.set('jurisdiccion', juris);
+    if (proveedorQ) p.set('proveedor_q', proveedorQ);
     p.set('page', String(page));
     return p.toString();
-  }, [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris, page]);
+  }, [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris, proveedorQ, page]);
 
   // Reset page=1 cuando cambian los filtros (no la página).
   useEffect(() => { setPage(1); },
-    [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris]);
+    [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris, proveedorQ]);
 
   // v1.49 — query string SIN page (para el export — no nos importa la página).
   const qsExport = useMemo(() => {
@@ -161,8 +175,9 @@ export function FacturasCompraPage() {
     if (tipoGasto) p.set('tipo_gasto', tipoGasto);
     if (periodoTrab) p.set('periodo_trabajado', periodoTrab);
     if (juris) p.set('jurisdiccion', juris);
+    if (proveedorQ) p.set('proveedor_q', proveedorQ);
     return p.toString();
-  }, [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris]);
+  }, [estado, origen, desde, hasta, impDesde, impHasta, noTomada, tipoGasto, periodoTrab, juris, proveedorQ]);
 
   const [exportando, setExportando] = useState(false);
   const exportarExcel = () => {
@@ -472,6 +487,17 @@ export function FacturasCompraPage() {
         />
         <CardBody className="p-4 space-y-3">
           <div className="flex flex-wrap gap-3">
+            {/* v1.56 — filtro por proveedor / CUIT con sugerencias. */}
+            <Field label="Proveedor / CUIT" value={proveedorQInput}
+              onChange={(e) => setProveedorQInput(e.target.value)}
+              placeholder="SALIM o 20398651554…"
+              list="fc-prov-sugerencias"
+              containerClassName="w-[220px]" />
+            <datalist id="fc-prov-sugerencias">
+              {(provSugerencias ?? []).map((s, i) => (
+                <option key={i} value={s.nombre}>{s.cuit ?? ''}</option>
+              ))}
+            </datalist>
             <SelectField label="Estado" value={estado} placeholder="Todos"
               onChange={(e) => setEstado(e.target.value)}
               containerClassName="w-[170px]"

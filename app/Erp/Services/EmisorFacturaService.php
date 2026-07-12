@@ -331,10 +331,18 @@ class EmisorFacturaService
                     (string) ($consulta['cae'] ?? ''), $consulta['cae_vto'] ?? null,
                 );
                 $this->marcarIntent($intent->id, 'OK', 'CAE adoptado por reconciliación', $out['factura_id'], (string) ($consulta['cae'] ?? ''));
+                \Illuminate\Support\Facades\Log::warning('emision-cae.huerfano-adoptado', [
+                    'intent_id' => $intent->id, 'factura_id' => $out['factura_id'],
+                    'cae' => $out['cae'], 'nro' => $ultimoNro,
+                    'tipo' => $tipoCbteId, 'pv' => $pvNumero,
+                ]);
                 $adoptadas[$intent->fingerprint] = $out;
                 $ultimoAdoptado = true;
             } else {
                 $this->marcarIntent($intent->id, 'DESCARTADA', 'Verificado contra AFIP: el último autorizado no coincide — no se emitió.');
+                \Illuminate\Support\Facades\Log::info('emision-cae.intent-descartado', [
+                    'intent_id' => $intent->id, 'tipo' => $tipoCbteId, 'pv' => $pvNumero,
+                ]);
             }
         }
 

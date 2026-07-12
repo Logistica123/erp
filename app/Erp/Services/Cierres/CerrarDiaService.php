@@ -3,6 +3,7 @@
 namespace App\Erp\Services\Cierres;
 
 use App\Erp\Models\Asiento;
+use App\Erp\Services\AsientoService;
 use App\Erp\Models\Cierres\AjusteRetroactivo;
 use App\Erp\Models\Cierres\DiaContable;
 use App\Erp\Models\Periodo;
@@ -268,56 +269,49 @@ class CerrarDiaService
 
     private function crearAsientoForward(int $cuentaDebeId, int $cuentaHaberId, float $importe, string $glosa, int $empresaId, User $usuario, Carbon $hoy): Asiento
     {
-        $periodo = Periodo::where('fecha_inicio', '<=', $hoy->toDateString())
-            ->where('fecha_fin', '>=', $hoy->toDateString())
-            ->where('estado', '!=', 'CERRADO')
-            ->orderByDesc('fecha_inicio')->first();
-        if (! $periodo) {
-            throw new DomainException('PERIODO_NO_ENCONTRADO: no hay período abierto que contenga '.$hoy->toDateString());
+        // Auditoría 2026-07-12 #6 — antes se creaba por INSERT/UPDATE directo:
+        // sin hash de integridad (fallaba verificarIntegridadAsientos), con
+        // numeración por regex sobre el último id (colisionable) y diario_id=8
+        // literal. Ahora pasa por AsientoService (numerador RN-9 con lock,
+        // hash RN-6, validaciones RN-1/3/10) y el diario se resuelve por código.
+        $diarioId = DB::table('erp_diarios')->where('empresa_id', $empresaId)
+            ->where('codigo', 'AJ')->where('activo', 1)->value('id')
+            ?? DB::table('erp_diarios')->where('empresa_id', $empresaId)
+                ->where('codigo', 'GEN')->where('activo', 1)->value('id');
+        if (! $diarioId) {
+            throw new DomainException('DIARIO_AJ_INEXISTENTE: no hay diario AJ ni GEN activo para la empresa '.$empresaId);
         }
 
-        $asiento = Asiento::create([
-            'empresa_id'    => $empresaId,
-            'ejercicio_id'  => (int) $periodo->ejercicio_id,
-            'periodo_id'    => (int) $periodo->id,
-            'diario_id'     => 8, // AJ — Ajustes
-            'numero'        => $this->proximoNumeroAsiento($empresaId),
-            'fecha'         => $hoy->toDateString(),
-            'glosa'         => $glosa,
-            'origen'        => 'AJUSTE',
-            'estado'        => 'BORRADOR',
-            'moneda_base'   => 'ARS',
-            'total_debe'    => 0,
-            'total_haber'   => 0,
-            'usuario_id'    => $usuario->id,
-        ]);
-
         $req = $this->cuentasQueRequierenCC([$cuentaDebeId, $cuentaHaberId]);
-        $cc  = $this->ccDefault();
+        $cc  = $req !== [] ? $this->ccDefault($empresaId) : null;
 
-        DB::table('erp_movimientos_asiento')->insert([
-            ['asiento_id' => $asiento->id, 'linea' => 1, 'cuenta_id' => $cuentaDebeId,
-             'centro_costo_id' => in_array($cuentaDebeId, $req, true) ? $cc : null,
-             'debe' => $importe, 'haber' => 0, 'moneda' => 'ARS'],
-            ['asiento_id' => $asiento->id, 'linea' => 2, 'cuenta_id' => $cuentaHaberId,
-             'centro_costo_id' => in_array($cuentaHaberId, $req, true) ? $cc : null,
-             'debe' => 0, 'haber' => $importe, 'moneda' => 'ARS'],
+        $asientoSvc = app(AsientoService::class);
+        $asiento = $asientoSvc->crearBorrador([
+            'empresa_id' => $empresaId,
+            'diario_id' => (int) $diarioId,
+            'fecha' => $hoy->toDateString(),
+            'glosa' => $glosa,
+            'origen' => 'AJUSTE',
+            'usuario_id' => $usuario->id,
+            'movimientos' => [
+                ['cuenta_id' => $cuentaDebeId,
+                 'centro_costo_id' => in_array($cuentaDebeId, $req, true) ? $cc : null,
+                 'debe' => $importe, 'haber' => 0, 'glosa' => $glosa],
+                ['cuenta_id' => $cuentaHaberId,
+                 'centro_costo_id' => in_array($cuentaHaberId, $req, true) ? $cc : null,
+                 'debe' => 0, 'haber' => $importe, 'glosa' => $glosa],
+            ],
         ]);
 
-        $asiento->update([
-            'total_debe'  => $importe,
-            'total_haber' => $importe,
-            'estado'      => 'CONTABILIZADO',
-            'fecha_contabilizacion' => now(),
-        ]);
-
-        return $asiento;
+        return $asientoSvc->contabilizar($asiento);
     }
 
-    private function ccDefault(): int
+    private function ccDefault(int $empresaId = 1): int
     {
-        $id = DB::table('erp_centros_costo')->where('empresa_id', 1)->where('activo', 1)
-            ->orderBy('id')->value('id');
+        $id = DB::table('erp_centros_costo')->where('empresa_id', $empresaId)->where('activo', 1)
+            ->where('codigo', 'GENERAL')->value('id')
+            ?? DB::table('erp_centros_costo')->where('empresa_id', $empresaId)->where('activo', 1)
+                ->orderBy('id')->value('id');
         if (! $id) throw new DomainException('CC_DEFAULT_NO_ENCONTRADO');
         return (int) $id;
     }
@@ -331,10 +325,4 @@ class CerrarDiaService
             ->pluck('id')->map(fn ($v) => (int) $v)->all();
     }
 
-    private function proximoNumeroAsiento(int $empresaId): string
-    {
-        $row = DB::table('erp_asientos')->where('empresa_id', $empresaId)->orderByDesc('id')->limit(1)->first(['numero']);
-        $n = $row ? ((int) preg_replace('/\D/', '', (string) $row->numero) + 1) : 1;
-        return str_pad((string) $n, 8, '0', STR_PAD_LEFT);
-    }
 }

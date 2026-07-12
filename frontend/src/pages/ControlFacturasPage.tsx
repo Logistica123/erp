@@ -24,7 +24,7 @@ type ExtraccionResp = {
 };
 type Validacion = {
   id: number; archivo_nombre: string; metodo_extraccion: string;
-  resultado_global: 'VALIDA' | 'INVALIDA' | 'APOCRIFA' | 'ERROR' | 'NO_PROCESABLE';
+  resultado_global: 'VALIDA' | 'INVALIDA' | 'APOCRIFA' | 'REVISAR' | 'ERROR' | 'NO_PROCESABLE';
   nivel_confianza: 'ALTO' | 'MEDIO' | 'BAJO';
   estado_seguimiento: string;
   wscdc_resultado: string | null; apoc_estado: string | null;
@@ -50,7 +50,7 @@ type Alerta = {
 
 const RESULTADO_VARIANT: Record<string, 'success' | 'danger' | 'warning' | 'neutral' | 'info'> = {
   VALIDA: 'success', INVALIDA: 'danger', APOCRIFA: 'danger',
-  ERROR: 'warning', NO_PROCESABLE: 'neutral',
+  REVISAR: 'warning', ERROR: 'warning', NO_PROCESABLE: 'neutral',
 };
 
 export function ControlFacturasPage() {
@@ -132,8 +132,8 @@ export function ControlFacturasPage() {
               containerClassName="w-[180px]" placeholder="Todos"
               options={[
                 { value: 'VALIDA', label: 'Válida' }, { value: 'INVALIDA', label: 'Inválida' },
-                { value: 'APOCRIFA', label: 'Apócrifa' }, { value: 'ERROR', label: 'Error' },
-                { value: 'NO_PROCESABLE', label: 'No procesable' },
+                { value: 'APOCRIFA', label: 'Apócrifa' }, { value: 'REVISAR', label: 'Revisar (APOC no consultado)' },
+                { value: 'ERROR', label: 'Error' }, { value: 'NO_PROCESABLE', label: 'No procesable' },
               ]} />
             <SelectField label="Seguimiento" value={filtros.seguimiento}
               onChange={(e) => { setFiltros({ ...filtros, seguimiento: e.target.value }); setPage(1); }}
@@ -194,6 +194,7 @@ function ValidarModal({ onClose }: { onClose: () => void }) {
         const res = data.resultado_global;
         if (res === 'APOCRIFA') toast.error('CUIT en padrón APOC', `Validación #${data.id} — CRITICA.`);
         else if (res === 'INVALIDA') toast.error('Factura inválida', `Validación #${data.id}: WSCDC rechazó.`);
+        else if (res === 'REVISAR') toast.error('Verificación incompleta', `Validación #${data.id}: APOC no consultable — reintentar antes de pagar.`);
         else if (res === 'VALIDA') toast.success('Factura válida', `Validación #${data.id} confirmada.`);
         else toast.info('Resultado: ' + res, `Validación #${data.id}.`);
         invalidate();

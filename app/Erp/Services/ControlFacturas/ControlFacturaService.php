@@ -235,7 +235,10 @@ class ControlFacturaService
     private function consolidar(string $wscdc, string $apoc): string
     {
         if ($apoc === 'EN_APOC') return 'APOCRIFA';
-        if ($wscdc === 'A' && in_array($apoc, ['NO_APOC', 'ERROR'], true)) return 'VALIDA';
+        // Auditoría 2026-07-12 — APOC no consultable NO puede dar VALIDA:
+        // sin la lista de apócrifos el control anti-fraude está incompleto.
+        if ($wscdc === 'A' && $apoc === 'ERROR') return 'REVISAR';
+        if ($wscdc === 'A' && $apoc === 'NO_APOC') return 'VALIDA';
         if ($wscdc === 'R') return 'INVALIDA';
         return 'ERROR';
     }
@@ -264,6 +267,17 @@ class ControlFacturaService
                 'tipo_alerta' => 'CUIT_APOC',
                 'severidad' => 'CRITICA',
                 'mensaje' => 'CUIT emisor aparece en padrón APOC (apócrifo). No pagar/aceptar la factura sin verificar.',
+                'created_at' => now(),
+            ]);
+        }
+        // Auditoría 2026-07-12 — APOC no consultable: avisar al operador
+        // que la verificación quedó incompleta y debe reintentarse.
+        if ($resultado === 'REVISAR') {
+            DB::table('erp_control_facturas_alertas')->insert([
+                'validacion_id' => $vid,
+                'tipo_alerta' => 'APOC_NO_CONSULTABLE',
+                'severidad' => 'MEDIA',
+                'mensaje' => 'El comprobante existe en AFIP pero no se pudo consultar el padrón APOC. Reintentar la validación antes de pagar.',
                 'created_at' => now(),
             ]);
         }

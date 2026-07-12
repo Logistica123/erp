@@ -137,7 +137,10 @@ class EmitirFacturaJob implements ShouldQueue
 
     private function buildPayload(FacturaVenta $f): array
     {
-        $idempotencyKey = 'fv-'.$f->id.'-'.substr(md5($f->updated_at?->toIso8601String() ?? (string) $f->id), 0, 12);
+        // Auditoría 2026-07-12 — la clave NO puede depender de updated_at:
+        // cambiaba entre reintentos y anulaba la idempotencia del gateway
+        // (riesgo de doble CAE). Una factura = una emisión = una clave.
+        $idempotencyKey = 'fv-'.$f->id;
 
         return [
             'idempotency_key' => $idempotencyKey,

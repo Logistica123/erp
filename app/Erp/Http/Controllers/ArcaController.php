@@ -145,7 +145,7 @@ class ArcaController extends Controller
                 'data' => [
                     'gateway_status' => $resp->status(),
                     'gateway_body' => $resp->json() ?? $resp->body(),
-                    'gateway_url' => config('services.arca.gateway_url'),
+                    'gateway_url' => config('services.arca_gateway.url'),
                 ],
             ], $resp->ok() ? 200 : 502);
         } catch (\Throwable $e) {

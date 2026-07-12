@@ -40,6 +40,11 @@ return [
         'client_id' => env('ARCA_CLIENT_ID'),
         'api_key' => env('ARCA_API_KEY'),
         'timeout' => env('ARCA_GATEWAY_TIMEOUT', 60),
+        // Auditoría 2026-07-12 #4 — antes el código leía esta clave sin que
+        // existiera y caía a un CUIT hardcodeado en el fuente. El default es
+        // el CUIT de Logística Argentina SRL (comportamiento actual de prod);
+        // otro despliegue DEBE setear ARCA_CUIT_REPRESENTADO.
+        'cuit_representado' => env('ARCA_CUIT_REPRESENTADO', '30717060985'),
     ],
 
     // v1.54 — webhooks de sync de facturas de compra con DistriApp.

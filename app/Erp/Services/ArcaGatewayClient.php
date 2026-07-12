@@ -85,7 +85,7 @@ class ArcaGatewayClient
             'fecha_emision' => $payload['fecha_cbte'] ?? $payload['fecha_emision'] ?? null,
             'importe_total' => (float) ($payload['imp_total'] ?? $payload['importe_total'] ?? 0),
             'cuit_receptor' => preg_replace('/[^0-9]/', '',
-                (string) ($payload['cuit_receptor'] ?? config('services.arca_gateway.cuit_representado') ?? '30717060985')),
+                (string) ($payload['cuit_receptor'] ?? config('services.arca_gateway.cuit_representado'))),
             'doc_tipo_receptor' => (int) ($payload['doc_tipo_receptor'] ?? 80),
         ];
         return $this->request()->post('/comprobantes/constatar', $body);

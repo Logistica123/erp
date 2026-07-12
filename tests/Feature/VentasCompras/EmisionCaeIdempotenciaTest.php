@@ -67,7 +67,7 @@ class EmisionCaeIdempotenciaTest extends TestCase
                 'empresa_id' => 1, 'tipo' => 'Cliente', 'codigo' => 'CLI-TEST-CAE',
                 'nombre' => 'Cliente Test CAE', 'cuit' => '20111111112', 'activo' => 1,
             ]));
-        $alicExistente = DB::table('erp_alicuotas_iva')->where('tasa', '>', 0)->value('id');
+        $alicExistente = DB::table('erp_alicuotas_iva')->where('tasa', 0.21)->value('id');
         if (! $alicExistente) {
             // id manual (catálogo sin autoincrement) — insertGetId devolvería 0.
             DB::table('erp_alicuotas_iva')->insert([

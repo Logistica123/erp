@@ -157,9 +157,9 @@ function DiarioModal({ open, diario, onClose, onSuccess }: {
         <TextareaField label="Descripción" rows={2} value={form.descripcion}
           onChange={(e) => setForm({ ...form, descripcion: e.target.value })} />
         <SelectField label="Tipo" required value={form.tipo}
-          onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-          {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
-        </SelectField>
+          onChange={(e) => setForm({ ...form, tipo: e.target.value })}
+          placeholder={null}
+          options={TIPOS.map((t) => ({ value: t, label: t }))} />
       </div>
     </Modal>
   );

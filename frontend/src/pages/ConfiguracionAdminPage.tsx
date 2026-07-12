@@ -147,10 +147,9 @@ function EditarConfigModal({ item, onClose, onSuccess }: {
         {item.descripcion && <div className="text-[12px] text-ink-muted">{item.descripcion}</div>}
         {esBool ? (
           <SelectField label={`Valor (${item.tipo})`} value={valor === '1' || valor === 'true' ? '1' : '0'}
-            onChange={(e) => setValor(e.target.value)}>
-            <option value="1">SÍ</option>
-            <option value="0">NO</option>
-          </SelectField>
+            onChange={(e) => setValor(e.target.value)}
+            placeholder={null}
+            options={[{ value: '1', label: 'SÍ' }, { value: '0', label: 'NO' }]} />
         ) : item.tipo === 'JSON' ? (
           <TextareaField label="Valor (JSON)" rows={5} value={valor}
             className="font-mono text-[11.5px]"

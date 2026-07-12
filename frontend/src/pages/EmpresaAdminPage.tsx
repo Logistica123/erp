@@ -80,23 +80,25 @@ export function EmpresaAdminPage() {
                 hint="11 dígitos sin guiones."
                 onChange={(e) => set('cuit', e.target.value.replace(/[^0-9]/g, ''))} />
               <SelectField label="Condición IVA" value={form.condicion_iva ?? 'RI'}
-                onChange={(e) => set('condicion_iva', e.target.value)}>
-                <option value="RI">Responsable Inscripto</option>
-                <option value="MONOTRIBUTO">Monotributo</option>
-                <option value="EXENTO">Exento</option>
-                <option value="CF">Consumidor Final</option>
-              </SelectField>
+                onChange={(e) => set('condicion_iva', e.target.value)}
+                placeholder={null}
+                options={[
+                  { value: 'RI', label: 'Responsable Inscripto' },
+                  { value: 'MONOTRIBUTO', label: 'Monotributo' },
+                  { value: 'EXENTO', label: 'Exento' },
+                  { value: 'CF', label: 'Consumidor Final' },
+                ]} />
               <Field label="Domicilio fiscal" containerClassName="md:col-span-2"
                 value={form.domicilio_fiscal ?? ''}
                 onChange={(e) => set('domicilio_fiscal', e.target.value)} />
               <Field label="IIBB Nro" value={form.iibb_nro ?? ''}
                 onChange={(e) => set('iibb_nro', e.target.value)} />
               <SelectField label="IIBB Régimen" value={form.iibb_regimen ?? ''}
-                onChange={(e) => set('iibb_regimen', e.target.value || null)}>
-                <option value="">—</option>
-                <option value="CM">Convenio Multilateral</option>
-                <option value="LOCAL">Local</option>
-              </SelectField>
+                onChange={(e) => set('iibb_regimen', e.target.value || null)}
+                options={[
+                  { value: 'CM', label: 'Convenio Multilateral' },
+                  { value: 'LOCAL', label: 'Local' },
+                ]} />
               <Field label="Jurisdicción sede (código)" value={form.iibb_jurisdiccion_sede ?? ''}
                 maxLength={3} hint="Código de 3 dígitos (ej: 902 Buenos Aires)."
                 onChange={(e) => set('iibb_jurisdiccion_sede', e.target.value)} />

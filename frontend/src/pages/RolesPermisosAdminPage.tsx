@@ -344,11 +344,13 @@ function PermisosTemporalesPanel({ permisos }: { permisos: Permiso[] }) {
         title={<span className="flex items-center gap-2"><Clock className="w-4 h-4" /> Permisos temporales</span>}
         actions={
           <div className="flex items-center gap-2">
-            <SelectField value={estado} onChange={(e) => setEstado(e.target.value as typeof estado)}>
-              <option value="activos">Activos</option>
-              <option value="vencidos">Vencidos</option>
-              <option value="todos">Todos</option>
-            </SelectField>
+            <SelectField value={estado} onChange={(e) => setEstado(e.target.value as typeof estado)}
+              placeholder={null}
+              options={[
+                { value: 'activos', label: 'Activos' },
+                { value: 'vencidos', label: 'Vencidos' },
+                { value: 'todos', label: 'Todos' },
+              ]} />
             <Button variant="primary" onClick={() => setOtorgarOpen(true)}>
               <Plus className="w-3 h-3" /> Otorgar
             </Button>
@@ -439,19 +441,13 @@ function OtorgarTemporalModal({ open, permisos, onClose, onSuccess }: {
       <div className="space-y-3">
         <FormError error={err} />
         <SelectField label="Usuario" required value={form.user_id}
-          onChange={(e) => setForm({ ...form, user_id: e.target.value })}>
-          <option value="">Seleccionar…</option>
-          {(usuarios ?? []).map((u) => (
-            <option key={u.user_id} value={u.user_id}>{u.user.name} ({u.user.email})</option>
-          ))}
-        </SelectField>
+          onChange={(e) => setForm({ ...form, user_id: e.target.value })}
+          placeholder="Seleccionar…"
+          options={(usuarios ?? []).map((u) => ({ value: u.user_id, label: `${u.user.name} (${u.user.email})` }))} />
         <SelectField label="Permiso" required value={form.permiso_codigo}
-          onChange={(e) => setForm({ ...form, permiso_codigo: e.target.value })}>
-          <option value="">Seleccionar…</option>
-          {permisos.map((p) => (
-            <option key={p.id} value={p.codigo}>{p.codigo}{p.sensible ? ' ⚠' : ''}</option>
-          ))}
-        </SelectField>
+          onChange={(e) => setForm({ ...form, permiso_codigo: e.target.value })}
+          placeholder="Seleccionar…"
+          options={permisos.map((p) => ({ value: p.codigo, label: `${p.codigo}${p.sensible ? ' ⚠' : ''}` }))} />
         <TextareaField label="Motivo" required rows={2} value={form.motivo}
           hint={`Mínimo 10 caracteres (${form.motivo.trim().length}/10). Queda en el audit log.`}
           onChange={(e) => setForm({ ...form, motivo: e.target.value })} />

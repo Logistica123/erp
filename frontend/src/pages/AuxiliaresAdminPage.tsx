@@ -122,10 +122,9 @@ export function AuxiliaresAdminPage() {
         />
         <CardBody>
           <div className="flex flex-wrap items-center gap-3 mb-3">
-            <SelectField value={tipo} onChange={(e) => { setTipo(e.target.value); setPage(1); }}>
-              <option value="">Todos los tipos</option>
-              {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </SelectField>
+            <SelectField value={tipo} onChange={(e) => { setTipo(e.target.value); setPage(1); }}
+              placeholder="Todos los tipos"
+              options={TIPOS.map((t) => ({ value: t, label: t }))} />
             <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }}
               placeholder="Buscar por nombre, código o CUIT…"
               className="px-3 py-1.5 text-[12.5px] border border-line rounded-md w-[280px]" />
@@ -200,9 +199,9 @@ function NuevoAuxiliarModal({ open, onClose, onSuccess }: {
       <div className="space-y-3">
         <FormError error={err} />
         <SelectField label="Tipo" required value={form.tipo}
-          onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-          {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
-        </SelectField>
+          onChange={(e) => setForm({ ...form, tipo: e.target.value })}
+          placeholder={null}
+          options={TIPOS.map((t) => ({ value: t, label: t }))} />
         <Field label="Nombre" required value={form.nombre}
           onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
         <Field label="Código" value={form.codigo} placeholder="Se autogenera si queda vacío"
@@ -211,10 +210,9 @@ function NuevoAuxiliarModal({ open, onClose, onSuccess }: {
           onChange={(e) => setForm({ ...form, cuit: e.target.value.replace(/[^0-9]/g, '') })} />
         <SelectField label="Cuenta contable default" value={form.cuenta}
           hint="Si queda vacío se asigna la default del tipo (ej: Proveedor → 2.1.1.01)."
-          onChange={(e) => setForm({ ...form, cuenta: e.target.value })}>
-          <option value="">(default por tipo)</option>
-          {(cuentas ?? []).map((c) => <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>)}
-        </SelectField>
+          onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
+          placeholder="(default por tipo)"
+          options={(cuentas ?? []).map((c) => ({ value: c.id, label: `${c.codigo} ${c.nombre}` }))} />
         <div className="text-[11px] text-ink-muted">
           Los Clientes y Distribuidores de DistriApp se crean desde sus flujos de sync — esta alta
           manual es para auxiliares locales.
@@ -266,10 +264,9 @@ function EditarAuxiliarModal({ aux, onClose, onSuccess }: {
         <Field label="CUIT" value={form.cuit} placeholder="Sin guiones"
           onChange={(e) => setForm({ ...form, cuit: e.target.value.replace(/[^0-9]/g, '') })} />
         <SelectField label="Cuenta contable default" value={form.cuenta}
-          onChange={(e) => setForm({ ...form, cuenta: e.target.value })}>
-          <option value="">(sin cuenta default)</option>
-          {(cuentas ?? []).map((c) => <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>)}
-        </SelectField>
+          onChange={(e) => setForm({ ...form, cuenta: e.target.value })}
+          placeholder="(sin cuenta default)"
+          options={(cuentas ?? []).map((c) => ({ value: c.id, label: `${c.codigo} ${c.nombre}` }))} />
       </div>
     </Modal>
   );

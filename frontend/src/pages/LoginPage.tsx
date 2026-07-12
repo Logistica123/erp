@@ -86,8 +86,14 @@ export function LoginPage() {
           </Button>
         </form>
 
-        <div className="mt-6 text-[11px] text-ink-muted text-center">
-          Entorno de desarrollo · MariaDB local · v0.3.0
+        <div className="mt-6 text-[11px] text-center">
+          {window.location.hostname.includes('erp-dev') || window.location.hostname.includes('sslip.io') ? (
+            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">
+              ⚠ ENTORNO DE PRUEBAS (DEV)
+            </span>
+          ) : (
+            <span className="text-ink-muted">ERP Logística Argentina · Producción</span>
+          )}
         </div>
       </div>
     </div>

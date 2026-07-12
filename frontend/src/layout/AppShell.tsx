@@ -3,6 +3,12 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 
+// v1.56 — el mismo build sirve prod y dev (API same-origin); el entorno se
+// detecta por hostname para que nadie confunda dónde está parado.
+export const ES_DEV = window.location.hostname.includes('erp-dev')
+  || window.location.hostname === 'localhost'
+  || window.location.hostname.includes('sslip.io');
+
 export function AppShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
@@ -12,6 +18,12 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-screen">
+      {/* v1.56 — banner fijo de entorno de pruebas. */}
+      {ES_DEV && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-[11px] font-bold py-0.5 tracking-wide">
+          ⚠ ENTORNO DE PRUEBAS (DEV) — los cambios acá NO afectan producción
+        </div>
+      )}
       {/* Sidebar — fijo en md+ */}
       <div className="hidden md:flex">
         <Sidebar />

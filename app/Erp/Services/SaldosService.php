@@ -96,6 +96,10 @@ class SaldosService
             ->selectRaw('COALESCE(SUM(m.debe), 0) AS debitos, COALESCE(SUM(m.haber), 0) AS creditos')
             ->first();
 
+        // Auditoría 2026-07-12 #5 — NO tocar saldo_inicial: puede venir
+        // encadenado del cierre del período anterior (propagarSaldos...).
+        // recomputarPeriodo() ya lo preservaba; este camino fino lo pisaba
+        // a 0. En el insert de fila nueva aplica el default 0 de la columna.
         DB::table('erp_saldos_cuenta')->updateOrInsert(
             [
                 'empresa_id' => $cuenta->empresa_id,
@@ -103,7 +107,6 @@ class SaldosService
                 'periodo_id' => $periodoId,
             ],
             [
-                'saldo_inicial' => 0,
                 'debitos' => (float) $agg->debitos,
                 'creditos' => (float) $agg->creditos,
                 'actualizado_en' => now(),

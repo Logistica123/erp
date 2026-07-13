@@ -93,6 +93,37 @@ class LibroIvaComprasBorrarImportTest extends TestCase
         DB::table('erp_facturas_compra')->where('id', $facturaId)->update(['import_id' => null]);
     }
 
+    public function test_BU_07_upload_con_facturas_soft_deleted_devuelve_409_no_500(): void
+    {
+        // Mini-tanda 2026-07-13 bug 2: el controller contaba vinculadas con
+        // Eloquent (excluye soft-deleted) pero la FK fk_compra_import las ve
+        // igual → borrado físico rebotaba con 1451 y el endpoint devolvía
+        // 500. Contrato correcto: 409, igual que con facturas vivas.
+        $imp = $this->crearImport('test-bu07.csv', 'hash-bu07-'.uniqid());
+
+        $facturaId = (int) DB::table('erp_facturas_compra')
+            ->whereNull('import_id')
+            ->whereNull('deleted_at')
+            ->value('id');
+        if (! $facturaId) {
+            $this->markTestSkipped('No hay facturas de compra disponibles para vincular.');
+        }
+        // Vincular y soft-borrar la factura.
+        DB::table('erp_facturas_compra')->where('id', $facturaId)
+            ->update(['import_id' => $imp->id, 'deleted_at' => now()]);
+
+        Sanctum::actingAs($this->superAdmin, ['*']);
+        $resp = $this->deleteJson("/api/erp/libro-iva-compras/imports/{$imp->id}");
+
+        $resp->assertStatus(409);
+        $resp->assertJsonPath('error.code', 'IMPORT_TIENE_FACTURAS');
+        $this->assertNotNull(LibroIvaComprasImport::find($imp->id));
+
+        // Cleanup dentro de la transacción.
+        DB::table('erp_facturas_compra')->where('id', $facturaId)
+            ->update(['import_id' => null, 'deleted_at' => null]);
+    }
+
     public function test_BU_03_rol_sin_permiso_devuelve_403(): void
     {
         $imp = $this->crearImport('test-bu03.csv', 'hash-bu03-'.uniqid());

@@ -82,7 +82,9 @@ class LibroIvaComprasImportController
     {
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $rows = LibroIvaComprasImport::where('empresa_id', $empresaId)
-            ->withCount('facturas') // v1.20 — agrega facturas_count
+            // v1.20 — facturas_count; con withTrashed para que puede_borrar
+            // refleje la FK (las soft-deleted también bloquean el borrado).
+            ->withCount(['facturas as facturas_count' => fn ($q) => $q->withTrashed()])
             ->orderByDesc('importado_at')
             ->limit(100)
             ->get(['id', 'archivo_nombre', 'archivo_hash', 'periodo_afip',
@@ -168,9 +170,9 @@ class LibroIvaComprasImportController
      * Bloqueos:
      *   - 403 si falta el permiso.
      *   - 404 si el import no existe en la empresa.
-     *   - 409 IMPORT_TIENE_ASIENTOS si tiene facturas vinculadas (la FK
-     *     `erp_facturas_compra.import_id` con DELETE_RULE=NO ACTION
-     *     bloquearía igual; lo detectamos antes para devolver mensaje útil).
+     *   - 409 IMPORT_TIENE_FACTURAS si tiene facturas vinculadas, vivas o
+     *     soft-deleted (la FK `erp_facturas_compra.import_id` NO ACTION
+     *     bloquearía igual; se detecta antes para devolver mensaje útil).
      *
      * Borrado físico (D-20-3): libera el hash SHA256 para permitir re-subir
      * el mismo archivo después de un fix. El histórico queda en audit log
@@ -189,13 +191,22 @@ class LibroIvaComprasImportController
         $empresaId = (int) ($request->header('X-Empresa-Id') ?: 1);
         $imp = LibroIvaComprasImport::where('empresa_id', $empresaId)->findOrFail($id);
 
-        $facturas = FacturaCompra::where('import_id', $imp->id)->get();
+        // Mini-tanda 2026-07-13 bug 2: contar con withTrashed — la FK
+        // fk_compra_import ve también las soft-deleted, y sin esto el
+        // borrado físico rebotaba con 1451 (el endpoint devolvía 500).
+        $facturas = FacturaCompra::withTrashed()->where('import_id', $imp->id)->get();
         $facturasCount = $facturas->count();
+        $facturasVivas = $facturas->whereNull('deleted_at')->count();
 
         if ($facturasCount > 0 && ! $cascada) {
+            $detalleBorradas = $facturasCount > $facturasVivas
+                ? sprintf(' (%d vivas, %d ya borradas — igual bloquean el borrado del upload)',
+                    $facturasVivas, $facturasCount - $facturasVivas)
+                : '';
+
             return response()->json(['ok' => false, 'error' => [
                 'code' => 'IMPORT_TIENE_FACTURAS',
-                'message' => "Este import generó {$facturasCount} facturas con asientos. "
+                'message' => "Este import generó {$facturasCount} facturas con asientos{$detalleBorradas}. "
                     . "Para borrar todo (incluyendo asientos) marcá 'cascada' en el modal — solo si el período está ABIERTO.",
             ]], 409);
         }
@@ -233,6 +244,12 @@ class LibroIvaComprasImportController
                     'message' => 'Hay facturas conciliadas con órdenes de pago o pagos. Desconciliá primero.',
                 ]], 422);
             }
+
+            // Las soft-deleted no pasan por el helper pero su FK bloquearía
+            // el borrado físico del import: se desvinculan (quedan como
+            // registro histórico sin import, que deja de existir).
+            FacturaCompra::withTrashed()->where('import_id', $imp->id)
+                ->whereNotNull('deleted_at')->update(['import_id' => null]);
 
             // El helper borra facturas + asientos + libera uploads vacíos.
             // Como las facturas son TODAS del mismo import, el import se va a

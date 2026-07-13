@@ -1183,7 +1183,8 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.generar')
             ->middleware(['erp.permiso:impuestos.bp.generar', 'erp.mfa.fresh']);
             Route::get('/bp/{ejercicio_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'descargar'])
-                ->whereNumber('ejercicio_id')->name('erp.imp.bp.descargar');
+                ->whereNumber('ejercicio_id')->name('erp.imp.bp.descargar')
+                ->middleware('erp.permiso:impuestos.bp.ver');
         });
 
         // ====================================================================
@@ -1363,7 +1364,8 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('id')->name('erp.presup.variaciones.resumen')
                 ->middleware('erp.permiso:presupuesto.variaciones.ver');
             Route::get('/{id}/ejecucion',            [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'ejecucion'])
-                ->whereNumber('id')->name('erp.presup.ejecucion');
+                ->whereNumber('id')->name('erp.presup.ejecucion')
+                ->middleware('erp.permiso:presupuesto.variaciones.ver');
         });
 
         // ====================================================================

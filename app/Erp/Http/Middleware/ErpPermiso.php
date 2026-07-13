@@ -46,7 +46,7 @@ class ErpPermiso
     private function denegar(Request $request, Closure $next, string $codigo, string $motivo): Response
     {
         if (config('erp.permisos_modo', 'enforce') === 'log') {
-            Log::warning('permiso.denegado-simulado', [
+            Log::channel('permisos')->warning('permiso.denegado-simulado', [
                 'permiso' => $codigo,
                 'motivo' => $motivo,
                 'user_id' => $request->user()?->id,
@@ -55,6 +55,11 @@ class ErpPermiso
 
             return $next($request);
         }
+
+        Log::channel('permisos')->info('permiso.denegado', [
+            'permiso' => $codigo, 'user_id' => $request->user()?->id,
+            'ruta' => $request->method().' '.$request->path(),
+        ]);
 
         return response()->json(['ok' => false, 'error' => [
             'code' => 'PERMISO_REQUERIDO',

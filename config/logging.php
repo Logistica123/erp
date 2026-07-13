@@ -52,6 +52,17 @@ return [
 
     'channels' => [
 
+        // Item 8 — canal dedicado del gate de permisos (modo log y 403 en
+        // enforce). Separado del general para la ventana de observación;
+        // driver daily con retención acotada = sin riesgo de partición.
+        'permisos' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/permisos.log'),
+            'level' => 'info',
+            'days' => 14,
+            'replace_placeholders' => true,
+        ],
+
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', (string) env('LOG_STACK', 'single')),

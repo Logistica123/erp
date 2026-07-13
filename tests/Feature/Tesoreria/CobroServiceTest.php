@@ -39,13 +39,17 @@ class CobroServiceTest extends TestCase
             ['name' => 'Test cobro', 'password' => bcrypt('irrelevante')]
         );
 
+        // Portabilidad (2.1): CC CENTRAL (fallback del service) y medio ECHEQ
+        // no existen en el catálogo prod; la caja elegida debe estar activa.
+        $this->asegurarCcCentral($this->empresaId);
         $this->clienteId = (int) DB::table('erp_auxiliares')
             ->where('empresa_id', $this->empresaId)->where('tipo', 'Cliente')->value('id');
-        $this->cajaId = (int) DB::table('erp_cajas')->where('empresa_id', $this->empresaId)->value('id');
+        $this->cajaId = (int) DB::table('erp_cajas')->where('empresa_id', $this->empresaId)
+            ->where('activo', 1)->value('id');
         $this->bancoId = (int) DB::table('erp_cuentas_bancarias')->where('empresa_id', $this->empresaId)->value('id');
         $this->medioEfectivoId = (int) DB::table('erp_medios_pago')->where('codigo', 'EFECTIVO')->value('id');
         $this->medioTransfId = (int) DB::table('erp_medios_pago')->where('codigo', 'TRANSFERENCIA')->value('id');
-        $this->medioEcheqId = (int) DB::table('erp_medios_pago')->where('codigo', 'ECHEQ')->value('id');
+        $this->medioEcheqId = $this->asegurarMedioPago('ECHEQ', ['afecta_banco' => 1, 'genera_echeq' => 1]);
     }
 
     public function test_cobro_desbalanceado_rechaza_RN27(): void

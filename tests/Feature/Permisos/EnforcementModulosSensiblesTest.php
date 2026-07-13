@@ -75,7 +75,7 @@ class EnforcementModulosSensiblesTest extends TestCase
     }
 
     #[DataProvider('modulosProvider')]
-    public function test_sin_permiso_recibe_403(string $ruta): void
+    public function test_sin_permiso_recibe_403(string $ruta, string $rol = ''): void
     {
         Sanctum::actingAs($this->sinPermisos, ['*']);
         $r = $this->getJson($ruta);
@@ -92,7 +92,7 @@ class EnforcementModulosSensiblesTest extends TestCase
     }
 
     #[DataProvider('modulosProvider')]
-    public function test_super_admin_no_pierde_acceso(string $ruta): void
+    public function test_super_admin_no_pierde_acceso(string $ruta, string $rol = ''): void
     {
         Sanctum::actingAs($this->superAdmin, ['*']);
         $r = $this->getJson($ruta);

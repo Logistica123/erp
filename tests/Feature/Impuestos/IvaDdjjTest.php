@@ -259,6 +259,9 @@ class IvaDdjjTest extends TestCase
             'empresa_id' => $this->empresaId, 'tipo_comprobante_id' => $this->tipoFAId,
             'punto_venta' => 1, 'numero' => $numero,
             'fecha_emision' => $fecha, 'fecha_recepcion' => $fecha,
+            // Explícita: el esquema prod tiene CHECK fecha_imputacion >= fecha_emision
+            // y el default (hoy) viola el CHECK con fechas de fixture futuras.
+            'fecha_imputacion' => $fecha,
             'auxiliar_id' => $this->proveedorId,
             'cuit_emisor' => '30123456789', 'razon_social_emisor' => 'Proveedor SA',
             'condicion_iva_id' => $this->condIvaRiId, 'moneda_id' => 1, 'cotizacion' => 1,

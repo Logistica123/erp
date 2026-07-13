@@ -46,6 +46,9 @@ class ConciliacionServiceTest extends TestCase
             ['name' => 'Test conciliación', 'password' => bcrypt('irrelevante')]
         );
 
+        // Portabilidad (2.1): los services de cobro/OP usan CC CENTRAL como
+        // fallback en cuentas que admiten CC — en prod no existe.
+        $this->asegurarCcCentral($this->empresaId);
         $this->cuentaBancaria = CuentaBancaria::where('empresa_id', $this->empresaId)->firstOrFail();
         $this->auxProveedorId = (int) DB::table('erp_auxiliares')->where('empresa_id', $this->empresaId)
             ->whereIn('tipo', ['Proveedor', 'Distribuidor'])->value('id');

@@ -25,6 +25,10 @@ class DetectorTransferenciasInternasTest extends TestCase
     {
         parent::setUp();
         $this->svc = app(DetectorTransferenciasInternasService::class);
+        // Portabilidad (2.1): la fecha de fixture (2026-11-15) cae en un
+        // período abierto SIN movimientos reales — con la fecha vieja
+        // (2026-04-01) el detector levantaba pares de los extractos reales
+        // del clon de prod y los conteos no cerraban.
         $cuentas = CuentaBancaria::where('empresa_id', 1)->where('activo', 1)->take(2)->get();
         $this->assertGreaterThanOrEqual(2, $cuentas->count(), 'Necesito 2 cuentas bancarias activas');
         [$this->c1, $this->c2] = [$cuentas[0], $cuentas[1]];
@@ -34,7 +38,7 @@ class DetectorTransferenciasInternasTest extends TestCase
     {
         return ExtractoBancario::create([
             'cuenta_bancaria_id' => $cuentaId,
-            'fecha_desde' => '2026-04-01', 'fecha_hasta' => '2026-04-01',
+            'fecha_desde' => '2026-11-15', 'fecha_hasta' => '2026-11-15',
             'hash_archivo' => $hash, 'nombre_archivo' => 'test.csv',
             'ruta_archivo' => '/tmp/test.csv',
             'saldo_inicial' => 0, 'saldo_final' => 0, 'cant_movimientos' => 0,
@@ -46,7 +50,7 @@ class DetectorTransferenciasInternasTest extends TestCase
     {
         return MovimientoBancario::create([
             'extracto_id' => $extractoId, 'cuenta_bancaria_id' => $cuentaId,
-            'fecha' => '2026-04-01', 'concepto' => 'Test',
+            'fecha' => '2026-11-15', 'concepto' => 'Test',
             'debito' => $debito, 'credito' => $credito, 'saldo' => 1000,
             'estado' => $estado, 'hash_linea' => $hash,
         ]);
@@ -59,7 +63,7 @@ class DetectorTransferenciasInternasTest extends TestCase
         $mDebe  = $this->crearMov($ext1->id, $this->c1->id, 50000, 0, str_repeat('1', 64));
         $mHaber = $this->crearMov($ext2->id, $this->c2->id, 0, 50000, str_repeat('2', 64));
 
-        $res = $this->svc->detectarYConciliar(Carbon::parse('2026-04-01'), 1, null);
+        $res = $this->svc->detectarYConciliar(Carbon::parse('2026-11-15'), 1, null);
 
         $this->assertSame(1, $res['pares']);
         $this->assertCount(1, $res['transferencias']);
@@ -76,7 +80,7 @@ class DetectorTransferenciasInternasTest extends TestCase
         $ext = $this->crearExtracto($this->c1->id, str_repeat('c', 64));
         $mHuerfano = $this->crearMov($ext->id, $this->c1->id, 30000, 0, str_repeat('3', 64), 'PENDIENTE');
 
-        $res = $this->svc->detectarYConciliar(Carbon::parse('2026-04-01'), 1, null);
+        $res = $this->svc->detectarYConciliar(Carbon::parse('2026-11-15'), 1, null);
 
         $this->assertSame(0, $res['pares']);
         $mHuerfano->refresh();
@@ -91,7 +95,7 @@ class DetectorTransferenciasInternasTest extends TestCase
         $mD = $this->crearMov($ext->id, $this->c1->id, 1000, 0, str_repeat('4', 64));
         $mH = $this->crearMov($ext->id, $this->c1->id, 0, 1000, str_repeat('5', 64));
 
-        $res = $this->svc->detectarYConciliar(Carbon::parse('2026-04-01'), 1, null);
+        $res = $this->svc->detectarYConciliar(Carbon::parse('2026-11-15'), 1, null);
 
         $this->assertSame(0, $res['pares']);
         $mD->refresh(); $mH->refresh();
@@ -106,8 +110,8 @@ class DetectorTransferenciasInternasTest extends TestCase
         $this->crearMov($ext1->id, $this->c1->id, 7777, 0, str_repeat('6', 64));
         $this->crearMov($ext2->id, $this->c2->id, 0, 7777, str_repeat('7', 64));
 
-        $r1 = $this->svc->detectarYConciliar(Carbon::parse('2026-04-01'), 1, null);
-        $r2 = $this->svc->detectarYConciliar(Carbon::parse('2026-04-01'), 1, null);
+        $r1 = $this->svc->detectarYConciliar(Carbon::parse('2026-11-15'), 1, null);
+        $r2 = $this->svc->detectarYConciliar(Carbon::parse('2026-11-15'), 1, null);
 
         $this->assertSame(1, $r1['pares']);
         $this->assertSame(0, $r2['pares'], 'Re-correr no debe duplicar (movs ya CONCILIADOS se filtran)');

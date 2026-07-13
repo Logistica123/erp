@@ -97,12 +97,14 @@ class MatchingContraparteServiceTest extends TestCase
     {
         AliasContraparte::create([
             'empresa_id' => 1, 'banco_id' => $this->cuenta->banco_id,
-            'alias_normalizado' => 'TRANSFERENCIA ENVIADA DAVID EDUARDO GIMENEZ',
+            'alias_normalizado' => 'ZZTEST PERSONA SINTETICA UNO',
             'persona_id' => 42, 'confianza' => 100,
             'asignado_por' => 1, 'asignado_at' => now(),
         ]);
 
-        $mov = $this->mov('Transferencia enviada David Eduardo Gimenez', debito: 5000);
+        // Portabilidad (2.1): concepto sintético — el real ('Transferencia
+        // enviada…') lo intercepta una regla seedeada del clon de prod.
+        $mov = $this->mov('Zztest Persona Sintetica Uno', debito: 5000);
         $r = $this->svc->matchear($mov);
 
         $this->assertSame('ALIAS', $r['estrategia']);
@@ -151,19 +153,21 @@ class MatchingContraparteServiceTest extends TestCase
         ConciliacionRegla::create([
             'empresa_id' => 1, 'codigo' => 'TEST-COD',
             'descripcion' => 'Solo DBT', 'tipo' => 'CONCEPTO_REGEX',
-            'patron_concepto' => 'DEBITO', 'cuenta_contable_id' => $cuentaContableId,
+            'patron_concepto' => 'ZZTESTDEB', 'cuenta_contable_id' => $cuentaContableId,
             'orden_prioridad' => 5, 'activa' => 1,
             'banco_id' => $this->cuenta->banco_id,
             'signo' => 'AMBOS', 'confianza' => 90, 'cod_concepto' => 'DBT',
         ]);
 
         // Sin (DBT) en el concepto → no matchea.
-        $movSinCod = $this->mov('DEBITO INMEDIATO', debito: 100);
+        // Portabilidad (2.1): concepto sintético — 'DEBITO INMEDIATO' lo
+        // matchean las reglas reales seedeadas en el clon de prod.
+        $movSinCod = $this->mov('ZZTESTDEB INMEDIATO', debito: 100);
         $r1 = $this->svc->matchear($movSinCod);
         $this->assertNotSame('REGLA', $r1['estrategia']);
 
         // Con (DBT) en el concepto → matchea.
-        $movConCod = $this->mov('DEBITO INMEDIATO (DBT)', debito: 100);
+        $movConCod = $this->mov('ZZTESTDEB INMEDIATO (DBT)', debito: 100);
         $r2 = $this->svc->matchear($movConCod);
         $this->assertSame('REGLA', $r2['estrategia']);
     }

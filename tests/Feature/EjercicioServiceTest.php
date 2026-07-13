@@ -40,8 +40,9 @@ class EjercicioServiceTest extends TestCase
 
         $this->diarioBanId = (int) DB::table('erp_diarios')
             ->where('empresa_id', $this->empresaId)->where('codigo', 'BAN')->value('id');
-        $this->ccCentralId = (int) DB::table('erp_centros_costo')
-            ->where('empresa_id', $this->empresaId)->where('codigo', 'CENTRAL')->value('id');
+        // Portabilidad (2.1): CENTRAL no existe en el catálogo prod y el
+        // service lo usa como CC_CIERRE — el helper lo garantiza.
+        $this->ccCentralId = $this->asegurarCcCentral($this->empresaId);
 
         $user = User::firstOrCreate(
             ['email' => 'test.ejercicioservice@logistica.local'],

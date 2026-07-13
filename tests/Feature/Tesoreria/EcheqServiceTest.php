@@ -46,7 +46,10 @@ class EcheqServiceTest extends TestCase
             ->where('tipo', 'Cliente')
             ->value('id');
 
-        $this->medioEcheqId = (int) DB::table('erp_medios_pago')->where('codigo', 'ECHEQ')->value('id');
+        // Portabilidad (2.1): el catálogo prod no tiene medio ECHEQ ni CC
+        // CENTRAL (fallback del service) — los helpers los crean (rollback).
+        $this->asegurarCcCentral($this->empresaId);
+        $this->medioEcheqId = $this->asegurarMedioPago('ECHEQ', ['afecta_banco' => 1, 'genera_echeq' => 1]);
     }
 
     public function test_depositar_requiere_EN_CARTERA(): void

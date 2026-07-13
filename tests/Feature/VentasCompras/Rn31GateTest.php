@@ -96,8 +96,11 @@ class Rn31GateTest extends TestCase
             'punto_venta' => 1,
             'numero' => 88888,
             'fecha_emision' => now()->toDateString(),
+            // NOT NULL sin default en esquema prod (sql_mode estricto).
+            'fecha_recepcion' => now()->toDateString(),
             'auxiliar_id' => $this->proveedorId,
             'cuit_emisor' => '30123456789',
+            'razon_social_emisor' => 'Proveedor RN31 SA',
             'condicion_iva_id' => DB::table('erp_condiciones_iva')->value('id'),
             'moneda_id' => 1,
             'cotizacion' => 1,
@@ -106,7 +109,9 @@ class Rn31GateTest extends TestCase
             'imp_total' => 605,
             'origen' => 'MANUAL',
             'estado' => 'RECIBIDA',
-            'constatacion_estado' => 'NO_APLICA',
+            // 'PENDIENTE' es el único valor del enum válido acá: el sql_mode
+            // estricto del esquema prod rechaza valores fuera del enum.
+            'constatacion_estado' => 'PENDIENTE',
             'created_by_user_id' => $this->user->id,
         ]);
 

@@ -122,11 +122,15 @@ class AfReportesTest extends TestCase
 
         $res = app(AfReexpresionService::class)->generar($ejercicio->fresh(), $this->user);
 
-        $this->assertCount(1, $res['filas']);
-        $this->assertEqualsWithDelta(1.5, $res['filas'][0]['coeficiente'], 0.001);
-        $this->assertEqualsWithDelta(1_500_000.00, $res['filas'][0]['valor_reexpresado'], 0.01);
-        $this->assertEqualsWithDelta(500_000.00, $res['filas'][0]['rei'], 0.01);
-        $this->assertEqualsWithDelta(500_000.00, $res['totales']['rei'], 0.01);
+        // Portabilidad (2.1): el clon de prod tiene bienes reales que también
+        // entran en la reexpresión — se asserta la fila del bien de fixture,
+        // no el total global.
+        $fila = collect($res['filas'])->firstWhere('bien_id', $bien->id);
+        $this->assertNotNull($fila, 'la reexpresión debe incluir el bien de fixture');
+        $this->assertEqualsWithDelta(1.5, $fila['coeficiente'], 0.001);
+        $this->assertEqualsWithDelta(1_500_000.00, $fila['valor_reexpresado'], 0.01);
+        $this->assertEqualsWithDelta(500_000.00, $fila['rei'], 0.01);
+        $this->assertGreaterThanOrEqual(500_000.00 - 0.01, $res['totales']['rei']);
 
         // Bien queda con valor_reexpresado snapshotted.
         $this->assertEqualsWithDelta(1_500_000.00, (float) $bien->fresh()->valor_reexpresado, 0.01);

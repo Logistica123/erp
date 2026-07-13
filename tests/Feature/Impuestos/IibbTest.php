@@ -314,6 +314,8 @@ class IibbTest extends TestCase
             'empresa_id' => $this->empresaId, 'tipo_comprobante_id' => $this->tipoFAId,
             'punto_venta' => 1, 'numero' => $numero,
             'fecha_emision' => $fecha, 'fecha_recepcion' => $fecha,
+            // Explícita: CHECK fecha_imputacion >= fecha_emision en esquema prod.
+            'fecha_imputacion' => $fecha,
             'auxiliar_id' => $this->proveedorId,
             'cuit_emisor' => '30123456789', 'razon_social_emisor' => 'Proveedor',
             'condicion_iva_id' => $this->condIvaRiId, 'moneda_id' => 1, 'cotizacion' => 1,

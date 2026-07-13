@@ -80,17 +80,31 @@ class CcAuxiliarClienteTest extends TestCase
         $this->assertSame('Renombrado', $cc->nombre);
     }
 
-    public function test_CC_04_migracion_inicial_poblo_ccs_existentes(): void
+    public function test_CC_04_observer_sanea_clientes_sin_cc(): void
     {
-        // Verificar que los auxiliares Cliente preexistentes tengan CC.
-        $auxSinCc = DB::table('erp_auxiliares as a')
+        // Portabilidad (2.1): en prod hay clientes creados por insert crudo
+        // (sync/merge) que bypasean el observer y quedan sin CC — hallazgo
+        // anotado en PLAN_REMEDIACION_ESTADO.md. El invariante global no es
+        // portable; lo que SÍ es contrato es el auto-sanado del observer:
+        // updated() sobre un Cliente sin CC se lo crea.
+        $sinCc = Auxiliar::query()
+            ->where('tipo', 'Cliente')->where('activo', 1)
+            ->whereNotExists(fn ($q) => $q->select(DB::raw(1))
+                ->from('erp_centros_costo')
+                ->whereColumn('erp_centros_costo.auxiliar_id', 'erp_auxiliares.id'))
+            ->get();
+
+        foreach ($sinCc as $aux) {
+            $aux->touch(); // dispara updated() → ensureCentroCosto()
+        }
+
+        $quedan = DB::table('erp_auxiliares as a')
             ->leftJoin('erp_centros_costo as cc', 'cc.auxiliar_id', '=', 'a.id')
-            ->where('a.tipo', 'Cliente')
-            ->where('a.activo', 1)
+            ->where('a.tipo', 'Cliente')->where('a.activo', 1)
             ->whereNull('cc.id')
             ->count();
-        $this->assertSame(0, $auxSinCc,
-            "Hay {$auxSinCc} auxiliares Cliente activos sin CC asociado — migración inicial incompleta");
+        $this->assertSame(0, $quedan,
+            "Tras el saneo por observer quedan {$quedan} clientes sin CC");
     }
 
     public function test_CC_05_jurisdicciones_seed_24_filas(): void

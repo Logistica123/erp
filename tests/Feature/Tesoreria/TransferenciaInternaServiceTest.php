@@ -34,6 +34,8 @@ class TransferenciaInternaServiceTest extends TestCase
             ['name' => 'Test TI', 'password' => bcrypt('irrelevante')]
         );
 
+        // Portabilidad (2.1): el service usa CC CENTRAL como fallback.
+        $this->asegurarCcCentral($this->empresaId);
         $cuentas = CuentaBancaria::where('empresa_id', $this->empresaId)->take(2)->pluck('id')->all();
         $this->origenId = (int) ($cuentas[0] ?? 0);
         $this->destinoId = (int) ($cuentas[1] ?? 0);

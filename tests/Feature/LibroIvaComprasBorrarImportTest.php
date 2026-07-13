@@ -66,8 +66,13 @@ class LibroIvaComprasBorrarImportTest extends TestCase
 
         // Vincular una factura existente al import. Si no hay facturas en la DB
         // de test, saltamos — no queremos generar facturas desde cero acá.
+        // Portabilidad (2.1): la factura vinculada debe estar VIVA — el
+        // controller cuenta vinculadas con Eloquent (excluye soft-deleted)
+        // pero la FK las ve igual; con una soft-deleted daría 500 (bug real
+        // anotado en PLAN_REMEDIACION_ESTADO.md).
         $facturaId = (int) DB::table('erp_facturas_compra')
             ->whereNull('import_id')
+            ->whereNull('deleted_at')
             ->value('id');
         if (! $facturaId) {
             $this->markTestSkipped('No hay facturas de compra disponibles para vincular.');
@@ -78,7 +83,9 @@ class LibroIvaComprasBorrarImportTest extends TestCase
         $resp = $this->deleteJson("/api/erp/libro-iva-compras/imports/{$imp->id}");
 
         $resp->assertStatus(409);
-        $resp->assertJsonPath('error.code', 'IMPORT_TIENE_ASIENTOS');
+        // El código real del contrato es IMPORT_TIENE_FACTURAS (el docblock
+        // del controller dice _ASIENTOS — desactualizado).
+        $resp->assertJsonPath('error.code', 'IMPORT_TIENE_FACTURAS');
         $this->assertNotNull(LibroIvaComprasImport::find($imp->id),
             'El upload NO se debe borrar si tiene facturas vinculadas');
 

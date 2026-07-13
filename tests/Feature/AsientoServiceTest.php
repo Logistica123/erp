@@ -36,10 +36,10 @@ class AsientoServiceTest extends TestCase
         // Resuelvo los IDs desde la DB seedeada.
         $this->diarioId = (int) DB::table('erp_diarios')
             ->where('empresa_id', $this->empresaId)->where('codigo', 'BAN')->value('id');
-        $this->ccCentralId = (int) DB::table('erp_centros_costo')
-            ->where('empresa_id', $this->empresaId)->where('codigo', 'CENTRAL')->value('id');
-        $this->auxProvId = (int) DB::table('erp_auxiliares')
-            ->where('empresa_id', $this->empresaId)->where('codigo', 'PROV-XYZ')->value('id');
+        // Portabilidad (2.1): CENTRAL y PROV-XYZ no existen en el catálogo
+        // prod — los helpers los crean dentro de la transacción del test.
+        $this->ccCentralId = $this->asegurarCcCentral($this->empresaId);
+        $this->auxProvId = $this->asegurarAuxiliar('PROV-XYZ', 'Proveedor', $this->empresaId);
 
         $user = User::firstOrCreate(
             ['email' => 'test.asientoservice@logistica.local'],

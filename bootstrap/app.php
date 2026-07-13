@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'erp.auth' => \App\Erp\Http\Middleware\ErpAuth::class,
             'erp.mfa.fresh' => \App\Erp\Http\Middleware\ErpRequireMfaFresh::class,
             'erp.superadmin' => \App\Erp\Http\Middleware\ErpSuperAdmin::class,
+            'erp.permiso' => \App\Erp\Http\Middleware\ErpPermiso::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

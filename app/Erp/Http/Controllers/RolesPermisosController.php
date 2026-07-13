@@ -152,7 +152,7 @@ class RolesPermisosController
         $perfil = $request->user()->erpPerfil()->with('roles.permisos:id,codigo,sensible')->first();
 
         if (! $perfil) {
-            return response()->json(['ok' => true, 'data' => []]);
+            return response()->json(['ok' => true, 'data' => [], 'roles' => [], 'es_super_admin' => false]);
         }
 
         $permisos = $perfil->roles
@@ -162,6 +162,14 @@ class RolesPermisosController
             ->values()
             ->map(fn ($p) => ['codigo' => $p->codigo, 'sensible' => (bool) $p->sensible]);
 
-        return response()->json(['ok' => true, 'data' => $permisos]);
+        // Item 8 Fase 2A — extensión ADITIVA (B.4): `data` mantiene su shape
+        // exacto (5 páginas lo consumen); roles y es_super_admin son claves
+        // top-level nuevas para usePermisos()/sidebar en 2C.
+        return response()->json([
+            'ok' => true,
+            'data' => $permisos,
+            'roles' => $perfil->roles->map(fn ($r) => ['codigo' => $r->codigo, 'nombre' => $r->nombre])->values(),
+            'es_super_admin' => $perfil->roles->contains('codigo', 'super_admin'),
+        ]);
     }
 }

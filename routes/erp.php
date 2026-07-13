@@ -1449,139 +1449,139 @@ Route::prefix('api/erp')->group(function () {
         Route::prefix('sueldos')->group(function () {
             // Catálogos
             Route::get('/convenios',          [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'convenios'])
-                ->name('erp.sueldos.convenios');
+                ->middleware('erp.permiso:sueldos.catalogos.ver')->name('erp.sueldos.convenios');
             Route::get('/categorias',         [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'categorias'])
-                ->name('erp.sueldos.categorias.index');
+                ->middleware('erp.permiso:sueldos.catalogos.ver')->name('erp.sueldos.categorias.index');
             Route::post('/categorias',        [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'categoriaStore'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.categorias.store');
+                ->middleware(['erp.permiso:sueldos.catalogos.editar', 'erp.mfa.fresh'])->name('erp.sueldos.categorias.store');
             Route::put('/categorias/{id}',    [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'categoriaUpdate'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.categorias.update');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.catalogos.editar', 'erp.mfa.fresh'])->name('erp.sueldos.categorias.update');
             Route::get('/conceptos',          [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'conceptos'])
-                ->name('erp.sueldos.conceptos.index');
+                ->middleware('erp.permiso:sueldos.catalogos.ver')->name('erp.sueldos.conceptos.index');
             Route::put('/conceptos/{id}',     [\App\Erp\Http\Controllers\Sueldos\CatalogosSueldosController::class, 'conceptoUpdate'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.conceptos.update');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.catalogos.editar', 'erp.mfa.fresh'])->name('erp.sueldos.conceptos.update');
 
             // Empleados (padrón)
             Route::get('/empleados',          [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'index'])
-                ->name('erp.sueldos.empleados.index');
+                ->middleware('erp.permiso:sueldos.empleados.ver')->name('erp.sueldos.empleados.index');
             Route::post('/empleados',         [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.store');
+                ->middleware(['erp.permiso:sueldos.empleados.editar', 'erp.mfa.fresh'])->name('erp.sueldos.empleados.store');
             Route::get('/empleados/{id}',     [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'show'])
-                ->whereNumber('id')->name('erp.sueldos.empleados.show');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.empleados.ver')->name('erp.sueldos.empleados.show');
             Route::put('/empleados/{id}',     [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'update'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.update');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.empleados.editar', 'erp.mfa.fresh'])->name('erp.sueldos.empleados.update');
 
             // Básicos historizados (RN-103: sin overlap)
             Route::get('/empleados/{id}/basicos',  [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'basicosListar'])
-                ->whereNumber('id')->name('erp.sueldos.empleados.basicos.index');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.basicos.ver')->name('erp.sueldos.empleados.basicos.index');
             Route::post('/empleados/{id}/basicos', [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'basicoStore'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.basicos.store');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.basicos.aprobar', 'erp.mfa.fresh'])->name('erp.sueldos.empleados.basicos.store');
 
             // Composición porcentual (RN-102: suma 100)
             Route::get('/empleados/{id}/composiciones',  [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'composicionesListar'])
-                ->whereNumber('id')->name('erp.sueldos.empleados.compos.index');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.empleados.ver')->name('erp.sueldos.empleados.compos.index');
             Route::post('/empleados/{id}/composiciones', [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'composicionStore'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.compos.store');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.empleados.editar', 'erp.mfa.fresh'])->name('erp.sueldos.empleados.compos.store');
 
             // Esquemas de comisión
             Route::get('/empleados/{id}/comisiones',  [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'comisionesListar'])
-                ->whereNumber('id')->name('erp.sueldos.empleados.coms.index');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.empleados.ver')->name('erp.sueldos.empleados.coms.index');
             Route::post('/empleados/{id}/comisiones', [\App\Erp\Http\Controllers\Sueldos\EmpleadosController::class, 'comisionStore'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.empleados.coms.store');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.empleados.editar', 'erp.mfa.fresh'])->name('erp.sueldos.empleados.coms.store');
 
             // ---- 8C: Novedades / Ausencias / CC / Préstamos -----------------
             // Novedades del mes
             Route::get('/novedades',          [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'index'])
-                ->name('erp.sueldos.novedades.index');
+                ->middleware('erp.permiso:sueldos.novedades.ver')->name('erp.sueldos.novedades.index');
             Route::post('/novedades',         [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.novedades.store');
+                ->middleware(['erp.permiso:sueldos.novedades.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.novedades.store');
             Route::post('/novedades/bulk',    [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'bulk'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.novedades.bulk');
+                ->middleware(['erp.permiso:sueldos.novedades.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.novedades.bulk');
             Route::delete('/novedades/{id}',  [\App\Erp\Http\Controllers\Sueldos\NovedadesController::class, 'destroy'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.novedades.destroy');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.novedades.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.novedades.destroy');
 
             // Ausencias
             Route::get('/ausencias',          [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'index'])
-                ->name('erp.sueldos.ausencias.index');
+                ->middleware('erp.permiso:sueldos.novedades.ver')->name('erp.sueldos.ausencias.index');
             Route::post('/ausencias',         [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.ausencias.store');
+                ->middleware(['erp.permiso:sueldos.novedades.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.ausencias.store');
             Route::put('/ausencias/{id}',     [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'update'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.ausencias.update');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.novedades.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.ausencias.update');
             Route::delete('/ausencias/{id}',  [\App\Erp\Http\Controllers\Sueldos\AusenciasController::class, 'destroy'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.ausencias.destroy');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.novedades.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.ausencias.destroy');
 
             // CC empleado + movimientos
             Route::get('/cc',                       [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'index'])
-                ->name('erp.sueldos.cc.index');
+                ->middleware('erp.permiso:sueldos.cc.ver')->name('erp.sueldos.cc.index');
             Route::post('/cc',                      [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.cc.store');
+                ->middleware(['erp.permiso:sueldos.cc.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.cc.store');
             Route::get('/cc/{id}/movimientos',      [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'movimientos'])
-                ->whereNumber('id')->name('erp.sueldos.cc.movs.index');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.cc.ver')->name('erp.sueldos.cc.movs.index');
             Route::post('/cc/{id}/movimientos',     [\App\Erp\Http\Controllers\Sueldos\CCController::class, 'movimientoStore'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.cc.movs.store');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.cc.cargar', 'erp.mfa.fresh'])->name('erp.sueldos.cc.movs.store');
 
             // Préstamos
             Route::get('/prestamos',          [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'index'])
-                ->name('erp.sueldos.prestamos.index');
+                ->middleware('erp.permiso:sueldos.prestamos.ver')->name('erp.sueldos.prestamos.index');
             Route::post('/prestamos',         [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.prestamos.store');
+                ->middleware(['erp.permiso:sueldos.prestamos.otorgar', 'erp.mfa.fresh'])->name('erp.sueldos.prestamos.store');
             Route::get('/prestamos/{id}',     [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'show'])
-                ->whereNumber('id')->name('erp.sueldos.prestamos.show');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.prestamos.ver')->name('erp.sueldos.prestamos.show');
 
             // ---- 8D: Liquidaciones (cabecera + máquina de estados) -----------
             Route::get('/liquidaciones',                          [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'index'])
-                ->name('erp.sueldos.liquidaciones.index');
+                ->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liquidaciones.index');
             Route::post('/liquidaciones',                         [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.store');
+                ->middleware(['erp.permiso:sueldos.liquidaciones.calcular', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.store');
             Route::get('/liquidaciones/{id}',                     [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'show'])
-                ->whereNumber('id')->name('erp.sueldos.liquidaciones.show');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liquidaciones.show');
             Route::post('/liquidaciones/{id}/calcular',           [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'calcular'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.calcular');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.liquidaciones.calcular', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.calcular');
             Route::post('/liquidaciones/{id}/aprobar',            [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'aprobar'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.aprobar');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.liquidaciones.aprobar', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.aprobar');
             Route::post('/liquidaciones/{id}/anular',             [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'anular'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.anular');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.liquidaciones.reabrir', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.anular');
             Route::post('/liquidaciones/{id}/rectificar',         [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'rectificar'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liquidaciones.rectificar');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.liquidaciones.reabrir', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.rectificar');
             Route::get('/liquidaciones/{id}/items',               [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'items'])
-                ->whereNumber('id')->name('erp.sueldos.liquidaciones.items');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liquidaciones.items');
             Route::get('/liquidaciones/{id}/recibo/{empleadoId}', [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'recibo'])
-                ->whereNumber('id')->whereNumber('empleadoId')->name('erp.sueldos.liquidaciones.recibo');
+                ->whereNumber('id')->whereNumber('empleadoId')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liquidaciones.recibo');
 
             // ---- 8E: Pagos en 3 modalidades + asientos automáticos -----------
             Route::post('/liquidaciones/{id}/contabilizar',  [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'contabilizar'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.contabilizar');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.liquidaciones.aprobar', 'erp.mfa.fresh'])->name('erp.sueldos.liq.contabilizar');
             Route::post('/liquidaciones/{id}/pagar/formal',  [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'pagarFormal'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.pagar.formal');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.pagos.ejecutar.formal', 'erp.mfa.fresh'])->name('erp.sueldos.liq.pagar.formal');
             Route::post('/liquidaciones/{id}/pagar/efectivo',[\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'pagarEfectivo'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.pagar.efectivo');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.pagos.ejecutar.efectivo', 'erp.mfa.fresh'])->name('erp.sueldos.liq.pagar.efectivo');
             Route::post('/liquidaciones/{id}/pagar/mt',      [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'pagarMt'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liq.pagar.mt');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.pagos.ejecutar.mt', 'erp.mfa.fresh'])->name('erp.sueldos.liq.pagar.mt');
             Route::get('/liquidaciones/{id}/pagos',          [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'listarPorLiquidacion'])
-                ->whereNumber('id')->name('erp.sueldos.liq.pagos');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liq.pagos');
             Route::get('/pagos/{id}',                        [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'show'])
-                ->whereNumber('id')->name('erp.sueldos.pagos.show');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.pagos.show');
 
             // ---- 8F: Export LIBER + reportes -------------------------------
             Route::post('/liquidaciones/{id}/export-liber',  [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'generarLiber'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liber.generar');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.export.liber', 'erp.mfa.fresh'])->name('erp.sueldos.liber.generar');
             Route::get('/exports-liber',                     [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'listarLiber'])
-                ->name('erp.sueldos.liber.index');
+                ->middleware('erp.permiso:sueldos.export.liber')->name('erp.sueldos.liber.index');
             Route::get('/exports-liber/{id}',                [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'showLiber'])
-                ->whereNumber('id')->name('erp.sueldos.liber.show');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.export.liber')->name('erp.sueldos.liber.show');
             Route::get('/exports-liber/{id}/descargar',      [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'descargarLiber'])
-                ->whereNumber('id')->name('erp.sueldos.liber.descargar');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.export.liber')->name('erp.sueldos.liber.descargar');
             Route::post('/exports-liber/{id}/marcar-enviado', [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'marcarEnviadoLiber'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.sueldos.liber.enviado');
+                ->whereNumber('id')->middleware(['erp.permiso:sueldos.export.liber', 'erp.mfa.fresh'])->name('erp.sueldos.liber.enviado');
 
             Route::get('/reportes/liquidacion/{id}',          [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'liquidacionResumen'])
-                ->whereNumber('id')->name('erp.sueldos.rep.liquidacion');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.reportes.ver')->name('erp.sueldos.rep.liquidacion');
             Route::get('/reportes/empleado/{id}/historico',   [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'empleadoHistorico'])
-                ->whereNumber('id')->name('erp.sueldos.rep.historico');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.reportes.ver')->name('erp.sueldos.rep.historico');
             Route::get('/reportes/costo-laboral',             [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'costoLaboral'])
-                ->name('erp.sueldos.rep.costo');
+                ->middleware('erp.permiso:sueldos.reportes.ver')->name('erp.sueldos.rep.costo');
             Route::get('/reportes/empleado/{id}/cc',          [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'ccEmpleado'])
-                ->whereNumber('id')->name('erp.sueldos.rep.cc');
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.reportes.ver')->name('erp.sueldos.rep.cc');
         });
 
         // ====================================================================

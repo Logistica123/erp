@@ -28,6 +28,14 @@ class RutasConGateTest extends TestCase
         'POST api/erp/auth/logout',          // cerrar sesión propia
         'POST api/erp/auth/mfa/verificar',   // flujo MFA propio
         'GET|HEAD api/erp/mi-permisos',      // el frontend necesita leerlos siempre
+        // D-10 — catálogos estáticos que alimentan dropdowns de toda la UI
+        // (gatearlos rompería la operatoria de cualquier rol legítimo):
+        'GET|HEAD api/erp/periodos',           // selector de período (decenas de páginas)
+        'GET|HEAD api/erp/periodos/abierto',   // ídem
+        'GET|HEAD api/erp/ejercicios',         // selector de ejercicio
+        'GET|HEAD api/erp/cuentas',            // SelectorCuentaContable (tesorería, imports…)
+        'GET|HEAD api/erp/cuentas/imputables', // ídem
+        'GET|HEAD api/erp/centros-costo',      // selector de CC (asientos, sueldos…)
     ];
 
     public function test_toda_ruta_del_grupo_erp_auth_declara_gate(): void

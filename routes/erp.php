@@ -88,14 +88,19 @@ Route::prefix('api/erp')->group(function () {
         // Catálogo simple (compat con SelectField).
         Route::get('/centros-costo', [CatalogosController::class, 'centrosCosto'])->name('erp.centros-costo');
         // v1.14 ampliación — ABM completo (listado paginado/filtros + CRUD).
-        Route::get('/centros-costo/abm', [CentrosCostoController::class, 'index'])->name('erp.cc.abm.index');
-        Route::post('/centros-costo', [CentrosCostoController::class, 'store'])->name('erp.cc.store');
+        Route::get('/centros-costo/abm', [CentrosCostoController::class, 'index'])->name('erp.cc.abm.index')
+            ->middleware('erp.permiso:contabilidad.cuentas.ver');
+        Route::post('/centros-costo', [CentrosCostoController::class, 'store'])->name('erp.cc.store')
+            ->middleware('erp.permiso:contabilidad.centros_costo.crear');
         Route::put('/centros-costo/{id}', [CentrosCostoController::class, 'update'])
-            ->whereNumber('id')->name('erp.cc.update');
+            ->whereNumber('id')->name('erp.cc.update')
+            ->middleware('erp.permiso:contabilidad.centros_costo.editar');
         Route::delete('/centros-costo/{id}', [CentrosCostoController::class, 'destroy'])
-            ->whereNumber('id')->name('erp.cc.destroy');
+            ->whereNumber('id')->name('erp.cc.destroy')
+            ->middleware('erp.permiso:contabilidad.centros_costo.eliminar');
         Route::post('/centros-costo/{id}/reactivar', [CentrosCostoController::class, 'reactivar'])
-            ->whereNumber('id')->name('erp.cc.reactivar');
+            ->whereNumber('id')->name('erp.cc.reactivar')
+            ->middleware('erp.permiso:contabilidad.centros_costo.editar');
         Route::get('/auxiliares', [CatalogosController::class, 'auxiliares'])->name('erp.auxiliares');
         // v1.24.1 — endpoint que faltaba desde v1.17, lo llama FacturaCompraManualPage.
         Route::get('/tipos-comprobante', [CatalogosController::class, 'tiposComprobante'])
@@ -126,78 +131,103 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/cuentas', [CuentasContablesController::class, 'index'])->name('erp.cuentas.index');
         // ADDENDUM v1.15 Sprint L — exportar CSV (debe ir antes de /{id} para no shadowear).
         Route::get('/cuentas/exportar', [CuentasContablesController::class, 'exportar'])
-            ->name('erp.cuentas.exportar');
+            ->name('erp.cuentas.exportar')
+            ->middleware('erp.permiso:contabilidad.libros.exportar');
         // ADDENDUM v1.15 Sprint M+ — endpoint del SelectorCuentaContable.
         Route::get('/cuentas/imputables', [CuentasContablesController::class, 'imputables'])
             ->name('erp.cuentas.imputables');
-        Route::post('/cuentas', [CuentasContablesController::class, 'store'])->name('erp.cuentas.store');
+        Route::post('/cuentas', [CuentasContablesController::class, 'store'])->name('erp.cuentas.store')
+            ->middleware('erp.permiso:contabilidad.cuentas.editar');
         Route::delete('/cuentas/{id}', [CuentasContablesController::class, 'destroy'])
-            ->whereNumber('id')->name('erp.cuentas.destroy');
+            ->whereNumber('id')->name('erp.cuentas.destroy')
+            ->middleware(['erp.permiso:contabilidad.cuentas.eliminar', 'erp.mfa.fresh']);
         // v1.15 Sprint L+
         Route::post('/cuentas/{id}/reactivar', [CuentasContablesController::class, 'reactivar'])
-            ->whereNumber('id')->name('erp.cuentas.reactivar');
+            ->whereNumber('id')->name('erp.cuentas.reactivar')
+            ->middleware('erp.permiso:contabilidad.cuentas.editar');
         Route::get('/cuentas/{id}', [CuentasContablesController::class, 'show'])
             ->whereNumber('id')
-            ->name('erp.cuentas.show');
+            ->name('erp.cuentas.show')
+            ->middleware('erp.permiso:contabilidad.cuentas.ver');
 
         // Contabilidad — asientos
-        Route::get('/asientos', [AsientosController::class, 'index'])->name('erp.asientos.index');
-        Route::post('/asientos', [AsientosController::class, 'store'])->name('erp.asientos.store');
+        Route::get('/asientos', [AsientosController::class, 'index'])->name('erp.asientos.index')
+            ->middleware('erp.permiso:contabilidad.asientos.ver');
+        Route::post('/asientos', [AsientosController::class, 'store'])->name('erp.asientos.store')
+            ->middleware('erp.permiso:contabilidad.asientos.crear');
         Route::get('/asientos/{id}', [AsientosController::class, 'show'])
-            ->whereNumber('id')->name('erp.asientos.show');
+            ->whereNumber('id')->name('erp.asientos.show')
+            ->middleware('erp.permiso:contabilidad.asientos.ver');
         Route::post('/asientos/{id}/contabilizar', [AsientosController::class, 'contabilizar'])
-            ->whereNumber('id')->name('erp.asientos.contabilizar');
+            ->whereNumber('id')->name('erp.asientos.contabilizar')
+            ->middleware('erp.permiso:contabilidad.asientos.contabilizar');
         Route::post('/asientos/{id}/anular', [AsientosController::class, 'anular'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.asientos.anular');
+            ->whereNumber('id')->name('erp.asientos.anular')
+            ->middleware('erp.permiso:contabilidad.asientos.anular');
         Route::delete('/asientos/{id}', [AsientosController::class, 'destroy'])
-            ->whereNumber('id')->name('erp.asientos.destroy');
+            ->whereNumber('id')->name('erp.asientos.destroy')
+            ->middleware('erp.permiso:contabilidad.asientos.eliminar_borrador');
         // Hard-delete con audit inmutable (super_admin + MFA fresh + motivo).
         Route::delete('/asientos/{id}/definitivo', [AsientosController::class, 'eliminarDefinitivo'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.asientos.eliminar-definitivo');
+            ->whereNumber('id')->name('erp.asientos.eliminar-definitivo')
+            ->middleware(['erp.permiso:contabilidad.asientos.eliminar_definitivo', 'erp.mfa.fresh']);
 
         // Plantillas/modelos de asiento (asientos repetitivos: sueldos, etc).
         Route::get('/asiento-plantillas', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'index'])
-            ->name('erp.asiento-plantillas.index');
+            ->name('erp.asiento-plantillas.index')
+            ->middleware('erp.permiso:contabilidad.asientos.ver');
         Route::post('/asiento-plantillas', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'store'])
-            ->name('erp.asiento-plantillas.store');
+            ->name('erp.asiento-plantillas.store')
+            ->middleware('erp.permiso:contabilidad.plantillas.gestionar');
         Route::get('/asiento-plantillas/{id}', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'show'])
-            ->whereNumber('id')->name('erp.asiento-plantillas.show');
+            ->whereNumber('id')->name('erp.asiento-plantillas.show')
+            ->middleware('erp.permiso:contabilidad.asientos.ver');
         Route::delete('/asiento-plantillas/{id}', [\App\Erp\Http\Controllers\AsientoPlantillasController::class, 'destroy'])
-            ->whereNumber('id')->name('erp.asiento-plantillas.destroy');
+            ->whereNumber('id')->name('erp.asiento-plantillas.destroy')
+            ->middleware('erp.permiso:contabilidad.plantillas.gestionar');
 
         // Libro diario (json|csv|html)
-        Route::get('/libro-diario', [LibroDiarioController::class, 'index'])->name('erp.libro-diario');
+        Route::get('/libro-diario', [LibroDiarioController::class, 'index'])->name('erp.libro-diario')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
 
         // Libro mayor
-        Route::get('/libro-mayor', [LibroMayorController::class, 'index'])->name('erp.libro-mayor');
+        Route::get('/libro-mayor', [LibroMayorController::class, 'index'])->name('erp.libro-mayor')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
 
         // Balance Sumas y Saldos
         Route::get('/balance-sumas-saldos', [BalanceController::class, 'sumasSaldos'])
-            ->name('erp.balance-ss');
+            ->name('erp.balance-ss')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
 
         // Cierre / apertura de período — sensibles: exigen MFA fresco (<15 min)
         Route::post('/periodos/{id}/cerrar', [PeriodosController::class, 'cerrar'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.periodos.cerrar');
+            ->whereNumber('id')->name('erp.periodos.cerrar')
+            ->middleware(['erp.permiso:contabilidad.periodos.cerrar', 'erp.mfa.fresh']);
         Route::post('/periodos/{id}/bloquear', [PeriodosController::class, 'bloquear'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.periodos.bloquear');
+            ->whereNumber('id')->name('erp.periodos.bloquear')
+            ->middleware('erp.permiso:contabilidad.periodos.bloquear');
         Route::post('/periodos/{id}/desbloquear', [PeriodosController::class, 'desbloquear'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.periodos.desbloquear');
+            ->whereNumber('id')->name('erp.periodos.desbloquear')
+            ->middleware('erp.permiso:contabilidad.periodos.desbloquear');
         Route::post('/periodos/{id}/reabrir', [PeriodosController::class, 'reabrir'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.periodos.reabrir');
+            ->whereNumber('id')->name('erp.periodos.reabrir')
+            ->middleware(['erp.permiso:contabilidad.periodos.reabrir', 'erp.mfa.fresh']);
 
         // Cierre / apertura de ejercicio (asiento refundición automático al cerrar)
         Route::post('/ejercicios/{id}/cerrar', [EjerciciosController::class, 'cerrar'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.ejercicios.cerrar');
+            ->whereNumber('id')->name('erp.ejercicios.cerrar')
+            ->middleware(['erp.permiso:contabilidad.ejercicios.cerrar', 'erp.mfa.fresh']);
         Route::post('/ejercicios/{id}/reabrir', [EjerciciosController::class, 'reabrir'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.ejercicios.reabrir');
+            ->whereNumber('id')->name('erp.ejercicios.reabrir')
+            ->middleware(['erp.permiso:contabilidad.ejercicios.cerrar', 'erp.mfa.fresh']);
 
         // Estados contables (FACPCE)
         Route::get('/estados-contables/situacion-patrimonial',
@@ -279,9 +309,11 @@ Route::prefix('api/erp')->group(function () {
         Route::patch('/compras/pendientes-facturar/{movId}/anular', [ConciliacionExtrasController::class, 'anularPendiente'])
             ->whereNumber('movId')->name('erp.concil.pendientes-anular');
         Route::get('/contabilidad/conciliaciones-con-diferencia', [ConciliacionExtrasController::class, 'conciliacionesConDiferencia'])
-            ->name('erp.concil.con-diferencia');
+            ->name('erp.concil.con-diferencia')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
         Route::get('/contabilidad/conciliaciones-con-diferencia/export', [ConciliacionExtrasController::class, 'exportConDiferencia'])
-            ->name('erp.concil.con-diferencia.export');
+            ->name('erp.concil.con-diferencia.export')
+            ->middleware('erp.permiso:contabilidad.libros.exportar');
         Route::post('/movimientos-bancarios/{id}/conciliar-factura', [MovimientosBancariosController::class, 'conciliarFactura'])
             ->whereNumber('id')->name('erp.mov-banc.conciliar-factura');
         // v1.27 §15 — Búsqueda de auxiliares + facturas pendientes para modal manual.
@@ -331,9 +363,11 @@ Route::prefix('api/erp')->group(function () {
 
         // v1.45 §9 — Reclasificación Imp Ley 25413.
         Route::get('/contabilidad/iiddycc/saldo-acumulado', [\App\Erp\Http\Controllers\ReclasificacionIiddyccController::class, 'saldo'])
-            ->name('erp.iiddycc.saldo');
+            ->name('erp.iiddycc.saldo')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
         Route::post('/contabilidad/iiddycc/reclasificar', [\App\Erp\Http\Controllers\ReclasificacionIiddyccController::class, 'reclasificar'])
-            ->name('erp.iiddycc.reclasificar');
+            ->name('erp.iiddycc.reclasificar')
+            ->middleware('erp.permiso:contabilidad.iiddycc.reclasificar');
 
         // v1.47 §15 — Conciliación en lote N:M.
         Route::get('/conciliacion/lotes/candidatos', [\App\Erp\Http\Controllers\ConciliacionLotesController::class, 'candidatos'])
@@ -353,11 +387,14 @@ Route::prefix('api/erp')->group(function () {
 
         // v1.47 §14.3 — Saneamiento cuenta puente 1.1.6.99.
         Route::get('/contabilidad/pendientes-identificar', [\App\Erp\Http\Controllers\ReclasificacionPendientesController::class, 'index'])
-            ->name('erp.pendientes.index');
+            ->name('erp.pendientes.index')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
         Route::get('/contabilidad/pendientes-identificar/saldo', [\App\Erp\Http\Controllers\ReclasificacionPendientesController::class, 'saldo'])
-            ->name('erp.pendientes.saldo');
+            ->name('erp.pendientes.saldo')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
         Route::post('/contabilidad/pendientes-identificar/reclasificar', [\App\Erp\Http\Controllers\ReclasificacionPendientesController::class, 'reclasificar'])
-            ->name('erp.pendientes.reclasificar');
+            ->name('erp.pendientes.reclasificar')
+            ->middleware('erp.permiso:contabilidad.pendientes.reclasificar');
 
         Route::get('/alias-contraparte', [AliasContraparteController::class, 'index'])->name('erp.alias.index');
         Route::post('/alias-contraparte', [AliasContraparteController::class, 'store'])->name('erp.alias.store');
@@ -657,9 +694,11 @@ Route::prefix('api/erp')->group(function () {
 
         // v1.24 — ABM del mapeo concepto AFIP → cuenta contable (importer Libro IVA).
         Route::get('/contabilidad/iva-mapeo', [ConfiguracionIvaMapeoController::class, 'index'])
-            ->name('erp.contabilidad.iva-mapeo.index');
+            ->name('erp.contabilidad.iva-mapeo.index')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
         Route::put('/contabilidad/iva-mapeo/{concepto}', [ConfiguracionIvaMapeoController::class, 'update'])
-            ->name('erp.contabilidad.iva-mapeo.update');
+            ->name('erp.contabilidad.iva-mapeo.update')
+            ->middleware('erp.permiso:contabilidad.iva_mapeo.editar');
 
         Route::get('/config', [ConfigController::class, 'index'])->name('erp.config.index');
         Route::patch('/config/{clave}', [ConfigController::class, 'update'])
@@ -682,7 +721,8 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/auditoria/verificar-cadena', [AuditoriaController::class, 'verificarCadena'])
             ->name('erp.auditoria.verificar-cadena');
         Route::get('/auditoria/verificar-integridad-asientos', [AuditoriaController::class, 'verificarIntegridadAsientos'])
-            ->name('erp.auditoria.verificar-integridad-asientos');
+            ->name('erp.auditoria.verificar-integridad-asientos')
+            ->middleware('erp.permiso:contabilidad.libros.ver');
 
         // Dashboard
         Route::get('/dashboard/stats', [\App\Erp\Http\Controllers\DashboardController::class, 'stats'])
@@ -738,22 +778,30 @@ Route::prefix('api/erp')->group(function () {
 
         // v1.45 — Importador del Libro IVA Ventas (espejo del v1.9 compras).
         Route::post('/libro-iva-ventas/import/preview', [LibroIvaVentasImportController::class, 'preview'])
-            ->name('erp.livv.preview');
+            ->name('erp.livv.preview')
+            ->middleware('erp.permiso:ventas.libro_iva.importar');
         Route::post('/libro-iva-ventas/import/confirmar', [LibroIvaVentasImportController::class, 'confirmar'])
-            ->name('erp.livv.confirmar');
+            ->name('erp.livv.confirmar')
+            ->middleware('erp.permiso:ventas.libro_iva.importar');
         // v1.30 — modo "Control": comparar archivo AFIP vs sistema (no inserta).
         Route::post('/libro-iva-ventas/import/control', [LibroIvaVentasImportController::class, 'controlar'])
-            ->name('erp.livv.control');
+            ->name('erp.livv.control')
+            ->middleware('erp.permiso:ventas.import.control');
         Route::post('/libro-iva-ventas/import/control/importar-faltantes', [LibroIvaVentasImportController::class, 'importarFaltantes'])
-            ->name('erp.livv.control.importar-faltantes');
+            ->name('erp.livv.control.importar-faltantes')
+            ->middleware('erp.permiso:ventas.import.control');
         Route::get('/libro-iva-ventas/imports', [LibroIvaVentasImportController::class, 'imports'])
-            ->name('erp.livv.imports');
+            ->name('erp.livv.imports')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::get('/libro-iva-ventas/imports/{id}/errores.csv', [LibroIvaVentasImportController::class, 'descargarErrores'])
-            ->whereNumber('id')->name('erp.livv.import-errores-csv');
+            ->whereNumber('id')->name('erp.livv.import-errores-csv')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::get('/libro-iva-ventas/imports/{id}', [LibroIvaVentasImportController::class, 'importDetalle'])
-            ->whereNumber('id')->name('erp.livv.import-detalle');
+            ->whereNumber('id')->name('erp.livv.import-detalle')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::delete('/libro-iva-ventas/imports/{id}', [LibroIvaVentasImportController::class, 'destroy'])
-            ->whereNumber('id')->name('erp.livv.import-destroy');
+            ->whereNumber('id')->name('erp.livv.import-destroy')
+            ->middleware(['erp.permiso:ventas.libro_iva.borrar_import', 'erp.mfa.fresh']);
 
         // ADDENDUM v1.11 — Generador F.8001 Libro IVA Digital Compras
         Route::post('/libro-iva-compras/{periodoId}/exportar-f8001', [LibroIvaComprasExportController::class, 'exportar'])
@@ -774,15 +822,19 @@ Route::prefix('api/erp')->group(function () {
         // Facturación (venta)
         // v1.27 — edición de período trabajado de facturas de venta.
         Route::get('/facturas-venta/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'periodosTrabajadosDistinct'])
-            ->name('erp.facturas-venta.periodos-trabajados');
+            ->name('erp.facturas-venta.periodos-trabajados')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::patch('/facturas-venta/periodos-trabajados', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodosTrabajadosBulk'])
-            ->name('erp.facturas-venta.periodos-trabajados.bulk');
+            ->name('erp.facturas-venta.periodos-trabajados.bulk')
+            ->middleware('erp.permiso:ventas.facturas.editar');
         // Borrado masivo (excepto WSFE_ERP). Antes del {id} para no colisionar.
         Route::post('/facturas-venta/borrar-masivo', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'borrarMasivo'])
-            ->name('erp.fv.borrar-masivo');
+            ->name('erp.fv.borrar-masivo')
+            ->middleware('erp.permiso:ventas.facturas.borrar_masivo');
         // v1.29 — DELETE factura venta con permisos condicionales.
         Route::delete('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'destroy'])
-            ->whereNumber('id')->name('erp.fv.destroy');
+            ->whereNumber('id')->name('erp.fv.destroy')
+            ->middleware(['erp.permiso:ventas.facturas.eliminar_ws', 'erp.mfa.fresh']);
         // v1.29 — ABM permisos temporales (super_admin only).
         Route::get('/admin/permisos-temporales', [\App\Erp\Http\Controllers\PermisosTemporalesController::class, 'index'])
             ->name('erp.admin.permisos-temp.index');
@@ -791,56 +843,73 @@ Route::prefix('api/erp')->group(function () {
         Route::delete('/admin/permisos-temporales/{id}', [\App\Erp\Http\Controllers\PermisosTemporalesController::class, 'destroy'])
             ->whereNumber('id')->name('erp.admin.permisos-temp.destroy');
         Route::patch('/facturas-venta/{id}/periodo-trabajado', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchPeriodoTrabajado'])
-            ->whereNumber('id')->name('erp.facturas-venta.periodo-trabajado');
+            ->whereNumber('id')->name('erp.facturas-venta.periodo-trabajado')
+            ->middleware('erp.permiso:ventas.facturas.editar');
         // v1.37 — cambiar categoria FACTURA ⇄ EFECTIVO.
         Route::patch('/facturas-venta/{id}/categoria', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'patchCategoria'])
-            ->whereNumber('id')->name('erp.facturas-venta.categoria');
+            ->whereNumber('id')->name('erp.facturas-venta.categoria')
+            ->middleware('erp.permiso:facturas.editar_categoria');
         Route::patch('/facturas-compra/{id}/categoria', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'patchCategoria'])
             ->whereNumber('id')->name('erp.facturas-compra.categoria');
         // v1.51 — Reparto de base imponible IIBB por jurisdicción.
         Route::get('/facturas-venta/{id}/jurisdicciones', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'jurisdicciones'])
-            ->whereNumber('id')->name('erp.facturas-venta.jurisdicciones');
+            ->whereNumber('id')->name('erp.facturas-venta.jurisdicciones')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::put('/facturas-venta/{id}/jurisdicciones', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'putJurisdicciones'])
-            ->whereNumber('id')->name('erp.facturas-venta.jurisdicciones.put');
+            ->whereNumber('id')->name('erp.facturas-venta.jurisdicciones.put')
+            ->middleware('erp.permiso:ventas.facturas.editar');
         Route::get('/facturas-venta/catalogos', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'catalogosEmision'])
-            ->name('erp.fv.catalogos');
+            ->name('erp.fv.catalogos')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::get('/facturas-venta', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'index'])
-            ->name('erp.fv.index');
+            ->name('erp.fv.index')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         // v1.27 Sprint D §14 — export XLSX (espejo v1.49 compras).
         Route::get('/facturas-venta/export.xlsx', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'exportXlsx'])
-            ->name('erp.fv.export-xlsx');
+            ->name('erp.fv.export-xlsx')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::post('/facturas-venta/emitir', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'emitir'])
-            ->name('erp.fv.emitir');
+            ->name('erp.fv.emitir')
+            ->middleware(['erp.permiso:ventas.emision.ejecutar', 'erp.mfa.fresh']);
         // v1.17 — Carga manual (sin emitir contra ARCA).
         Route::post('/facturas-venta/manual', [FacturasManualController::class, 'ventaStore'])
-            ->name('erp.fv.manual');
+            ->name('erp.fv.manual')
+            ->middleware('erp.permiso:ventas.facturas.cargar_manual');
         Route::post('/facturas-compra/manual', [FacturasManualController::class, 'compraStore'])
             ->name('erp.fc.manual');
         // v1.39 — descarga del PDF adjunto (AFIP original).
         Route::get('/facturas-venta/{id}/pdf', [FacturasManualController::class, 'descargarPdfVenta'])
-            ->whereNumber('id')->name('erp.fv.pdf');
+            ->whereNumber('id')->name('erp.fv.pdf')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         // v1.41 — extracción de datos desde PDF AFIP (autofill del form).
         Route::post('/facturas-venta/pdf-extract', [FacturasManualController::class, 'extraerDesdePdfVenta'])
-            ->name('erp.fv.pdf-extract');
+            ->name('erp.fv.pdf-extract')
+            ->middleware('erp.permiso:ventas.libro_iva.importar');
         // v1.17 — Verificación opcional contra ARCA (WSCDC + padrón).
         Route::post('/facturas/{tipo}/{id}/verificar-arca', [FacturasManualController::class, 'verificarArca'])
             ->whereIn('tipo', ['venta', 'compra'])
             ->whereNumber('id')
             ->name('erp.facturas.verificar-arca');
         Route::post('/facturas-venta/{id}/cobrar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'cobrar'])
-            ->whereNumber('id')->name('erp.fv.cobrar');
+            ->whereNumber('id')->name('erp.fv.cobrar')
+            ->middleware('erp.permiso:ventas.cobranzas.gestionar');
         Route::post('/facturas-venta/{id}/controlar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'controlar'])
-            ->whereNumber('id')->name('erp.fv.controlar');
+            ->whereNumber('id')->name('erp.fv.controlar')
+            ->middleware('erp.permiso:ventas.facturas.controlar');
         Route::post('/facturas-venta/{id}/rechazar', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'rechazar'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.fv.rechazar');
+            ->whereNumber('id')->name('erp.fv.rechazar')
+            ->middleware('erp.permiso:ventas.facturas.controlar');
         Route::post('/facturas-venta/{id}/anular', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'anular'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.fv.anular');
+            ->whereNumber('id')->name('erp.fv.anular')
+            ->middleware(['erp.permiso:ventas.facturas.anular', 'erp.mfa.fresh']);
         Route::post('/facturas-venta/{id}/fce-aceptada', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'fceAceptada'])
-            ->whereNumber('id')->name('erp.fv.fce-aceptada');
+            ->whereNumber('id')->name('erp.fv.fce-aceptada')
+            ->middleware('erp.permiso:ventas.fce.gestionar');
         Route::post('/facturas-venta/{id}/fce-rechazada', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'fceRechazada'])
-            ->whereNumber('id')->name('erp.fv.fce-rechazada');
+            ->whereNumber('id')->name('erp.fv.fce-rechazada')
+            ->middleware('erp.permiso:ventas.fce.gestionar');
 
         // Reportes Ventas/Compras (SPEC 03 §6.5)
         Route::get('/reportes/libro-iva-compras', [ReportesVentasComprasController::class, 'libroIvaCompras'])
@@ -852,7 +921,8 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/reportes/antiguedad-proveedores', [ReportesVentasComprasController::class, 'antiguedadProveedores'])
             ->name('erp.reportes.aging-proveedores');
         Route::get('/reportes/fce-estados', [ReportesVentasComprasController::class, 'fceEstados'])
-            ->name('erp.reportes.fce-estados');
+            ->name('erp.reportes.fce-estados')
+            ->middleware('erp.permiso:ventas.facturas.ver');
 
         // ADDENDUM v1.14 — Reportes por CC / Jurisdicción
         Route::get('/reportes/ventas-por-cliente', [ReportesV14Controller::class, 'ventasPorCliente'])
@@ -884,12 +954,15 @@ Route::prefix('api/erp')->group(function () {
 
         // ARCA — emisión (fachada sobre factura venta) — SPEC 03 §6.6
         Route::get('/facturas-venta/{id}/emision-status', [ArcaController::class, 'emisionStatus'])
-            ->whereNumber('id')->name('erp.fv.emision-status');
+            ->whereNumber('id')->name('erp.fv.emision-status')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::get('/facturas-venta/{id}/cae', [ArcaController::class, 'cae'])
-            ->whereNumber('id')->name('erp.fv.cae');
+            ->whereNumber('id')->name('erp.fv.cae')
+            ->middleware('erp.permiso:ventas.facturas.ver');
         Route::post('/facturas-venta/{id}/reintentar-emision', [ArcaController::class, 'reintentarEmision'])
             ->middleware('erp.mfa.fresh')
-            ->whereNumber('id')->name('erp.fv.reintentar');
+            ->whereNumber('id')->name('erp.fv.reintentar')
+            ->middleware('erp.permiso:ventas.emision.reintentar');
 
         // ARCA — padrones, constatación, Mis Comprobantes, PV AFIP (SPEC 03 §6.6)
         Route::post('/padrones/consultar', [ArcaController::class, 'padronConsultar'])->name('erp.arca.padron.consultar');
@@ -925,7 +998,8 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/puntos-venta/afip', [ArcaController::class, 'puntosVentaAfip'])
             ->name('erp.arca.pv.sync');
         Route::get('/facturas-venta/{id}', [\App\Erp\Http\Controllers\FacturasVentaController::class, 'show'])
-            ->whereNumber('id')->name('erp.fv.show');
+            ->whereNumber('id')->name('erp.fv.show')
+            ->middleware('erp.permiso:ventas.facturas.ver');
 
         // Facturación (compra) — SPEC 03 §6.3
         // v1.22 §13 — borrado masivo de facturas de compra (super_admin).

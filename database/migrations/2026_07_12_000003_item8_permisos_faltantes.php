@@ -28,6 +28,9 @@ return new class extends Migration
         ['presupuesto.ver', 'presupuesto', 'presupuesto', 'ver', 0],
         ['cierres.dia.ajuste_retroactivo', 'cierres', 'dia', 'ajuste_retroactivo', 1],
         ['af.bienes.ver', 'af', 'bienes', 'ver', 0],
+        // Existen en prod pero no en entornos con catálogo viejo (drift):
+        ['contabilidad.periodos.bloquear', 'contabilidad', 'periodos', 'bloquear', 1],
+        ['contabilidad.periodos.desbloquear', 'contabilidad', 'periodos', 'desbloquear', 1],
     ];
 
     /** @var array<string, list<string>> rol => permisos (nuevos + D-8/D-9 sobre existentes) */
@@ -61,6 +64,7 @@ return new class extends Migration
             'tesoreria.saldos_iniciales.ver', 'tesoreria.saldos_iniciales.cargar',
             'tesoreria.saldos_iniciales.revertir', 'impuestos.bp.ver', 'impuestos.libro_iva.ver',
             'impuestos.iibb.aprobar', 'presupuesto.ver', 'cierres.dia.ajuste_retroactivo', 'af.bienes.ver',
+            'contabilidad.periodos.bloquear', 'contabilidad.periodos.desbloquear',
         ],
     ];
 

@@ -398,13 +398,17 @@ Route::prefix('api/erp')->group(function () {
             ->name('erp.caja.denominaciones-catalogo');
         // v1.52 — carga de saldo inicial (Cajas y Bancos).
         Route::get('/tesoreria/cargas-saldo-inicial', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'index'])
-            ->name('erp.tesoreria.cargas-saldo-inicial.index');
+            ->name('erp.tesoreria.cargas-saldo-inicial.index')
+            ->middleware('erp.permiso:tesoreria.saldos_iniciales.ver');
         Route::get('/tesoreria/cargas-saldo-inicial/cuentas-destino', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'cuentasDestino'])
-            ->name('erp.tesoreria.cargas-saldo-inicial.cuentas-destino');
+            ->name('erp.tesoreria.cargas-saldo-inicial.cuentas-destino')
+            ->middleware('erp.permiso:tesoreria.saldos_iniciales.ver');
         Route::post('/tesoreria/cargas-saldo-inicial', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'store'])
-            ->name('erp.tesoreria.cargas-saldo-inicial.store');
+            ->name('erp.tesoreria.cargas-saldo-inicial.store')
+            ->middleware(['erp.permiso:tesoreria.saldos_iniciales.cargar', 'erp.mfa.fresh']);
         Route::post('/tesoreria/cargas-saldo-inicial/{id}/revertir', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'revertir'])
-            ->whereNumber('id')->name('erp.tesoreria.cargas-saldo-inicial.revertir');
+            ->whereNumber('id')->name('erp.tesoreria.cargas-saldo-inicial.revertir')
+            ->middleware(['erp.permiso:tesoreria.saldos_iniciales.revertir', 'erp.mfa.fresh']);
         Route::get('/users-lookup', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'usersLookup'])
             ->name('erp.users-lookup');
         Route::get('/caja/operadores', [\App\Erp\Http\Controllers\CajaOperadoresController::class, 'index'])
@@ -438,32 +442,44 @@ Route::prefix('api/erp')->group(function () {
 
         // v1.42 Fase C — Inversiones
         Route::get('/inversiones', [\App\Erp\Http\Controllers\InversionesController::class, 'index'])
-            ->name('erp.inversiones.index');
+            ->name('erp.inversiones.index')
+            ->middleware('erp.permiso:inversiones.ver');
         Route::post('/inversiones', [\App\Erp\Http\Controllers\InversionesController::class, 'store'])
-            ->name('erp.inversiones.store');
+            ->name('erp.inversiones.store')
+            ->middleware('erp.permiso:inversiones.crear');
         Route::get('/inversiones/{id}', [\App\Erp\Http\Controllers\InversionesController::class, 'show'])
-            ->whereNumber('id')->name('erp.inversiones.show');
+            ->whereNumber('id')->name('erp.inversiones.show')
+            ->middleware('erp.permiso:inversiones.ver');
         Route::get('/inversiones/{id}/movimientos', [\App\Erp\Http\Controllers\InversionesController::class, 'movimientos'])
-            ->whereNumber('id')->name('erp.inversiones.movimientos');
+            ->whereNumber('id')->name('erp.inversiones.movimientos')
+            ->middleware('erp.permiso:inversiones.ver');
         Route::post('/inversiones/{id}/movimientos', [\App\Erp\Http\Controllers\InversionesController::class, 'registrarMovimiento'])
-            ->whereNumber('id')->name('erp.inversiones.movimientos.store');
+            ->whereNumber('id')->name('erp.inversiones.movimientos.store')
+            ->middleware('erp.permiso:inversiones.registrar_movimiento');
 
         // v1.42 Fase D — Préstamos
         Route::get('/prestamos', [\App\Erp\Http\Controllers\PrestamosController::class, 'index'])
-            ->name('erp.prestamos.index');
+            ->name('erp.prestamos.index')
+            ->middleware('erp.permiso:prestamos.ver');
         Route::post('/prestamos', [\App\Erp\Http\Controllers\PrestamosController::class, 'store'])
-            ->name('erp.prestamos.store');
+            ->name('erp.prestamos.store')
+            ->middleware('erp.permiso:prestamos.crear');
         // Importar plan de facilidades ARCA/AFIP desde el PDF "Mis Facilidades".
         Route::post('/prestamos/plan-afip/analizar', [\App\Erp\Http\Controllers\PrestamosController::class, 'analizarPlanAfip'])
-            ->name('erp.prestamos.plan-afip.analizar');
+            ->name('erp.prestamos.plan-afip.analizar')
+            ->middleware('erp.permiso:prestamos.crear');
         Route::post('/prestamos/plan-afip/importar', [\App\Erp\Http\Controllers\PrestamosController::class, 'importarPlanAfip'])
-            ->name('erp.prestamos.plan-afip.importar');
+            ->name('erp.prestamos.plan-afip.importar')
+            ->middleware('erp.permiso:prestamos.crear');
         Route::get('/prestamos/{id}', [\App\Erp\Http\Controllers\PrestamosController::class, 'show'])
-            ->whereNumber('id')->name('erp.prestamos.show');
+            ->whereNumber('id')->name('erp.prestamos.show')
+            ->middleware('erp.permiso:prestamos.ver');
         Route::post('/prestamos/{id}/cuotas/{cuotaId}/pagar', [\App\Erp\Http\Controllers\PrestamosController::class, 'pagarCuota'])
-            ->whereNumber('id')->whereNumber('cuotaId')->name('erp.prestamos.pagar');
+            ->whereNumber('id')->whereNumber('cuotaId')->name('erp.prestamos.pagar')
+            ->middleware('erp.permiso:prestamos.registrar_pago_cuota');
         Route::post('/prestamos/{id}/cancelar', [\App\Erp\Http\Controllers\PrestamosController::class, 'cancelar'])
-            ->whereNumber('id')->name('erp.prestamos.cancelar');
+            ->whereNumber('id')->name('erp.prestamos.cancelar')
+            ->middleware('erp.permiso:prestamos.cancelar');
 
         // Tesorería — transferencias internas (SPEC 02 §6.7, RN-20)
         Route::get('/transferencias-internas', [TransferenciasInternasController::class, 'index'])
@@ -990,132 +1006,182 @@ Route::prefix('api/erp')->group(function () {
         Route::prefix('impuestos')->group(function () {
             // Períodos fiscales (§6.1)
             Route::get('/periodos',  [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'index'])
-                ->name('erp.imp.periodos.index');
+                ->name('erp.imp.periodos.index')
+            ->middleware('erp.permiso:impuestos.periodo.revisar');
             Route::post('/periodos', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'store'])
-                ->name('erp.imp.periodos.store');
+                ->name('erp.imp.periodos.store')
+            ->middleware('erp.permiso:impuestos.periodo.crear');
             Route::get('/periodos/{id}', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'show'])
-                ->whereNumber('id')->name('erp.imp.periodos.show');
+                ->whereNumber('id')->name('erp.imp.periodos.show')
+            ->middleware('erp.permiso:impuestos.periodo.revisar');
             Route::patch('/periodos/{id}', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'update'])
-                ->whereNumber('id')->name('erp.imp.periodos.update');
+                ->whereNumber('id')->name('erp.imp.periodos.update')
+            ->middleware('erp.permiso:impuestos.periodo.crear');
             Route::post('/periodos/{id}/rectificativa', [\App\Erp\Http\Controllers\Impuestos\PeriodosFiscalesController::class, 'rectificar'])
-                ->whereNumber('id')->name('erp.imp.periodos.rectificar');
+                ->whereNumber('id')->name('erp.imp.periodos.rectificar')
+            ->middleware(['erp.permiso:impuestos.periodo.presentar', 'erp.mfa.fresh']);
 
             // Libro IVA Digital F.8001 (§6.2)
             Route::get('/libro-iva/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'show'])
-                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.show');
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.show')
+            ->middleware('erp.permiso:impuestos.libro_iva.ver');
             Route::post('/libro-iva/{periodo_id}/armar', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'armar'])
-                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.armar');
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.armar')
+            ->middleware('erp.permiso:impuestos.libro_iva.generar');
             Route::post('/libro-iva/{periodo_id}/validar', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'validar'])
-                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.validar');
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.validar')
+            ->middleware('erp.permiso:impuestos.libro_iva.generar');
             Route::post('/libro-iva/{periodo_id}/generar-f8001', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'generar'])
-                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.libro-iva.generar');
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.libro-iva.generar')
+            ->middleware(['erp.permiso:impuestos.libro_iva.generar', 'erp.mfa.fresh']);
             Route::get('/libro-iva/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\LibroIvaDigitalController::class, 'descargar'])
-                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.descargar');
+                ->whereNumber('periodo_id')->name('erp.imp.libro-iva.descargar')
+            ->middleware('erp.permiso:impuestos.libro_iva.ver');
 
             // DDJJ IVA F.2002 (§6.3, H2)
             Route::get('/iva/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'show'])
-                ->whereNumber('periodo_id')->name('erp.imp.iva.show');
+                ->whereNumber('periodo_id')->name('erp.imp.iva.show')
+            ->middleware('erp.permiso:impuestos.iva.ver');
             Route::post('/iva/{periodo_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'calcular'])
-                ->whereNumber('periodo_id')->name('erp.imp.iva.calcular');
+                ->whereNumber('periodo_id')->name('erp.imp.iva.calcular')
+            ->middleware('erp.permiso:impuestos.iva.generar');
             Route::post('/iva/{periodo_id}/generar-f2002', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'generar'])
-                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iva.generar');
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iva.generar')
+            ->middleware(['erp.permiso:impuestos.iva.presentar', 'erp.mfa.fresh']);
             Route::get('/iva/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'descargar'])
-                ->whereNumber('periodo_id')->name('erp.imp.iva.descargar');
+                ->whereNumber('periodo_id')->name('erp.imp.iva.descargar')
+            ->middleware('erp.permiso:impuestos.iva.ver');
             Route::post('/iva/{periodo_id}/generar-op', [\App\Erp\Http\Controllers\Impuestos\IvaDdjjController::class, 'generarOp'])
-                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iva.generar-op');
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iva.generar-op')
+            ->middleware('erp.permiso:impuestos.iva.generar');
 
             // SICORE / SIRE retenciones (§6.4, H3)
             Route::get('/sicore/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'show'])
-                ->whereNumber('periodo_id')->name('erp.imp.sicore.show');
+                ->whereNumber('periodo_id')->name('erp.imp.sicore.show')
+            ->middleware('erp.permiso:impuestos.retenciones.ver');
             Route::post('/sicore/{periodo_id}/generar', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'generar'])
-                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.generar');
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.generar')
+            ->middleware(['erp.permiso:impuestos.sicore.generar', 'erp.mfa.fresh']);
             Route::get('/sicore/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'descargar'])
-                ->whereNumber('periodo_id')->name('erp.imp.sicore.descargar');
+                ->whereNumber('periodo_id')->name('erp.imp.sicore.descargar')
+            ->middleware('erp.permiso:impuestos.retenciones.ver');
             Route::post('/sicore/aplicar/{op_id}', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'aplicarOp'])
-                ->whereNumber('op_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.aplicar');
+                ->whereNumber('op_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.aplicar')
+            ->middleware('erp.permiso:impuestos.retenciones.generar');
             Route::get('/sicore/certificados/{retencion_id}', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'certificadoHtml'])
-                ->whereNumber('retencion_id')->name('erp.imp.sicore.cert.html');
+                ->whereNumber('retencion_id')->name('erp.imp.sicore.cert.html')
+            ->middleware('erp.permiso:impuestos.retenciones.ver');
             Route::post('/sicore/certificados/{retencion_id}/anular', [\App\Erp\Http\Controllers\Impuestos\SicoreController::class, 'anularCertificado'])
-                ->whereNumber('retencion_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.cert.anular');
+                ->whereNumber('retencion_id')->middleware('erp.mfa.fresh')->name('erp.imp.sicore.cert.anular')
+            ->middleware('erp.permiso:impuestos.retenciones.generar');
 
             // IIBB Convenio Multilateral (§6.5, H4)
             Route::get('/iibb/cm/{periodo_id}', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'showCm'])
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm.show');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm.show')
+            ->middleware('erp.permiso:impuestos.iibb.ver');
             Route::post('/iibb/cm/{periodo_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'calcularCm'])
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm.calcular');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm.calcular')
+            ->middleware('erp.permiso:impuestos.iibb.generar');
             Route::post('/iibb/cm/{periodo_id}/generar-sifere', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'generarCm'])
-                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm.generar');
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm.generar')
+            ->middleware(['erp.permiso:impuestos.iibb.generar', 'erp.mfa.fresh']);
 
             // CM05 coeficientes anuales
             Route::post('/iibb/cm05/{periodo_id}/calcular-coeficientes', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'calcularCoeficientesCm05'])
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm05.calcular');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.cm05.calcular')
+            ->middleware('erp.permiso:impuestos.iibb.generar');
             Route::post('/iibb/cm05/coeficientes/{id}/ajustar', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'ajustarCoeficiente'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm05.ajustar');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm05.ajustar')
+            ->middleware('erp.permiso:impuestos.iibb.generar');
             Route::post('/iibb/cm05/{anio}/aprobar', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'aprobarCoeficientesCm05'])
-                ->whereNumber('anio')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm05.aprobar');
+                ->whereNumber('anio')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.cm05.aprobar')
+            ->middleware(['erp.permiso:impuestos.iibb.aprobar', 'erp.mfa.fresh']);
             Route::get('/iibb/cm05/{anio}/coeficientes', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'listarCoeficientes'])
-                ->whereNumber('anio')->name('erp.imp.iibb.cm05.list');
+                ->whereNumber('anio')->name('erp.imp.iibb.cm05.list')
+            ->middleware('erp.permiso:impuestos.iibb.ver');
 
             // ARCIBA (CABA)
             Route::get('/iibb/caba/{periodo_id}', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
                 app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->showLocal($periodo_id, 'IIBB_CABA', $r))
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.caba.show');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.caba.show')
+            ->middleware('erp.permiso:impuestos.iibb.ver');
             Route::post('/iibb/caba/{periodo_id}/calcular', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
                 app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->calcularLocal($periodo_id, 'IIBB_CABA', $r))
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.caba.calcular');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.caba.calcular')
+            ->middleware('erp.permiso:impuestos.iibb.generar');
             Route::post('/iibb/caba/{periodo_id}/generar', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
                 app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->generarLocal($periodo_id, 'IIBB_CABA', $r))
-                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.caba.generar');
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.caba.generar')
+            ->middleware(['erp.permiso:impuestos.iibb.generar', 'erp.mfa.fresh']);
 
             // ARBA (PBA)
             Route::get('/iibb/pba/{periodo_id}', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
                 app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->showLocal($periodo_id, 'IIBB_PBA', $r))
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.pba.show');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.pba.show')
+            ->middleware('erp.permiso:impuestos.iibb.ver');
             Route::post('/iibb/pba/{periodo_id}/calcular', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
                 app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->calcularLocal($periodo_id, 'IIBB_PBA', $r))
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.pba.calcular');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.pba.calcular')
+            ->middleware('erp.permiso:impuestos.iibb.generar');
             Route::post('/iibb/pba/{periodo_id}/generar', fn (\Illuminate\Http\Request $r, int $periodo_id) =>
                 app(\App\Erp\Http\Controllers\Impuestos\IibbController::class)->generarLocal($periodo_id, 'IIBB_PBA', $r))
-                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.pba.generar');
+                ->whereNumber('periodo_id')->middleware('erp.mfa.fresh')->name('erp.imp.iibb.pba.generar')
+            ->middleware(['erp.permiso:impuestos.iibb.generar', 'erp.mfa.fresh']);
 
             Route::get('/iibb/{periodo_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\IibbController::class, 'descargar'])
-                ->whereNumber('periodo_id')->name('erp.imp.iibb.descargar');
+                ->whereNumber('periodo_id')->name('erp.imp.iibb.descargar')
+            ->middleware('erp.permiso:impuestos.iibb.ver');
 
             // Ganancias F.713 + anticipos (§6.6, H5)
             Route::get('/ganancias/anticipos', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'listarAnticipos'])
-                ->name('erp.imp.gan.anticipos.list');
+                ->name('erp.imp.gan.anticipos.list')
+            ->middleware('erp.permiso:impuestos.ganancias.ver');
             Route::post('/ganancias/anticipos/{id}/pagar', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'pagarAnticipo'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.anticipos.pagar');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.anticipos.pagar')
+            ->middleware('erp.permiso:impuestos.ganancias.editar');
 
             Route::get('/ganancias/{ejercicio_id}', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'show'])
-                ->whereNumber('ejercicio_id')->name('erp.imp.gan.show');
+                ->whereNumber('ejercicio_id')->name('erp.imp.gan.show')
+            ->middleware('erp.permiso:impuestos.ganancias.ver');
             Route::post('/ganancias/{ejercicio_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'calcular'])
-                ->whereNumber('ejercicio_id')->name('erp.imp.gan.calcular');
+                ->whereNumber('ejercicio_id')->name('erp.imp.gan.calcular')
+            ->middleware('erp.permiso:impuestos.ganancias.generar');
             Route::post('/ganancias/{ejercicio_id}/agregar-ajuste', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'agregarAjuste'])
-                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.ajuste');
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.ajuste')
+            ->middleware('erp.permiso:impuestos.ganancias.editar');
             Route::post('/ganancias/{ejercicio_id}/generar-f713', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'generar'])
-                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.generar');
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.generar')
+            ->middleware(['erp.permiso:impuestos.ganancias.generar', 'erp.mfa.fresh']);
             Route::get('/ganancias/{ejercicio_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'descargar'])
-                ->whereNumber('ejercicio_id')->name('erp.imp.gan.descargar');
+                ->whereNumber('ejercicio_id')->name('erp.imp.gan.descargar')
+            ->middleware('erp.permiso:impuestos.ganancias.ver');
             Route::post('/ganancias/{ejercicio_id}/generar-anticipos', [\App\Erp\Http\Controllers\Impuestos\GananciasController::class, 'generarAnticipos'])
-                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.generar-anticipos');
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.gan.generar-anticipos')
+            ->middleware('erp.permiso:impuestos.ganancias.generar');
 
             // BP F.2000 + CRUD socios (§6.7, H6)
             Route::get('/bp/socios', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'listSocios'])
-                ->name('erp.imp.bp.socios.list');
+                ->name('erp.imp.bp.socios.list')
+            ->middleware('erp.permiso:impuestos.bp.ver');
             Route::post('/bp/socios', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'storeSocio'])
-                ->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.store');
+                ->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.store')
+            ->middleware('erp.permiso:impuestos.bp.generar');
             Route::patch('/bp/socios/{id}', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'updateSocio'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.update');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.update')
+            ->middleware('erp.permiso:impuestos.bp.generar');
             Route::delete('/bp/socios/{id}', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'destroySocio'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.destroy');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.socios.destroy')
+            ->middleware('erp.permiso:impuestos.bp.generar');
 
             Route::get('/bp/{ejercicio_id}', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'show'])
-                ->whereNumber('ejercicio_id')->name('erp.imp.bp.show');
+                ->whereNumber('ejercicio_id')->name('erp.imp.bp.show')
+            ->middleware('erp.permiso:impuestos.bp.ver');
             Route::post('/bp/{ejercicio_id}/calcular', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'calcular'])
-                ->whereNumber('ejercicio_id')->name('erp.imp.bp.calcular');
+                ->whereNumber('ejercicio_id')->name('erp.imp.bp.calcular')
+            ->middleware('erp.permiso:impuestos.bp.generar');
             Route::post('/bp/{ejercicio_id}/generar-f2000', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'generar'])
-                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.generar');
+                ->whereNumber('ejercicio_id')->middleware('erp.mfa.fresh')->name('erp.imp.bp.generar')
+            ->middleware(['erp.permiso:impuestos.bp.generar', 'erp.mfa.fresh']);
             Route::get('/bp/{ejercicio_id}/descargar', [\App\Erp\Http\Controllers\Impuestos\BpController::class, 'descargar'])
                 ->whereNumber('ejercicio_id')->name('erp.imp.bp.descargar');
         });
@@ -1169,62 +1235,86 @@ Route::prefix('api/erp')->group(function () {
         Route::prefix('af')->group(function () {
             // Categorías
             Route::get('/categorias',       [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'index'])
-                ->name('erp.af.cats.index');
+                ->name('erp.af.cats.index')
+                ->middleware('erp.permiso:af.bienes.ver');
             Route::post('/categorias',      [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.af.cats.store');
+                ->middleware('erp.mfa.fresh')->name('erp.af.cats.store')
+                ->middleware('erp.permiso:af.categorias.gestionar');
             Route::get('/categorias/{id}',  [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'show'])
-                ->whereNumber('id')->name('erp.af.cats.show');
+                ->whereNumber('id')->name('erp.af.cats.show')
+                ->middleware('erp.permiso:af.bienes.ver');
             Route::put('/categorias/{id}',  [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'update'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.cats.update');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.cats.update')
+                ->middleware('erp.permiso:af.categorias.gestionar');
             Route::delete('/categorias/{id}', [\App\Erp\Http\Controllers\Af\AfCategoriasController::class, 'destroy'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.cats.destroy');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.cats.destroy')
+                ->middleware('erp.permiso:af.categorias.gestionar');
 
             // Bienes
             Route::get('/bienes',           [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'index'])
-                ->name('erp.af.bienes.index');
+                ->name('erp.af.bienes.index')
+                ->middleware('erp.permiso:af.bienes.ver');
             Route::post('/bienes',          [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.af.bienes.store');
+                ->middleware('erp.mfa.fresh')->name('erp.af.bienes.store')
+                ->middleware('erp.permiso:af.bienes.crear');
             Route::post('/bienes/activar-desde-factura', [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'activarDesdeFactura'])
-                ->middleware('erp.mfa.fresh')->name('erp.af.bienes.activar');
+                ->middleware('erp.mfa.fresh')->name('erp.af.bienes.activar')
+                ->middleware('erp.permiso:af.bienes.crear');
             Route::get('/bienes/{id}',      [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'show'])
-                ->whereNumber('id')->name('erp.af.bienes.show');
+                ->whereNumber('id')->name('erp.af.bienes.show')
+                ->middleware('erp.permiso:af.bienes.ver');
             Route::put('/bienes/{id}',      [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'update'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.update');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.update')
+                ->middleware('erp.permiso:af.bienes.editar');
             Route::get('/bienes/{id}/movimientos', [\App\Erp\Http\Controllers\Af\AfBienesController::class, 'movimientos'])
-                ->whereNumber('id')->name('erp.af.bienes.movimientos');
+                ->whereNumber('id')->name('erp.af.bienes.movimientos')
+                ->middleware('erp.permiso:af.bienes.ver');
 
             // I2: Amortizaciones + movimientos contables (mejora/revalúo/baja)
             Route::post('/amortizaciones/generar', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'generar'])
-                ->middleware('erp.mfa.fresh')->name('erp.af.amort.generar');
+                ->middleware('erp.mfa.fresh')->name('erp.af.amort.generar')
+                ->middleware('erp.permiso:af.amortizaciones.generar');
             Route::get('/amortizaciones', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'listar'])
-                ->name('erp.af.amort.listar');
+                ->name('erp.af.amort.listar')
+                ->middleware('erp.permiso:af.reportes.ver');
             Route::get('/bienes/{id}/amortizaciones', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'porBien'])
-                ->whereNumber('id')->name('erp.af.bienes.amort');
+                ->whereNumber('id')->name('erp.af.bienes.amort')
+                ->middleware('erp.permiso:af.reportes.ver');
 
             Route::post('/bienes/{id}/mejora', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'mejora'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.mejora');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.mejora')
+                ->middleware('erp.permiso:af.bienes.mejora');
             Route::post('/bienes/{id}/revaluo', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'revaluo'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.revaluo');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.revaluo')
+                ->middleware('erp.permiso:af.bienes.mejora');
             Route::post('/bienes/{id}/baja', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'baja'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.baja');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.bienes.baja')
+                ->middleware('erp.permiso:af.bienes.baja');
 
             Route::post('/movimientos/{id}/vincular-asiento', [\App\Erp\Http\Controllers\Af\AfAmortizacionesController::class, 'vincularAsiento'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.movs.vincular');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.af.movs.vincular')
+                ->middleware('erp.permiso:af.bienes.editar');
 
             // I3: Reportes + reexpresión RT 6
             Route::get('/reportes/listado',          [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'listado'])
-                ->name('erp.af.rep.listado');
+                ->name('erp.af.rep.listado')
+                ->middleware('erp.permiso:af.reportes.ver');
             Route::get('/reportes/anexo-bienes-uso', [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'anexoBienesUso'])
-                ->name('erp.af.rep.anexo');
+                ->name('erp.af.rep.anexo')
+                ->middleware('erp.permiso:af.reportes.ver');
             Route::get('/reportes/altas-bajas',      [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'altasBajas'])
-                ->name('erp.af.rep.altasbajas');
+                ->name('erp.af.rep.altasbajas')
+                ->middleware('erp.permiso:af.reportes.ver');
             Route::get('/reportes/amortizaciones',   [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'amortContVsFiscal'])
-                ->name('erp.af.rep.amort');
+                ->name('erp.af.rep.amort')
+                ->middleware('erp.permiso:af.reportes.ver');
 
             Route::post('/reexpresiones/generar',    [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'generarReexpresion'])
-                ->middleware('erp.mfa.fresh')->name('erp.af.reexp.generar');
+                ->middleware('erp.mfa.fresh')->name('erp.af.reexp.generar')
+                ->middleware('erp.permiso:af.reexpresion.generar');
             Route::get('/reexpresiones',             [\App\Erp\Http\Controllers\Af\AfReportesController::class, 'listarReexpresiones'])
-                ->name('erp.af.reexp.list');
+                ->name('erp.af.reexp.list')
+                ->middleware('erp.permiso:af.reportes.ver');
         });
 
         // ====================================================================
@@ -1232,33 +1322,46 @@ Route::prefix('api/erp')->group(function () {
         // ====================================================================
         Route::prefix('presupuestos')->group(function () {
             Route::get('/',         [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'index'])
-                ->name('erp.presup.index');
+                ->name('erp.presup.index')
+                ->middleware('erp.permiso:presupuesto.ver');
             Route::post('/',        [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'store'])
-                ->middleware('erp.mfa.fresh')->name('erp.presup.store');
+                ->middleware('erp.mfa.fresh')->name('erp.presup.store')
+                ->middleware('erp.permiso:presupuesto.crear');
             Route::get('/{id}',     [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'show'])
-                ->whereNumber('id')->name('erp.presup.show');
+                ->whereNumber('id')->name('erp.presup.show')
+                ->middleware('erp.permiso:presupuesto.ver');
             Route::put('/{id}',     [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'update'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.update');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.update')
+                ->middleware('erp.permiso:presupuesto.editar');
             Route::post('/{id}/aprobar',    [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'aprobar'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.aprobar');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.aprobar')
+                ->middleware('erp.permiso:presupuesto.aprobar');
             Route::post('/{id}/vigente',    [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'vigente'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.vigente');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.vigente')
+                ->middleware('erp.permiso:presupuesto.aprobar');
             Route::post('/{id}/descartar',  [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'descartar'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.descartar');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.descartar')
+                ->middleware('erp.permiso:presupuesto.descartar');
             Route::post('/{id}/reforecast', [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'reforecast'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.reforecast');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.reforecast')
+                ->middleware('erp.permiso:presupuesto.editar');
 
             Route::post('/{id}/items',         [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'bulkItems'])
-                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.items.bulk');
+                ->whereNumber('id')->middleware('erp.mfa.fresh')->name('erp.presup.items.bulk')
+                ->middleware('erp.permiso:presupuesto.editar');
             Route::get('/{id}/items',          [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'listItems'])
-                ->whereNumber('id')->name('erp.presup.items.list');
+                ->whereNumber('id')->name('erp.presup.items.list')
+                ->middleware('erp.permiso:presupuesto.ver');
             Route::delete('/{id}/items/{itemId}', [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'deleteItem'])
-                ->whereNumber('id')->whereNumber('itemId')->middleware('erp.mfa.fresh')->name('erp.presup.items.del');
+                ->whereNumber('id')->whereNumber('itemId')->middleware('erp.mfa.fresh')->name('erp.presup.items.del')
+                ->middleware('erp.permiso:presupuesto.editar');
 
             Route::get('/{id}/variaciones',          [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'variaciones'])
-                ->whereNumber('id')->name('erp.presup.variaciones');
+                ->whereNumber('id')->name('erp.presup.variaciones')
+                ->middleware('erp.permiso:presupuesto.variaciones.ver');
             Route::get('/{id}/variaciones/resumen',  [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'variacionesResumen'])
-                ->whereNumber('id')->name('erp.presup.variaciones.resumen');
+                ->whereNumber('id')->name('erp.presup.variaciones.resumen')
+                ->middleware('erp.permiso:presupuesto.variaciones.ver');
             Route::get('/{id}/ejecucion',            [\App\Erp\Http\Controllers\Presupuesto\PresupuestosController::class, 'ejecucion'])
                 ->whereNumber('id')->name('erp.presup.ejecucion');
         });
@@ -1410,19 +1513,26 @@ Route::prefix('api/erp')->group(function () {
         // ====================================================================
         Route::prefix('cierres-diarios')->group(function () {
             Route::get('/',                              [\App\Erp\Http\Controllers\CierresDiariosController::class, 'index'])
-                ->name('erp.cierres.dia.index');
+                ->name('erp.cierres.dia.index')
+                ->middleware('erp.permiso:cierres.dia.ver');
             Route::get('/{fecha}',                       [\App\Erp\Http\Controllers\CierresDiariosController::class, 'show'])
-                ->name('erp.cierres.dia.show');
+                ->name('erp.cierres.dia.show')
+                ->middleware('erp.permiso:cierres.dia.ver');
             Route::post('/{fecha}/iniciar',              [\App\Erp\Http\Controllers\CierresDiariosController::class, 'iniciar'])
-                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.iniciar');
+                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.iniciar')
+                ->middleware('erp.permiso:cierres.dia.iniciar');
             Route::post('/{fecha}/sellar',               [\App\Erp\Http\Controllers\CierresDiariosController::class, 'sellar'])
-                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.sellar');
+                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.sellar')
+                ->middleware('erp.permiso:cierres.dia.sellar');
             Route::post('/{fecha}/ajuste-retroactivo',   [\App\Erp\Http\Controllers\CierresDiariosController::class, 'ajusteRetroactivo'])
-                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.ajuste');
+                ->middleware('erp.mfa.fresh')->name('erp.cierres.dia.ajuste')
+                ->middleware(['erp.permiso:cierres.dia.ajuste_retroactivo', 'erp.mfa.fresh']);
             Route::get('/{fecha}/exportar-liber',        [\App\Erp\Http\Controllers\CierresDiariosController::class, 'exportarLiber'])
-                ->name('erp.cierres.dia.export.liber');
+                ->name('erp.cierres.dia.export.liber')
+                ->middleware('erp.permiso:cierres.dia.exportar');
             Route::get('/{fecha}/exportar-pdf',          [\App\Erp\Http\Controllers\CierresDiariosController::class, 'exportarPdf'])
-                ->name('erp.cierres.dia.export.pdf');
+                ->name('erp.cierres.dia.export.pdf')
+                ->middleware('erp.permiso:cierres.dia.exportar');
         });
     });
 });

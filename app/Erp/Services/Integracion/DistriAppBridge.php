@@ -210,13 +210,14 @@ class DistriAppBridge
                 DB::table('erp_auxiliares')->where('id', $legacy->id)->update($attrs);
                 $actualizados++;
             } else {
-                DB::table('erp_auxiliares')->insert([
+                $nuevoId = DB::table('erp_auxiliares')->insertGetId([
                     'empresa_id' => $empresaId,
                     'tipo' => 'Cliente',
                     'codigo' => $codigo,
                     ...$attrs,
                     'created_at' => now(),
                 ]);
+                \App\Erp\Support\CcCliente::asegurar($nuevoId); // bug 3
                 $creados++;
             }
         }
@@ -365,6 +366,7 @@ class DistriAppBridge
                         'empresa_id' => $empresaId, 'tipo' => 'Cliente', 'codigo' => $codigo,
                         ...$auxAttrs, 'created_at' => now(),
                     ]);
+                    \App\Erp\Support\CcCliente::asegurar($auxId); // bug 3
                 }
             }
 
@@ -717,6 +719,7 @@ class DistriAppBridge
             ...$payload,
             'created_at' => now(),
         ]);
+        \App\Erp\Support\CcCliente::asegurar($id); // bug 3: no-op si no es Cliente
 
         return (object) DB::table('erp_auxiliares')->where('id', $id)->first();
     }

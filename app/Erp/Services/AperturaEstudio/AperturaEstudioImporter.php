@@ -303,6 +303,7 @@ class AperturaEstudioImporter
                     'activo' => 1,
                     'created_at' => now(), 'updated_at' => now(),
                 ]);
+                \App\Erp\Support\CcCliente::asegurar($id); // bug 3: no-op si no es Cliente
                 $this->manifest['auxiliares'][] = $id;
                 $this->stats['auxiliares_dummy']++;
                 $this->auxiliaresDummyPorTipo[$tipo] = $id;
@@ -355,6 +356,7 @@ class AperturaEstudioImporter
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+        \App\Erp\Support\CcCliente::asegurar($id); // bug 3: no-op si no es Cliente
         $this->manifest['auxiliares'][] = $id;
         return $id;
     }

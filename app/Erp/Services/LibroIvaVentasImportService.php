@@ -768,6 +768,7 @@ class LibroIvaVentasImportService
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
+                \App\Erp\Support\CcCliente::asegurar($clienteAuxId); // bug 3: insert crudo bypasea el observer
                 $clienteCreado = true;
             } elseif (! $clienteAuxId) {
                 $clienteNoMapeado = "{$docNro} (sin razón social)";

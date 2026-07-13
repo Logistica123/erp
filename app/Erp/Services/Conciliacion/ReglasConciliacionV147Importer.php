@@ -116,7 +116,7 @@ class ReglasConciliacionV147Importer
                 $this->stats['auxiliares_existentes']++;
                 continue;
             }
-            DB::table('erp_auxiliares')->insert([
+            $nuevoId = DB::table('erp_auxiliares')->insertGetId([
                 'empresa_id' => self::EMPRESA_ID,
                 'tipo' => self::TIPO_AUX[strtoupper($a['tipo'] ?? 'OTRO')] ?? 'Organismo',
                 'codigo' => $a['codigo'],
@@ -124,6 +124,7 @@ class ReglasConciliacionV147Importer
                 'activo' => 1,
                 'created_at' => now(), 'updated_at' => now(),
             ]);
+            \App\Erp\Support\CcCliente::asegurar($nuevoId); // bug 3: no-op si no es Cliente
             $this->stats['auxiliares_creados']++;
         }
     }

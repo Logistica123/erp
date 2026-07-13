@@ -121,11 +121,9 @@ class MovimientoBancarioService
                     ['cuenta_id' => $cuentaCtaBancariaId, 'debe' => 0, 'haber' => $monto, 'glosa' => $glosa ?? $mov->concepto],
                 ];
 
-            // Fallback CC CENTRAL para cualquier línea cuya cuenta exija CC y no lo tenga.
-            $ccFallbackId = DB::table('erp_centros_costo')
-                ->where('empresa_id', $cuentaBancaria->empresa_id)
-                ->where('codigo', 'CENTRAL')
-                ->value('id');
+            // Fallback CC operativo (CENTRAL→GENERAL) para cualquier línea
+            // cuya cuenta exija CC y no lo tenga (mini-tanda 2026-07-13 bug 1).
+            $ccFallbackId = \App\Erp\Models\CentroCosto::operativoId((int) $cuentaBancaria->empresa_id);
 
             foreach ($movs as &$m) {
                 if (empty($m['centro_costo_id'])) {

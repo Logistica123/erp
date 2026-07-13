@@ -30,7 +30,7 @@ use Illuminate\Support\Facades\DB;
  * Precondición: el último período (el que contiene fecha_cierre del ejercicio)
  * debe estar ABIERTO para poder insertar el asiento ahí.
  *
- * Sobre admite_cc: si alguna cuenta RP/RN requiere CC, se usa el CC 'CENTRAL'
+ * Sobre admite_cc: si alguna cuenta RP/RN requiere CC, se usa el CC operativo
  * como fallback (es una convención para el asiento de refundición, no una
  * imputación analítica real).
  */
@@ -38,7 +38,6 @@ class EjercicioService
 {
     private const CUENTA_RESULTADO_EJERCICIO = '3.3.02';
     private const DIARIO_CIERRE = 'CIE';
-    private const CC_CIERRE = 'CENTRAL';
 
     public function __construct(
         private readonly AsientoService $asientoService,
@@ -250,10 +249,9 @@ class EjercicioService
      */
     private function construirMovimientos(\Illuminate\Support\Collection $saldos, int $empresaId): array
     {
-        $ccCentralId = DB::table('erp_centros_costo')
-            ->where('empresa_id', $empresaId)
-            ->where('codigo', self::CC_CIERRE)
-            ->value('id');
+        // Mini-tanda 2026-07-13 bug 1: resolver unificado (CENTRAL→GENERAL)
+        // en lugar del código fijo CC_CIERRE='CENTRAL' que en prod no existe.
+        $ccCentralId = \App\Erp\Models\CentroCosto::operativoId($empresaId);
 
         $cuentaResultadoPn = CuentaContable::where('empresa_id', $empresaId)
             ->where('codigo', self::CUENTA_RESULTADO_EJERCICIO)

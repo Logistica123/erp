@@ -19,6 +19,27 @@ class CentroCosto extends Model
         'activo' => 'boolean',
     ];
 
+    /**
+     * CC operativo por defecto de la empresa — fallback único para las
+     * líneas de asiento sobre cuentas admite_cc sin CC explícito.
+     *
+     * Mini-tanda 2026-07-13 bug 1: 5 services buscaban 'CENTRAL', que en
+     * prod no existe (el operativo real es 'GENERAL'); v1.51 había
+     * arreglado solo ArqueoCajaService. Este resolver unifica el criterio:
+     * CENTRAL si existe (compat con entornos viejos) → GENERAL → null.
+     */
+    public static function operativoId(int $empresaId): ?int
+    {
+        $id = static::query()
+            ->where('empresa_id', $empresaId)
+            ->whereIn('codigo', ['CENTRAL', 'GENERAL'])
+            ->where('activo', 1)
+            ->orderByRaw("FIELD(codigo, 'CENTRAL', 'GENERAL')")
+            ->value('id');
+
+        return $id !== null ? (int) $id : null;
+    }
+
     public function empresa(): BelongsTo
     {
         return $this->belongsTo(Empresa::class);

@@ -357,10 +357,8 @@ class TransferenciaInternaService
      */
     private function completarCc(array $movs, int $empresaId): array
     {
-        $ccFallback = DB::table('erp_centros_costo')
-            ->where('empresa_id', $empresaId)
-            ->where('codigo', 'CENTRAL')
-            ->value('id');
+        // Mini-tanda 2026-07-13 bug 1: resolver unificado (CENTRAL→GENERAL).
+        $ccFallback = \App\Erp\Models\CentroCosto::operativoId($empresaId);
 
         foreach ($movs as &$m) {
             if (empty($m['centro_costo_id'])) {

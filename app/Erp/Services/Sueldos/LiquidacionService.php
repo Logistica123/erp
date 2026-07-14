@@ -32,8 +32,16 @@ use Illuminate\Support\Facades\DB;
  */
 class LiquidacionService
 {
-    /** Horas mensuales estándar usadas para valor_hora. */
-    private const HORAS_MES = 200.0;
+    /**
+     * G-14 (P3 Matías): valor hora = básico / divisor, divisor CONFIG
+     * (ERP_SUELDOS_DIVISOR_HORA, default 240 = (básico/30)/8 del Excel).
+     */
+    private function divisorValorHora(): float
+    {
+        $d = (float) config('erp.sueldos.divisor_valor_hora', 240);
+
+        return $d > 0 ? $d : 240.0;
+    }
 
     /** Días para básico diario. */
     private const DIAS_MES = 30.0;
@@ -125,7 +133,7 @@ class LiquidacionService
         }
 
         $basicoTotal = (float) $basicoVig->basico_total;
-        $valorHora   = $basicoTotal / self::HORAS_MES;
+        $valorHora   = $basicoTotal / $this->divisorValorHora();
         $basicoDiario = $basicoTotal / self::DIAS_MES;
 
         $items = [];

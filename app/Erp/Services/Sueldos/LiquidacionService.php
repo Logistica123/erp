@@ -132,7 +132,10 @@ class LiquidacionService
         // default del maestro SOLO en esta liquidación.
         $override = DB::table('erp_emp_liquidacion_reparto_override')
             ->where('liquidacion_id', $liq->id)->where('empleado_id', $emp->id)->first();
-        if ($override) {
+        $sumaOverride = $override
+            ? round((float) $override->porc_formal + (float) $override->porc_efectivo + (float) $override->porc_mt, 2)
+            : 0.0;
+        if ($override && abs($sumaOverride - 100.0) <= 0.01) {
             $compVig = (object) [
                 'porc_formal' => (float) $override->porc_formal,
                 'porc_efectivo' => (float) $override->porc_efectivo,
@@ -157,7 +160,16 @@ class LiquidacionService
             ->where('fecha_hasta', '>=', substr($liq->periodo, 0, 7).'-01')
             ->sum('dias_habiles');
 
-        $diasTrabajados = max(0, (int) self::DIAS_MES - $diasFaltados);
+        // G-09: base 30 con prorrateo por ingreso a mitad de mes (Excel §3.1).
+        $diasBase = (int) self::DIAS_MES;
+        if ($emp->fecha_ingreso && $emp->fecha_ingreso->format('Y-m') === $liq->periodo) {
+            $diasBase = max(0, (int) self::DIAS_MES - ((int) $emp->fecha_ingreso->format('j') - 1));
+        }
+        $diasTrabajados = max(0, $diasBase - $diasFaltados);
+        // Override manual de la grilla ("Días Trab." del Excel) gana.
+        if ($override && $override->dias_trabajados !== null) {
+            $diasTrabajados = max(0, min((int) self::DIAS_MES, (int) $override->dias_trabajados));
+        }
         if ($liq->tipo === Liquidacion::TIPO_SAC) {
             // G-02 (LCT 121-123): mitad del MEJOR básico del semestre,
             // proporcional para ingresos dentro del semestre, paga_sac.

@@ -443,9 +443,30 @@ class PagosSueldosService
 
     private function avanzarPrestamosCuotas(Liquidacion $liq): void
     {
-        // Por cada préstamo VIGENTE con cuota imputada en este período, incrementar cuotas_pagadas.
-        $prestamos = Prestamo::where('estado', Prestamo::ESTADO_VIGENTE)
-            ->where('primera_cuota_periodo', '<=', $liq->periodo)
+        // G-13 (gap analysis 2026-07-13): avanzar SOLO los préstamos cuya
+        // cuota fue imputada en ESTA liquidación. El criterio anterior
+        // (todo préstamo VIGENTE de la empresa con primera_cuota <= período)
+        // avanzaba préstamos de empleados no liquidados o otorgados después
+        // del cálculo. La fuente de verdad son los ítems PRESTAMO_CUOTA,
+        // cuya observación lleva 'Préstamo #{id}' (la escribe
+        // LiquidacionService::descuentosInternos).
+        $prestamoIds = [];
+        $observaciones = DB::table('erp_emp_liquidaciones_items as i')
+            ->join('erp_emp_conceptos as c', 'c.id', '=', 'i.concepto_id')
+            ->where('i.liquidacion_id', $liq->id)
+            ->where('c.codigo', 'PRESTAMO_CUOTA')
+            ->pluck('i.observaciones');
+        foreach ($observaciones as $obs) {
+            if (preg_match('/#(\d+)\b/u', (string) $obs, $m)) {
+                $prestamoIds[(int) $m[1]] = true;
+            }
+        }
+        if (empty($prestamoIds)) {
+            return;
+        }
+
+        $prestamos = Prestamo::whereIn('id', array_keys($prestamoIds))
+            ->where('estado', Prestamo::ESTADO_VIGENTE)
             ->whereColumn('cuotas_pagadas', '<', 'cuotas_total')
             ->get();
         foreach ($prestamos as $p) {

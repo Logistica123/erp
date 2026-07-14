@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Erp\Console\Commands\LlenarJurisdiccionRetroactivo::class,
         \App\Erp\Console\Commands\SanearCcClientesCommand::class,
         \App\Erp\Console\Commands\ReconciliarCaeHuerfanosHistoricos::class,
+        \App\Erp\Console\Commands\ImportarRosterSueldos::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([

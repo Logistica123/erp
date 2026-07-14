@@ -158,9 +158,19 @@ class LiquidacionService
             ->sum('dias_habiles');
 
         $diasTrabajados = max(0, (int) self::DIAS_MES - $diasFaltados);
-        $brutoBasico = $liq->tipo === Liquidacion::TIPO_SAC
-            ? $basicoTotal / 2  // RN-104 v1: SAC = básico/2.
-            : round($basicoTotal * $diasTrabajados / self::DIAS_MES, 2);
+        if ($liq->tipo === Liquidacion::TIPO_SAC) {
+            // G-02 (LCT 121-123): mitad del MEJOR básico del semestre,
+            // proporcional para ingresos dentro del semestre, paga_sac.
+            if (! $emp->paga_sac) {
+                return [];
+            }
+            $brutoBasico = $this->sacBruto($emp, $liq);
+            if ($brutoBasico <= 0) {
+                return [];
+            }
+        } else {
+            $brutoBasico = round($basicoTotal * $diasTrabajados / self::DIAS_MES, 2);
+        }
 
         $codBasico = $liq->tipo === Liquidacion::TIPO_SAC ? 'SAC' : 'BASICO';
         $items = array_merge($items, $this->descomponer(
@@ -510,5 +520,52 @@ class LiquidacionService
                 .'. Revisar cuotas de préstamo/descuentos o pausar el préstamo.'
             );
         }
+    }
+
+    /**
+     * G-02 — SAC según LCT art. 121-123: mitad de la mejor remuneración
+     * mensual devengada del semestre calendario. Se toma el básico
+     * vigente al fin de cada mes del semestre (hasta el mes del período
+     * SAC), acotado a los últimos N meses según config SAC_MESES (6
+     * default; 3 si Sebastián pide replicar el Excel). Ingresos dentro
+     * del semestre: proporcional (mejor/2 × meses_trabajados/6).
+     */
+    private function sacBruto(Empleado $emp, Liquidacion $liq): float
+    {
+        [$anio, $mes] = array_map('intval', explode('-', $liq->periodo));
+        $mesesSemestre = $mes <= 6 ? range(1, 6) : range(7, 12);
+        // Meses del semestre transcurridos hasta el período del SAC.
+        $meses = array_values(array_filter($mesesSemestre, fn ($m) => $m <= $mes));
+        // Ventana config: los últimos N (para el modo "3 meses" del Excel).
+        $ventana = max(1, (int) config('erp.sueldos.sac_meses_calculo', 6));
+        $meses = array_slice($meses, -$ventana);
+
+        $mejor = 0.0;
+        $trabajados = 0;
+        foreach ($meses as $m) {
+            $finMes = sprintf('%04d-%02d-%02d', $anio, $m, (int) date('t', strtotime(sprintf('%04d-%02d-01', $anio, $m))));
+            $inicioMes = sprintf('%04d-%02d-01', $anio, $m);
+            if ($emp->fecha_ingreso && $emp->fecha_ingreso->toDateString() > $finMes) {
+                continue;
+            }
+            if ($emp->fecha_egreso && $emp->fecha_egreso->toDateString() < $inicioMes) {
+                continue;
+            }
+            $trabajados++;
+            $basico = $this->basicoVigente($emp->id, $finMes);
+            if ($basico) {
+                $mejor = max($mejor, (float) $basico->basico_total);
+            }
+        }
+
+        if ($mejor <= 0 || $trabajados === 0) {
+            return 0.0;
+        }
+
+        // Proporcionalidad sobre el semestre COMPLETO (6 meses), aunque la
+        // ventana de cálculo sea menor.
+        $proporcion = min(1.0, $trabajados / count($mesesSemestre));
+
+        return round(($mejor / 2) * $proporcion, 2);
     }
 }

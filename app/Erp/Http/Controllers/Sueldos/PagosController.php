@@ -134,4 +134,12 @@ class PagosController extends Controller
         $code = explode(':', $e->getMessage(), 2)[0];
         return response()->json(['ok' => false, 'error' => ['code' => $code, 'message' => $e->getMessage()]], 409);
     }
+
+    /** G-01 — GET efectivo-a-preparar: billetes a llevar antes de pagar. */
+    public function efectivoAPreparar(int $id, Request $request): JsonResponse
+    {
+        $liq = Liquidacion::findOrFail($id);
+
+        return response()->json(['ok' => true, 'data' => $this->service->efectivoAPreparar($liq)]);
+    }
 }

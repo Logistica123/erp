@@ -234,7 +234,7 @@ class PagosSueldosService
         $cuentaSueldosPagarId = $this->cuentaPorCodigo('2.1.5.10');
 
         $byEmpleado = collect($receptores)->keyBy('empleado_id');
-        $resultado = ['pagos' => []];
+        $resultado = ['pagos' => [], 'efectivo' => []];
 
         DB::transaction(function () use ($liq, $netos, $caja, $cuentaSueldosPagarId, $fecha, $byEmpleado, $userId, &$resultado) {
             foreach ($netos as $empId => $componentes) {
@@ -250,17 +250,26 @@ class PagosSueldosService
                 $emp = Empleado::find($empId);
                 if (! $emp) continue;
 
-                $asiento = $this->crearAsientoPago(
+                // G-01: los billetes se entregan redondeados hacia arriba
+                // (CEILING del Excel); la diferencia se contabiliza aparte.
+                [$entregado, $difRedondeo] = $this->redondearEfectivo($importe);
+
+                $asiento = $this->crearAsientoPagoEfectivo(
                     fecha: $fecha,
                     glosa: 'Pago EFECTIVO sueldo '.$liq->periodo.' '.$emp->apellido.', '.$emp->nombre,
                     cuentaDebeId: $cuentaSueldosPagarId,
                     cuentaHaberId: (int) $caja->cuenta_contable_id,
-                    importe: $importe,
+                    neto: $importe,
+                    difRedondeo: $difRedondeo,
                     auxiliarId: $this->auxiliarEmpleado($emp)->id,
                     userId: $userId,
-                    origenTabla: 'erp_emp_pagos',
-                    origenId: 0,
                 );
+                $resultado['efectivo'][] = [
+                    'empleado_id' => $emp->id,
+                    'neto' => $importe,
+                    'entregado' => $entregado,
+                    'diferencia_redondeo' => $difRedondeo,
+                ];
 
                 $pago = Pago::create([
                     'liquidacion_id'  => $liq->id,
@@ -272,7 +281,8 @@ class PagosSueldosService
                     'recibido_por'    => $rec['recibido_por'],
                     'dni_recibio'     => $rec['dni_recibio'],
                     'asiento_id'      => $asiento->id,
-                    'observaciones'   => 'Caja '.$caja->codigo,
+                    'observaciones'   => 'Caja '.$caja->codigo
+                        .($difRedondeo > 0 ? sprintf(' — entregado $%.2f (redondeo +$%.2f)', $entregado, $difRedondeo) : ''),
                     'created_at'      => now(),
                 ]);
 
@@ -655,5 +665,111 @@ class PagosSueldosService
             ->first(['numero']);
         $n = $row ? ((int) preg_replace('/\D/', '', (string) $row->numero) + 1) : 1;
         return 'OP-'.str_pad((string) $n, 8, '0', STR_PAD_LEFT);
+    }
+
+    // ------------------------------------------------------------------
+    // G-01 — redondeo del efectivo (CEILING a múltiplos, config)
+    // ------------------------------------------------------------------
+
+    /** @return array{0: float, 1: float} [entregado, diferencia] */
+    public function redondearEfectivo(float $neto): array
+    {
+        $multiplo = (int) config('erp.sueldos.redondeo_efectivo', 500);
+        if ($multiplo <= 0 || $neto <= 0) {
+            return [round($neto, 2), 0.0];
+        }
+        $entregado = ceil(round($neto, 2) / $multiplo) * $multiplo;
+
+        return [(float) $entregado, round($entregado - $neto, 2)];
+    }
+
+    /**
+     * Asiento del pago en efectivo: D Sueldos a pagar (neto, auxiliar del
+     * empleado) + D cuenta de diferencia (redondeo, si hay) / H caja por
+     * el total ENTREGADO en billetes.
+     */
+    private function crearAsientoPagoEfectivo(
+        string $fecha, string $glosa,
+        int $cuentaDebeId, int $cuentaHaberId,
+        float $neto, float $difRedondeo,
+        ?int $auxiliarId, ?int $userId
+    ): Asiento {
+        if ($difRedondeo <= 0) {
+            return $this->crearAsientoPago($fecha, $glosa, $cuentaDebeId, $cuentaHaberId, $neto, $auxiliarId, $userId, 'erp_emp_pagos', 0);
+        }
+
+        $ctaDifCodigo = (string) config('erp.sueldos.cuenta_dif_redondeo', '5.4.09');
+        $ctaDifId = $this->cuentaPorCodigo($ctaDifCodigo);
+        $entregado = round($neto + $difRedondeo, 2);
+
+        $asiento = $this->crearAsiento($fecha, $glosa, 'erp_emp_pagos', 0, $userId);
+        $ccDefaultId = $this->ccDefault();
+        $req = $this->cuentasQueRequierenCC([$cuentaDebeId, $cuentaHaberId, $ctaDifId]);
+
+        MovimientoAsiento::create([
+            'asiento_id' => $asiento->id, 'linea' => 1,
+            'cuenta_id' => $cuentaDebeId, 'auxiliar_id' => $auxiliarId,
+            'centro_costo_id' => in_array($cuentaDebeId, $req, true) ? $ccDefaultId : null,
+            'debe' => $neto, 'haber' => 0, 'moneda' => 'ARS',
+        ]);
+        MovimientoAsiento::create([
+            'asiento_id' => $asiento->id, 'linea' => 2,
+            'cuenta_id' => $ctaDifId,
+            'centro_costo_id' => in_array($ctaDifId, $req, true) ? $ccDefaultId : null,
+            'glosa' => 'Dif. redondeo efectivo sueldos',
+            'debe' => $difRedondeo, 'haber' => 0, 'moneda' => 'ARS',
+        ]);
+        MovimientoAsiento::create([
+            'asiento_id' => $asiento->id, 'linea' => 3,
+            'cuenta_id' => $cuentaHaberId,
+            'centro_costo_id' => in_array($cuentaHaberId, $req, true) ? $ccDefaultId : null,
+            'debe' => 0, 'haber' => $entregado, 'moneda' => 'ARS',
+        ]);
+
+        $asiento->update([
+            'total_debe' => $entregado, 'total_haber' => $entregado,
+            'estado' => 'CONTABILIZADO', 'fecha_contabilizacion' => now(),
+        ]);
+
+        return $asiento;
+    }
+
+    /**
+     * G-01 — "efectivo a preparar": cuánto llevar en billetes ANTES de
+     * pagar (por empleado y total), con neto, redondeo y diferencia.
+     */
+    public function efectivoAPreparar(Liquidacion $liq): array
+    {
+        $netos = $this->netosPorEmpleadoYComponente($liq);
+        $empleados = [];
+        $total = 0.0;
+        $totalDif = 0.0;
+        foreach ($netos as $empId => $componentes) {
+            $neto = round((float) ($componentes['EFECTIVO'] ?? 0), 2);
+            if ($neto <= 0) continue;
+            [$entregar, $dif] = $this->redondearEfectivo($neto);
+            $emp = Empleado::find($empId);
+            $empleados[] = [
+                'empleado_id' => $empId,
+                'legajo' => $emp?->legajo,
+                'nombre' => $emp ? ($emp->apellido.', '.$emp->nombre) : null,
+                'neto_efectivo' => $neto,
+                'a_entregar' => $entregar,
+                'diferencia_redondeo' => $dif,
+                'ya_pagado' => $this->pagoExiste($liq->id, $empId, 'EFECTIVO'),
+            ];
+            if (! $this->pagoExiste($liq->id, $empId, 'EFECTIVO')) {
+                $total += $entregar;
+                $totalDif += $dif;
+            }
+        }
+
+        return [
+            'liquidacion_id' => $liq->id,
+            'periodo' => $liq->periodo,
+            'empleados' => $empleados,
+            'total_a_preparar' => round($total, 2),
+            'total_diferencia_redondeo' => round($totalDif, 2),
+        ];
     }
 }

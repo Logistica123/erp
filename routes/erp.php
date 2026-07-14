@@ -1562,6 +1562,9 @@ Route::prefix('api/erp')->group(function () {
                 ->whereNumber('id')->middleware(['erp.permiso:sueldos.pagos.ejecutar.efectivo', 'erp.mfa.fresh'])->name('erp.sueldos.liq.pagar.efectivo');
             Route::post('/liquidaciones/{id}/pagar/mt',      [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'pagarMt'])
                 ->whereNumber('id')->middleware(['erp.permiso:sueldos.pagos.ejecutar.mt', 'erp.mfa.fresh'])->name('erp.sueldos.liq.pagar.mt');
+            // G-01: efectivo a preparar (dato sensible: montos en efectivo).
+            Route::get('/liquidaciones/{id}/efectivo-a-preparar', [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'efectivoAPreparar'])
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.efectivos.ver')->name('erp.sueldos.liq.efectivo_preparar');
             Route::get('/liquidaciones/{id}/pagos',          [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'listarPorLiquidacion'])
                 ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liq.pagos');
             Route::get('/pagos/{id}',                        [\App\Erp\Http\Controllers\Sueldos\PagosController::class, 'show'])

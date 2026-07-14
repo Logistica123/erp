@@ -1527,6 +1527,11 @@ Route::prefix('api/erp')->group(function () {
                 ->middleware(['erp.permiso:sueldos.prestamos.otorgar', 'erp.mfa.fresh'])->name('erp.sueldos.prestamos.store');
             Route::get('/prestamos/{id}',     [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'show'])
                 ->whereNumber('id')->middleware('erp.permiso:sueldos.prestamos.ver')->name('erp.sueldos.prestamos.show');
+            // G-08 (P4): pausar/reanudar préstamo.
+            Route::post('/prestamos/{id}/pausar',   [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'pausar'])
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.prestamos.otorgar')->name('erp.sueldos.prestamos.pausar');
+            Route::post('/prestamos/{id}/reanudar', [\App\Erp\Http\Controllers\Sueldos\PrestamosController::class, 'reanudar'])
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.prestamos.otorgar')->name('erp.sueldos.prestamos.reanudar');
 
             // ---- 8D: Liquidaciones (cabecera + máquina de estados) -----------
             Route::get('/liquidaciones',                          [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'index'])

@@ -31,6 +31,7 @@ class Prestamo extends Model
     public const ESTADO_CANCELADO    = 'CANCELADO';
     public const ESTADO_REFINANCIADO = 'REFINANCIADO';
     public const ESTADO_BAJA         = 'BAJA';
+    public const ESTADO_PAUSADO      = 'PAUSADO'; // G-08: congelado, no descuenta
 
     public function empleado(): BelongsTo
     {

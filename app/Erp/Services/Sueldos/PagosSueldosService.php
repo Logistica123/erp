@@ -215,7 +215,7 @@ class PagosSueldosService
                 $resultado['pagos'][] = $pago->id;
             }
 
-            $this->actualizarEstadoLiquidacion($liq);
+            $resultado['prestamos_cancelados'] = $this->actualizarEstadoLiquidacion($liq);
         });
 
         return $resultado;
@@ -282,7 +282,7 @@ class PagosSueldosService
                 $resultado['pagos'][] = $pago->id;
             }
 
-            $this->actualizarEstadoLiquidacion($liq);
+            $resultado['prestamos_cancelados'] = $this->actualizarEstadoLiquidacion($liq);
         });
 
         return $resultado;
@@ -369,7 +369,7 @@ class PagosSueldosService
                 $resultado['pagos'][] = $pago->id;
             }
 
-            $this->actualizarEstadoLiquidacion($liq);
+            $resultado['prestamos_cancelados'] = $this->actualizarEstadoLiquidacion($liq);
         });
 
         return $resultado;
@@ -409,7 +409,8 @@ class PagosSueldosService
         }
     }
 
-    private function actualizarEstadoLiquidacion(Liquidacion $liq): void
+    /** @return array<int, array{id:int, empleado_id:int, mensaje:string}> préstamos auto-cancelados (G-08: alerta al tesorero) */
+    private function actualizarEstadoLiquidacion(Liquidacion $liq): array
     {
         $netos = $this->netosPorEmpleadoYComponente($liq);
         $componentesActivos = [];
@@ -437,11 +438,15 @@ class PagosSueldosService
 
         if ($todosPagados && count($componentesActivos) > 0) {
             $liq->update(['estado' => Liquidacion::ESTADO_PAGADA, 'fecha_pago' => now()]);
-            $this->avanzarPrestamosCuotas($liq);
+
+            return $this->avanzarPrestamosCuotas($liq);
         }
+
+        return [];
     }
 
-    private function avanzarPrestamosCuotas(Liquidacion $liq): void
+    /** @return array<int, array{id:int, empleado_id:int, mensaje:string}> */
+    private function avanzarPrestamosCuotas(Liquidacion $liq): array
     {
         // G-13 (gap analysis 2026-07-13): avanzar SOLO los préstamos cuya
         // cuota fue imputada en ESTA liquidación. El criterio anterior
@@ -462,13 +467,14 @@ class PagosSueldosService
             }
         }
         if (empty($prestamoIds)) {
-            return;
+            return [];
         }
 
         $prestamos = Prestamo::whereIn('id', array_keys($prestamoIds))
             ->where('estado', Prestamo::ESTADO_VIGENTE)
             ->whereColumn('cuotas_pagadas', '<', 'cuotas_total')
             ->get();
+        $cancelados = [];
         foreach ($prestamos as $p) {
             $nuevaCuota = $p->cuotas_pagadas + 1;
             $nuevoSaldo = round((float) $p->saldo_capital - (float) $p->cuota_mensual, 2);
@@ -479,9 +485,18 @@ class PagosSueldosService
             if ($nuevaCuota >= $p->cuotas_total || $nuevoSaldo <= 0.005) {
                 $update['estado']        = Prestamo::ESTADO_CANCELADO;
                 $update['saldo_capital'] = 0;
+                // G-08: la auto-cancelación queda como default (P4) pero se
+                // INFORMA para la confirmación visual del tesorero.
+                $cancelados[] = [
+                    'id' => $p->id,
+                    'empleado_id' => $p->empleado_id,
+                    'mensaje' => "Préstamo #{$p->id} completó {$p->cuotas_total} cuotas y quedó CANCELADO.",
+                ];
             }
             $p->update($update);
         }
+
+        return $cancelados;
     }
 
     private function auxiliarEmpleado(Empleado $emp): Auxiliar

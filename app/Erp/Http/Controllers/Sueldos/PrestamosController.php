@@ -123,4 +123,52 @@ class PrestamosController extends Controller
             abort(response()->json(['ok' => false, 'error' => ['code' => 'NO_AUTORIZADO', 'message' => "Falta permiso {$codigo}"]], 403));
         }
     }
+
+    /**
+     * G-08 (P4 Matías) — pausar un préstamo VIGENTE: congela la cuota
+     * (no se descuenta ni avanza) conservando el registro.
+     */
+    public function pausar(int $id, Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'sueldos.prestamos.otorgar');
+        $data = $request->validate(['motivo' => ['required', 'string', 'min:5', 'max:300']]);
+
+        $p = Prestamo::findOrFail($id);
+        if ($p->estado !== Prestamo::ESTADO_VIGENTE) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'ESTADO_INVALIDO',
+                'message' => "Solo se pausa un préstamo VIGENTE (actual: {$p->estado}).",
+            ]], 422);
+        }
+
+        $p->update([
+            'estado' => Prestamo::ESTADO_PAUSADO,
+            'observaciones' => trim(($p->observaciones ?? '')
+                ."\n[".now()->format('Y-m-d H:i')."] PAUSADO por user #{$request->user()->id}: {$data['motivo']}"),
+        ]);
+
+        return response()->json(['ok' => true, 'data' => $p->fresh()]);
+    }
+
+    /** G-08 — reanudar un préstamo PAUSADO (vuelve a VIGENTE). */
+    public function reanudar(int $id, Request $request): JsonResponse
+    {
+        $this->mustHave($request, 'sueldos.prestamos.otorgar');
+
+        $p = Prestamo::findOrFail($id);
+        if ($p->estado !== Prestamo::ESTADO_PAUSADO) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'ESTADO_INVALIDO',
+                'message' => "Solo se reanuda un préstamo PAUSADO (actual: {$p->estado}).",
+            ]], 422);
+        }
+
+        $p->update([
+            'estado' => Prestamo::ESTADO_VIGENTE,
+            'observaciones' => trim(($p->observaciones ?? '')
+                ."\n[".now()->format('Y-m-d H:i')."] REANUDADO por user #{$request->user()->id}"),
+        ]);
+
+        return response()->json(['ok' => true, 'data' => $p->fresh()]);
+    }
 }

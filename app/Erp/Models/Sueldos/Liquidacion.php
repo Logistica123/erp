@@ -17,7 +17,7 @@ class Liquidacion extends Model
         'fecha_calculo', 'fecha_aprobacion', 'fecha_pago',
         'total_bruto', 'total_descuentos', 'total_neto',
         'total_formal', 'total_efectivo', 'total_mt',
-        'empleados_count', 'asiento_id',
+        'empleados_count', 'asiento_id', 'hash_integridad',
         'calculado_por_id', 'aprobado_por_id',
         'liquidacion_origen_id', 'observaciones',
     ];

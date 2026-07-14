@@ -95,15 +95,10 @@ class LiquidacionesController extends Controller
     {
         $this->mustHave($request, 'sueldos.liquidaciones.aprobar');
         $liq = Liquidacion::findOrFail($id);
-        if ($liq->estado !== Liquidacion::ESTADO_CALCULADA) {
-            throw new DomainException('ESTADO_INVALIDO: para aprobar la liquidación debe estar CALCULADA (actual: '.$liq->estado.')');
-        }
-        $liq->update([
-            'estado'           => Liquidacion::ESTADO_APROBADA,
-            'fecha_aprobacion' => now(),
-            'aprobado_por_id'  => $request->user()->id,
-        ]);
-        return response()->json(['ok' => true, 'data' => $liq->fresh()]);
+        // G-03: aprobar sella el snapshot con hash de integridad (service).
+        $liq = app(\App\Erp\Services\Sueldos\LiquidacionService::class)
+            ->aprobar($liq, $request->user()->id);
+        return response()->json(['ok' => true, 'data' => $liq]);
     }
 
     public function anular(int $id, Request $request): JsonResponse

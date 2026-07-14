@@ -384,4 +384,68 @@ class LiquidacionService
             ->orderByDesc('vigencia_desde')
             ->first();
     }
+
+    // ------------------------------------------------------------------
+    // G-03 (Bloque 1 Sueldos) — cierre sellado con hash de integridad
+    // ------------------------------------------------------------------
+
+    /**
+     * Aprueba la liquidación (CALCULADA → APROBADA) sellando el snapshot
+     * con SHA-256 — equivalente al .bat del Excel que congela fórmulas a
+     * valores, con verificación posterior (patrón RN-6 de asientos).
+     */
+    public function aprobar(Liquidacion $liq, int $userId): Liquidacion
+    {
+        if ($liq->estado !== Liquidacion::ESTADO_CALCULADA) {
+            throw new DomainException('ESTADO_INVALIDO: para aprobar la liquidación debe estar CALCULADA (actual: '.$liq->estado.')');
+        }
+
+        $liq->update([
+            'estado'           => Liquidacion::ESTADO_APROBADA,
+            'fecha_aprobacion' => now(),
+            'aprobado_por_id'  => $userId,
+            'hash_integridad'  => $this->hashIntegridad($liq),
+        ]);
+
+        return $liq->fresh();
+    }
+
+    /** Recalcula el hash del snapshot y lo compara con el sellado. */
+    public function verificarIntegridad(Liquidacion $liq): bool
+    {
+        if (! $liq->hash_integridad) {
+            return false;
+        }
+
+        return hash_equals($liq->hash_integridad, $this->hashIntegridad($liq));
+    }
+
+    /**
+     * SHA-256 canónico del snapshot: cabecera (período, tipo, totales) +
+     * TODOS los ítems ordenados determinísticamente. Cualquier alta, baja
+     * o modificación posterior de ítems (o de totales) cambia el hash.
+     */
+    private function hashIntegridad(Liquidacion $liq): string
+    {
+        $items = LiquidacionItem::where('liquidacion_id', $liq->id)
+            ->orderBy('empleado_id')->orderBy('concepto_id')->orderBy('componente')->orderBy('id')
+            ->get(['empleado_id', 'concepto_id', 'componente', 'cantidad', 'importe', 'base_calculo']);
+
+        $payload = sprintf(
+            '%s|%s|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%d',
+            $liq->periodo, $liq->tipo,
+            (float) $liq->total_bruto, (float) $liq->total_descuentos, (float) $liq->total_neto,
+            (float) $liq->total_formal, (float) $liq->total_efectivo, (float) $liq->total_mt,
+            (int) $liq->empleados_count,
+        );
+        foreach ($items as $i) {
+            $payload .= sprintf(
+                '||%d|%d|%s|%.2f|%.2f|%.2f',
+                $i->empleado_id, $i->concepto_id, $i->componente,
+                (float) $i->cantidad, (float) $i->importe, (float) $i->base_calculo,
+            );
+        }
+
+        return hash('sha256', $payload);
+    }
 }

@@ -209,4 +209,68 @@ class LiquidacionesController extends Controller
         $code = explode(':', $e->getMessage(), 2)[0];
         return response()->json(['ok' => false, 'error' => ['code' => $code, 'message' => $e->getMessage()]], 409);
     }
+
+    /**
+     * G-07 (P1) — guardar el override de reparto FORMAL/EFECTIVO/MT de un
+     * empleado para ESTA liquidación (no toca el maestro) y recalcular.
+     */
+    public function repartoGuardar(int $id, int $empleadoId, Request $request): JsonResponse
+    {
+        $liq = Liquidacion::findOrFail($id);
+        if (! in_array($liq->estado, [Liquidacion::ESTADO_BORRADOR, Liquidacion::ESTADO_CALCULADA], true)) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'LIQUIDACION_CERRADA',
+                'message' => "El reparto solo se edita en BORRADOR/CALCULADA (actual: {$liq->estado}).",
+            ]], 422);
+        }
+
+        $data = $request->validate([
+            'porc_formal' => ['required', 'numeric', 'min:0', 'max:100'],
+            'porc_efectivo' => ['required', 'numeric', 'min:0', 'max:100'],
+            'porc_mt' => ['required', 'numeric', 'min:0', 'max:100'],
+            'observaciones' => ['nullable', 'string', 'max:300'],
+        ]);
+        $suma = round($data['porc_formal'] + $data['porc_efectivo'] + $data['porc_mt'], 2);
+        if (abs($suma - 100.0) > 0.01) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'REPARTO_NO_SUMA_100',
+                'message' => "Los porcentajes deben sumar 100 (suman {$suma}).",
+            ]], 422);
+        }
+
+        DB::table('erp_emp_liquidacion_reparto_override')->updateOrInsert(
+            ['liquidacion_id' => $liq->id, 'empleado_id' => $empleadoId],
+            [
+                'porc_formal' => $data['porc_formal'], 'porc_efectivo' => $data['porc_efectivo'],
+                'porc_mt' => $data['porc_mt'], 'observaciones' => $data['observaciones'] ?? null,
+                'creado_por_id' => $request->user()->id, 'updated_at' => now(), 'created_at' => now(),
+            ]
+        );
+
+        // Recalcular para que el reparto quede aplicado de inmediato.
+        $liq = app(\App\Erp\Services\Sueldos\LiquidacionService::class)
+            ->calcular($liq->fresh(), $request->user()->id);
+
+        return response()->json(['ok' => true, 'data' => $liq]);
+    }
+
+    /** G-07 — quitar el override (vuelve al default del maestro) y recalcular. */
+    public function repartoQuitar(int $id, int $empleadoId, Request $request): JsonResponse
+    {
+        $liq = Liquidacion::findOrFail($id);
+        if (! in_array($liq->estado, [Liquidacion::ESTADO_BORRADOR, Liquidacion::ESTADO_CALCULADA], true)) {
+            return response()->json(['ok' => false, 'error' => [
+                'code' => 'LIQUIDACION_CERRADA',
+                'message' => "El reparto solo se edita en BORRADOR/CALCULADA (actual: {$liq->estado}).",
+            ]], 422);
+        }
+
+        DB::table('erp_emp_liquidacion_reparto_override')
+            ->where('liquidacion_id', $liq->id)->where('empleado_id', $empleadoId)->delete();
+
+        $liq = app(\App\Erp\Services\Sueldos\LiquidacionService::class)
+            ->calcular($liq->fresh(), $request->user()->id);
+
+        return response()->json(['ok' => true, 'data' => $liq]);
+    }
 }

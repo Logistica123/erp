@@ -1543,6 +1543,11 @@ Route::prefix('api/erp')->group(function () {
                 ->middleware(['erp.permiso:sueldos.liquidaciones.calcular', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.store');
             Route::get('/liquidaciones/{id}',                     [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'show'])
                 ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liquidaciones.show');
+            // G-07 (P1): override de reparto por empleado en la liquidación.
+            Route::put('/liquidaciones/{id}/reparto/{empleadoId}',    [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'repartoGuardar'])
+                ->whereNumber('id')->whereNumber('empleadoId')->middleware('erp.permiso:sueldos.liquidaciones.calcular')->name('erp.sueldos.liq.reparto.guardar');
+            Route::delete('/liquidaciones/{id}/reparto/{empleadoId}', [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'repartoQuitar'])
+                ->whereNumber('id')->whereNumber('empleadoId')->middleware('erp.permiso:sueldos.liquidaciones.calcular')->name('erp.sueldos.liq.reparto.quitar');
             Route::post('/liquidaciones/{id}/calcular',           [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'calcular'])
                 ->whereNumber('id')->middleware(['erp.permiso:sueldos.liquidaciones.calcular', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.calcular');
             Route::post('/liquidaciones/{id}/aprobar',            [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'aprobar'])

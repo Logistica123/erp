@@ -128,6 +128,17 @@ class LiquidacionService
             return [];
         }
         $compVig = $this->composicionVigente($emp->id, $cierre);
+        // G-07 (P1): el override por (liquidación, empleado) pisa el
+        // default del maestro SOLO en esta liquidación.
+        $override = DB::table('erp_emp_liquidacion_reparto_override')
+            ->where('liquidacion_id', $liq->id)->where('empleado_id', $emp->id)->first();
+        if ($override) {
+            $compVig = (object) [
+                'porc_formal' => (float) $override->porc_formal,
+                'porc_efectivo' => (float) $override->porc_efectivo,
+                'porc_mt' => (float) $override->porc_mt,
+            ];
+        }
         if (! $compVig) {
             return [];
         }

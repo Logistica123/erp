@@ -1029,11 +1029,14 @@ Route::prefix('api/erp')->group(function () {
         // v1.54 — acciones de facturas sincronizadas desde DistriApp.
         Route::get('/facturas-compra/{id}/preview-autorizacion', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'previewAutorizacion'])
             ->whereNumber('id')->name('erp.facturas-compra.preview-autorizacion');
+        // Item 8 D-6 (2026-07-13): autorizar contabiliza → solo contador/SA;
+        // admin_compras puede desautorizar/borrar (revisión), no autorizar.
         Route::post('/facturas-compra/{id}/autorizar', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'autorizar'])
-            ->whereNumber('id')->name('erp.facturas-compra.autorizar');
+            ->whereNumber('id')->middleware('erp.permiso:compras.facturas.autorizar')->name('erp.facturas-compra.autorizar');
         Route::post('/facturas-compra/{id}/desautorizar', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'desautorizar'])
-            ->whereNumber('id')->name('erp.facturas-compra.desautorizar');
+            ->whereNumber('id')->middleware('erp.permiso:compras.facturas.desautorizar')->name('erp.facturas-compra.desautorizar');
         Route::delete('/facturas-compra/{id}/sync', [\App\Erp\Http\Controllers\FacturasCompraSyncController::class, 'borrar'])
+            ->middleware('erp.permiso:compras.facturas.desautorizar')
             ->whereNumber('id')->name('erp.facturas-compra.sync-borrar');
         Route::post('/facturas-compra/{id}/controlar', [\App\Erp\Http\Controllers\FacturasCompraController::class, 'controlar'])
             ->whereNumber('id')->name('erp.fc.controlar');

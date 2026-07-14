@@ -29,5 +29,9 @@ return [
         'divisor_valor_hora' => (float) env('ERP_SUELDOS_DIVISOR_HORA', 240),
         // G-02 (Bloque 2, Q-07): meses del semestre para el MAX del SAC.
         'sac_meses_calculo' => (int) env('ERP_SUELDOS_SAC_MESES', 6),
+        // Camino A (P2): el ERP liquida bolsillo — los descuentos legales
+        // del empleado (JUB/OS/19032/sindicato) los calcula LIBER, NO el
+        // ERP. true = Camino B futuro (reemplazo total de LIBER).
+        'aplicar_descuentos_legales' => (bool) env('ERP_SUELDOS_DESCUENTOS_LEGALES', false),
     ],
 ];

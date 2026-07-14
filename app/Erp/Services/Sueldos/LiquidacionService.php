@@ -225,7 +225,10 @@ class LiquidacionService
         }
 
         // Descuentos legales — sólo sobre FORMAL, sólo para no-monotributistas.
-        if ($emp->regimen !== Empleado::REGIMEN_MONOTRIBUTISTA && $brutoFormal > 0) {
+        // Camino A (P2, Bloque 2): por default NO se aplican — el recibo
+        // formal AFIP lo liquida LIBER; el ERP refleja bolsillo.
+        if (config('erp.sueldos.aplicar_descuentos_legales', false)
+            && $emp->regimen !== Empleado::REGIMEN_MONOTRIBUTISTA && $brutoFormal > 0) {
             $legales = [
                 'JUB_11'    => 0.11,
                 'OS_3'      => 0.03,

@@ -400,6 +400,9 @@ class LiquidacionService
             throw new DomainException('ESTADO_INVALIDO: para aprobar la liquidación debe estar CALCULADA (actual: '.$liq->estado.')');
         }
 
+        // G-10 (spec §8): ningún empleado puede cerrar con neto negativo.
+        $this->validarNetosNoNegativos($liq);
+
         $liq->update([
             'estado'           => Liquidacion::ESTADO_APROBADA,
             'fecha_aprobacion' => now(),
@@ -447,5 +450,43 @@ class LiquidacionService
         }
 
         return hash('sha256', $payload);
+    }
+
+    /**
+     * G-10 — neto por empleado ≥ 0. Si algún descuento excede los haberes,
+     * error explícito con el detalle (empleado, haberes, descuentos) para
+     * que el tesorero sepa exactamente qué corregir antes de cerrar.
+     */
+    private function validarNetosNoNegativos(Liquidacion $liq): void
+    {
+        $filas = DB::table('erp_emp_liquidaciones_items as i')
+            ->join('erp_emp_conceptos as c', 'c.id', '=', 'i.concepto_id')
+            ->join('erp_emp_empleados as e', 'e.id', '=', 'i.empleado_id')
+            ->where('i.liquidacion_id', $liq->id)
+            ->groupBy('i.empleado_id', 'e.legajo')
+            ->selectRaw("e.legajo,
+                SUM(CASE WHEN c.signo = 'HABER' THEN i.importe ELSE 0 END) haberes,
+                SUM(CASE WHEN c.signo = 'DESCUENTO' THEN i.importe ELSE 0 END) descuentos")
+            ->get();
+
+        $negativos = [];
+        foreach ($filas as $f) {
+            $neto = round((float) $f->haberes - (float) $f->descuentos, 2);
+            if ($neto < -0.009) {
+                $negativos[] = sprintf('%s (haberes $%s, descuentos $%s, neto $%s)',
+                    $f->legajo,
+                    number_format((float) $f->haberes, 2, ',', '.'),
+                    number_format((float) $f->descuentos, 2, ',', '.'),
+                    number_format($neto, 2, ',', '.'));
+            }
+        }
+
+        if ($negativos) {
+            throw new DomainException(
+                'NETO_NEGATIVO: no se puede aprobar — los descuentos exceden los haberes en: '
+                .implode(' · ', $negativos)
+                .'. Revisar cuotas de préstamo/descuentos o pausar el préstamo.'
+            );
+        }
     }
 }

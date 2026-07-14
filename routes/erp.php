@@ -1543,6 +1543,11 @@ Route::prefix('api/erp')->group(function () {
                 ->middleware(['erp.permiso:sueldos.liquidaciones.calcular', 'erp.mfa.fresh'])->name('erp.sueldos.liquidaciones.store');
             Route::get('/liquidaciones/{id}',                     [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'show'])
                 ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liquidaciones.show');
+            // Bloque 3 (P8): grilla editable estilo Excel.
+            Route::get('/liquidaciones/{id}/grilla', [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'grilla'])
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.ver')->name('erp.sueldos.liq.grilla');
+            Route::put('/liquidaciones/{id}/grilla', [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'grillaGuardar'])
+                ->whereNumber('id')->middleware('erp.permiso:sueldos.liquidaciones.calcular')->name('erp.sueldos.liq.grilla.guardar');
             // G-07 (P1): override de reparto por empleado en la liquidación.
             Route::put('/liquidaciones/{id}/reparto/{empleadoId}',    [\App\Erp\Http\Controllers\Sueldos\LiquidacionesController::class, 'repartoGuardar'])
                 ->whereNumber('id')->whereNumber('empleadoId')->middleware('erp.permiso:sueldos.liquidaciones.calcular')->name('erp.sueldos.liq.reparto.guardar');

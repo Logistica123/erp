@@ -273,4 +273,33 @@ class LiquidacionesController extends Controller
 
         return response()->json(['ok' => true, 'data' => $liq]);
     }
+
+    /** Bloque 3 (P8) — grilla estilo Excel: una fila por empleado. */
+    public function grilla(int $id, Request $request): JsonResponse
+    {
+        $liq = Liquidacion::findOrFail($id);
+
+        return response()->json(['ok' => true,
+            'data' => app(\App\Erp\Services\Sueldos\GrillaSueldosService::class)->armar($liq)]);
+    }
+
+    /** Bloque 3 (P8) — guarda la grilla completa (días/reparto/valores) y recalcula. */
+    public function grillaGuardar(int $id, Request $request): JsonResponse
+    {
+        $liq = Liquidacion::findOrFail($id);
+        $data = $request->validate(['filas' => ['required', 'array', 'min:1']]);
+
+        try {
+            $grilla = app(\App\Erp\Services\Sueldos\GrillaSueldosService::class)
+                ->guardar($liq, $data['filas'], $request->user()->id);
+        } catch (DomainException $e) {
+            $code = explode(':', $e->getMessage(), 2)[0];
+
+            return response()->json(['ok' => false, 'error' => [
+                'code' => $code, 'message' => $e->getMessage(),
+            ]], 422);
+        }
+
+        return response()->json(['ok' => true, 'data' => $grilla]);
+    }
 }

@@ -162,6 +162,7 @@ export const sections: NavSection[] = [
       { to: '/erp/sueldos/ausencias', label: 'Ausencias', icon: CalendarCheck },
       { to: '/erp/sueldos/cc', label: 'CC + Préstamos', icon: Wallet },
       { to: '/erp/sueldos/liquidaciones', label: 'Liquidaciones', icon: Calculator },
+      { to: '/erp/sueldos/pagos', label: 'Pagos', icon: Wallet },
       { to: '/erp/sueldos/liber', label: 'Export LIBER', icon: FileBarChart },
       { to: '/erp/sueldos/reportes', label: 'Reportes', icon: PieChart },
     ],

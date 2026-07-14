@@ -295,7 +295,14 @@ function PrestamosTab() {
     { key: 'capital', header: 'Capital', align: 'right', width: '120px',
       render: (r) => fmtMoney(Number(r.capital)) },
     { key: 'cuotas', header: 'Cuotas', width: '110px',
-      render: (r) => `${r.cuotas_pagadas} / ${r.cuotas_total}` },
+      render: (r) => (
+        <span>
+          {r.cuotas_pagadas} / {r.cuotas_total}{' '}
+          {r.estado === 'VIGENTE' && r.cuotas_pagadas >= r.cuotas_total - 1 && (
+            <Badge variant="warning">{r.cuotas_pagadas >= r.cuotas_total ? 'CUMPLIDO — confirmar' : 'última cuota'}</Badge>
+          )}
+        </span>
+      ) },
     { key: 'cuota', header: 'Cuota mens.', align: 'right', width: '120px',
       render: (r) => fmtMoney(Number(r.cuota_mensual)) },
     { key: 'saldo', header: 'Saldo', align: 'right', width: '120px',

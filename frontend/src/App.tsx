@@ -91,6 +91,8 @@ import { NovedadesPage } from './pages/Sueldos/NovedadesPage';
 import { AusenciasPage } from './pages/Sueldos/AusenciasPage';
 import { CCPrestamosPage } from './pages/Sueldos/CCPrestamosPage';
 import { LiquidacionesPage as LiquidacionesSueldosPage } from './pages/Sueldos/LiquidacionesPage';
+import { GrillaLiquidacionPage } from './pages/Sueldos/GrillaLiquidacionPage';
+import { PagosSueldosPage } from './pages/Sueldos/PagosSueldosPage';
 import { LiberPage } from './pages/Sueldos/LiberPage';
 import { ReportesSueldosPage } from './pages/Sueldos/ReportesSueldosPage';
 import { CierresDiariosPage } from './pages/CierresDiariosPage';
@@ -244,6 +246,8 @@ export default function App() {
               <Route path="/erp/sueldos/ausencias" element={<AusenciasPage />} handle={{ crumb: 'Ausencias' }} />
               <Route path="/erp/sueldos/cc" element={<CCPrestamosPage />} handle={{ crumb: 'CC + Préstamos' }} />
               <Route path="/erp/sueldos/liquidaciones" element={<LiquidacionesSueldosPage />} handle={{ crumb: 'Liquidaciones' }} />
+              <Route path="/erp/sueldos/liquidaciones/:id/grilla" element={<GrillaLiquidacionPage />} handle={{ crumb: 'Grilla' }} />
+              <Route path="/erp/sueldos/pagos" element={<PagosSueldosPage />} handle={{ crumb: 'Pagos' }} />
               <Route path="/erp/sueldos/liber" element={<LiberPage />} handle={{ crumb: 'Export LIBER' }} />
               <Route path="/erp/sueldos/reportes" element={<ReportesSueldosPage />} handle={{ crumb: 'Reportes Sueldos' }} />
 

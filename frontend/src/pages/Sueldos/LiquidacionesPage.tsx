@@ -233,6 +233,9 @@ function Acciones({ liq, onClose }: { liq: Liquidacion; onClose: () => void }) {
   const [reciboOpen, setReciboOpen] = useState(false);
 
   const acciones: { label: string; icon: React.ReactNode; variant?: 'primary' | 'outline' | 'danger'; visible: boolean; onClick: () => void; pending: boolean }[] = [
+    { label: 'Grilla (editar estilo Excel)', icon: <Calculator className="w-3 h-3" />, variant: 'primary',
+      visible: true,
+      onClick: () => { window.location.href = `/erp/sueldos/liquidaciones/${liq.id}/grilla`; }, pending: false },
     { label: 'Calcular', icon: <Calculator className="w-3 h-3" />, variant: 'primary',
       visible: liq.estado === 'BORRADOR' || liq.estado === 'CALCULADA',
       onClick: () => calc.mutate(undefined as unknown as void), pending: calc.isPending },

@@ -1595,6 +1595,11 @@ Route::prefix('api/erp')->group(function () {
             Route::post('/exports-liber/{id}/marcar-enviado', [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'marcarEnviadoLiber'])
                 ->whereNumber('id')->middleware(['erp.permiso:sueldos.export.liber', 'erp.mfa.fresh'])->name('erp.sueldos.liber.enviado');
 
+            // G-06: dashboard + export XLSX.
+            Route::get('/reportes/dashboard', [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'dashboard'])
+                ->middleware('erp.permiso:sueldos.reportes.ver')->name('erp.sueldos.rep.dashboard');
+            Route::get('/reportes/export-xlsx', [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'exportXlsx'])
+                ->middleware('erp.permiso:sueldos.reportes.ver')->name('erp.sueldos.rep.export');
             Route::get('/reportes/liquidacion/{id}',          [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'liquidacionResumen'])
                 ->whereNumber('id')->middleware('erp.permiso:sueldos.reportes.ver')->name('erp.sueldos.rep.liquidacion');
             Route::get('/reportes/empleado/{id}/historico',   [\App\Erp\Http\Controllers\Sueldos\ReportesSueldosController::class, 'empleadoHistorico'])

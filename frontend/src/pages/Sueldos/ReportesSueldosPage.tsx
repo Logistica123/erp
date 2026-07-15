@@ -1,16 +1,17 @@
 import { useState } from 'react';
-import { PieChart, Calendar, User, Wallet } from 'lucide-react';
+import { PieChart, Calendar, User, Wallet, LayoutDashboard, Download } from 'lucide-react';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { fmtMoney, fmtDate } from '@/components/ui/DataTable';
 import { Field, FormError } from '@/components/ui/Field';
 import { useApi, errorMessage } from '@/hooks/useApi';
+import { auth } from '@/lib/auth';
 
-type Tab = 'costo' | 'historico' | 'cc';
+type Tab = 'dashboard' | 'costo' | 'historico' | 'cc';
 
 export function ReportesSueldosPage() {
-  const [tab, setTab] = useState<Tab>('costo');
+  const [tab, setTab] = useState<Tab>('dashboard');
   return (
     <div className="p-6 space-y-4">
       <Card>
@@ -19,6 +20,11 @@ export function ReportesSueldosPage() {
         } />
         <CardBody className="p-4">
           <div className="flex gap-2 border-b border-line mb-3">
+            <Button size="sm" variant="ghost"
+              className={tab === 'dashboard' ? 'border-b-2 border-azure rounded-none text-azure' : 'border-b-2 border-transparent rounded-none'}
+              onClick={() => setTab('dashboard')}>
+              <LayoutDashboard className="w-3 h-3" /> Dashboard
+            </Button>
             <Button size="sm" variant="ghost"
               className={tab === 'costo' ? 'border-b-2 border-azure rounded-none text-azure' : 'border-b-2 border-transparent rounded-none'}
               onClick={() => setTab('costo')}>
@@ -35,6 +41,7 @@ export function ReportesSueldosPage() {
               <Wallet className="w-3 h-3" /> CC empleado
             </Button>
           </div>
+          {tab === 'dashboard' && <DashboardTab />}
           {tab === 'costo' && <CostoLaboralTab />}
           {tab === 'historico' && <HistoricoTab />}
           {tab === 'cc' && <CCEmpleadoTab />}
@@ -271,6 +278,95 @@ function CCEmpleadoTab() {
           </table>
         </>
       )}
+    </div>
+  );
+}
+
+
+// ── G-06: Dashboard totales-por-mes (Excel "TOTALES POR MES") ──────────
+type DashMes = { periodo: string; tipo: string; haberes: number; descuentos: number; neto: number; formal: number; efectivo: number | null; mt: number; variacion_neto_pct: number | null };
+type DashResp = { anio: number; meses: DashMes[]; acumulado: { haberes: number; descuentos: number; neto: number; formal: number; efectivo: number | null; mt: number } };
+
+function descargarXlsx(tipo: 'dashboard' | 'costo-laboral', anio: string) {
+  const token = auth.getToken();
+  fetch(`/api/erp/sueldos/reportes/export-xlsx?anio=${anio}&tipo=${tipo}`, { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => r.blob())
+    .then((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `sueldos_${tipo}_${anio}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+}
+
+function DashboardTab() {
+  const [anio, setAnio] = useState(String(new Date().getFullYear()));
+  const { data, isLoading, error } = useApi<DashResp>(['sueldos-dashboard', anio], `/api/erp/sueldos/reportes/dashboard?anio=${anio}`);
+
+  const ultimo = data?.meses.filter((m) => m.tipo === 'MENSUAL').at(-1);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end gap-2">
+        <Field label="Año" value={anio} onChange={(e) => setAnio(e.target.value)} className="w-24" />
+        <Button size="sm" variant="outline" onClick={() => descargarXlsx('dashboard', anio)}><Download className="w-3 h-3" /> XLSX</Button>
+        <Button size="sm" variant="outline" onClick={() => descargarXlsx('costo-laboral', anio)}><Download className="w-3 h-3" /> Costo laboral XLSX</Button>
+      </div>
+      {error && <FormError error={errorMessage(error)} />}
+      {isLoading && <p className="text-sm text-slate-500">Cargando…</p>}
+
+      {ultimo && (
+        <div className="grid md:grid-cols-4 gap-3">
+          <Card><CardBody className="py-3">
+            <div className="text-[11px] uppercase text-slate-500">Neto último mes ({ultimo.periodo})</div>
+            <div className="text-lg font-semibold">{fmtMoney(ultimo.neto)}</div>
+            {ultimo.variacion_neto_pct !== null && (
+              <Badge variant={ultimo.variacion_neto_pct > 0 ? 'warning' : 'success'}>
+                {ultimo.variacion_neto_pct > 0 ? '+' : ''}{ultimo.variacion_neto_pct}% vs mes anterior
+              </Badge>
+            )}
+          </CardBody></Card>
+          <Card><CardBody className="py-3">
+            <div className="text-[11px] uppercase text-slate-500">Acumulado {anio} — Neto</div>
+            <div className="text-lg font-semibold">{data ? fmtMoney(data.acumulado.neto) : '—'}</div>
+          </CardBody></Card>
+          <Card><CardBody className="py-3">
+            <div className="text-[11px] uppercase text-slate-500">Acumulado — Formal / MT</div>
+            <div className="text-sm">{data ? `${fmtMoney(data.acumulado.formal)} / ${fmtMoney(data.acumulado.mt)}` : '—'}</div>
+          </CardBody></Card>
+          <Card><CardBody className="py-3">
+            <div className="text-[11px] uppercase text-slate-500">Acumulado — Efectivo</div>
+            <div className="text-sm">{data?.acumulado.efectivo !== null && data ? fmtMoney(data.acumulado.efectivo) : '— oculto —'}</div>
+          </CardBody></Card>
+        </div>
+      )}
+
+      <table className="text-[12px] min-w-full">
+        <thead><tr className="text-left text-[11px] uppercase text-slate-500">
+          <th className="px-2 py-1.5">Período</th><th className="px-2 py-1.5">Tipo</th>
+          <th className="px-2 py-1.5 text-right">Haberes</th><th className="px-2 py-1.5 text-right">Descuentos</th>
+          <th className="px-2 py-1.5 text-right">Neto</th><th className="px-2 py-1.5 text-right">Formal</th>
+          <th className="px-2 py-1.5 text-right">Efectivo</th><th className="px-2 py-1.5 text-right">MT</th>
+          <th className="px-2 py-1.5 text-right">Var. %</th>
+        </tr></thead>
+        <tbody>
+          {(data?.meses ?? []).map((m) => (
+            <tr key={m.periodo + m.tipo} className="border-t border-slate-100 dark:border-slate-800">
+              <td className="px-2 py-1">{m.periodo}</td>
+              <td className="px-2 py-1"><Badge variant={m.tipo === 'SAC' ? 'info' : 'default'}>{m.tipo}</Badge></td>
+              <td className="px-2 py-1 text-right">{fmtMoney(m.haberes)}</td>
+              <td className="px-2 py-1 text-right">{fmtMoney(m.descuentos)}</td>
+              <td className="px-2 py-1 text-right font-semibold">{fmtMoney(m.neto)}</td>
+              <td className="px-2 py-1 text-right">{fmtMoney(m.formal)}</td>
+              <td className="px-2 py-1 text-right">{m.efectivo !== null ? fmtMoney(m.efectivo) : '— oculto —'}</td>
+              <td className="px-2 py-1 text-right">{fmtMoney(m.mt)}</td>
+              <td className="px-2 py-1 text-right">{m.variacion_neto_pct !== null ? `${m.variacion_neto_pct}%` : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data && data.meses.length === 0 && <p className="text-sm text-slate-500">Sin liquidaciones aprobadas en {anio}.</p>}
     </div>
   );
 }

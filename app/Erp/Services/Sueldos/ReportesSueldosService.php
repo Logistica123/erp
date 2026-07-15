@@ -239,4 +239,64 @@ class ReportesSueldosService
             'cuentas'  => $rows,
         ];
     }
+
+    /**
+     * G-06 — Dashboard "TOTALES POR MES" del Excel: por cada mes del año
+     * (liquidaciones APROBADA/PAGADA), haberes, descuentos, neto y
+     * desglose por componente + variación vs mes anterior + acumulado.
+     */
+    public function dashboardAnual(int $anio, bool $verEfectivos = true): array
+    {
+        $filas = DB::table('erp_emp_liquidaciones_items as i')
+            ->join('erp_emp_conceptos as c', 'c.id', '=', 'i.concepto_id')
+            ->join('erp_emp_liquidaciones as l', 'l.id', '=', 'i.liquidacion_id')
+            ->whereIn('l.estado', ['APROBADA', 'PAGADA'])
+            ->where('l.periodo', 'like', $anio.'-%')
+            ->groupBy('l.periodo', 'l.tipo')
+            ->selectRaw("l.periodo, l.tipo,
+                SUM(CASE WHEN c.signo='HABER' THEN i.importe ELSE 0 END) haberes,
+                SUM(CASE WHEN c.signo='DESCUENTO' THEN i.importe ELSE 0 END) descuentos,
+                SUM(CASE WHEN c.signo='HABER' THEN i.importe ELSE -i.importe END) neto,
+                SUM(CASE WHEN i.componente='FORMAL'   THEN (CASE WHEN c.signo='HABER' THEN i.importe ELSE -i.importe END) ELSE 0 END) formal,
+                SUM(CASE WHEN i.componente='EFECTIVO' THEN (CASE WHEN c.signo='HABER' THEN i.importe ELSE -i.importe END) ELSE 0 END) efectivo,
+                SUM(CASE WHEN i.componente='MT'       THEN (CASE WHEN c.signo='HABER' THEN i.importe ELSE -i.importe END) ELSE 0 END) mt")
+            ->orderBy('l.periodo')
+            ->get();
+
+        $meses = [];
+        $acum = ['haberes' => 0.0, 'descuentos' => 0.0, 'neto' => 0.0, 'formal' => 0.0, 'efectivo' => 0.0, 'mt' => 0.0];
+        $netoAnterior = null;
+        foreach ($filas as $f) {
+            $fila = [
+                'periodo' => $f->periodo,
+                'tipo' => $f->tipo,
+                'haberes' => round((float) $f->haberes, 2),
+                'descuentos' => round((float) $f->descuentos, 2),
+                'neto' => round((float) $f->neto, 2),
+                'formal' => round((float) $f->formal, 2),
+                'efectivo' => $verEfectivos ? round((float) $f->efectivo, 2) : null,
+                'mt' => round((float) $f->mt, 2),
+            ];
+            // Variación vs mes anterior (solo entre MENSUALES).
+            if ($f->tipo === 'MENSUAL') {
+                $fila['variacion_neto_pct'] = ($netoAnterior !== null && $netoAnterior > 0)
+                    ? round(((float) $f->neto - $netoAnterior) / $netoAnterior * 100, 2)
+                    : null;
+                $netoAnterior = (float) $f->neto;
+            } else {
+                $fila['variacion_neto_pct'] = null;
+            }
+            foreach (['haberes', 'descuentos', 'neto', 'formal', 'mt'] as $k) {
+                $acum[$k] += (float) $fila[$k];
+            }
+            $acum['efectivo'] += (float) ($f->efectivo ?? 0);
+            $meses[] = $fila;
+        }
+
+        return [
+            'anio' => $anio,
+            'meses' => $meses,
+            'acumulado' => array_map(fn ($v) => round($v, 2), $verEfectivos ? $acum : array_merge($acum, ['efectivo' => null])),
+        ];
+    }
 }

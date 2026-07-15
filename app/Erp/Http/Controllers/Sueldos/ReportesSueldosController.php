@@ -135,4 +135,59 @@ class ReportesSueldosController extends Controller
         $code = explode(':', $e->getMessage(), 2)[0];
         return response()->json(['ok' => false, 'error' => ['code' => $code, 'message' => $e->getMessage()]], 409);
     }
+
+    /** G-06 — Dashboard totales-por-mes con comparación y acumulado anual. */
+    public function dashboard(Request $request): JsonResponse
+    {
+        $anio = (int) $request->query('anio', date('Y'));
+        $verEfectivos = $request->user()?->erpPerfil?->tienePermiso('sueldos.efectivos.ver') ?? false;
+
+        return response()->json(['ok' => true,
+            'data' => $this->reportesSvc->dashboardAnual($anio, $verEfectivos)]);
+    }
+
+    /** G-06 — Export XLSX del dashboard o del costo laboral anual. */
+    public function exportXlsx(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $anio = (int) $request->query('anio', date('Y'));
+        $tipo = (string) $request->query('tipo', 'dashboard');
+        $verEfectivos = $request->user()?->erpPerfil?->tienePermiso('sueldos.efectivos.ver') ?? false;
+
+        $sp = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $hoja = $sp->getActiveSheet();
+
+        if ($tipo === 'costo-laboral') {
+            $data = $this->reportesSvc->costoLaboralAnual($anio, $verEfectivos);
+            $hoja->setTitle('Costo laboral '.$anio);
+            $hoja->fromArray(['Legajo', 'Empleado', ...array_map(fn ($m) => sprintf('%02d/%d', $m, $anio), range(1, 12)), 'TOTAL'], null, 'A1');
+            $r = 2;
+            foreach (($data['empleados'] ?? []) as $emp) {
+                $fila = [$emp['legajo'] ?? '', $emp['nombre'] ?? ''];
+                foreach (range(1, 12) as $m) {
+                    $fila[] = $emp['meses'][$m]['total'] ?? 0;
+                }
+                $fila[] = $emp['total_anual'] ?? 0;
+                $hoja->fromArray($fila, null, 'A'.$r++);
+            }
+            $filename = "sueldos_costo_laboral_{$anio}.xlsx";
+        } else {
+            $data = $this->reportesSvc->dashboardAnual($anio, $verEfectivos);
+            $hoja->setTitle('Sueldos '.$anio);
+            $hoja->fromArray(['Período', 'Tipo', 'Haberes', 'Descuentos', 'Neto', 'Formal', 'Efectivo', 'MT', 'Var % vs mes ant.'], null, 'A1');
+            $r = 2;
+            foreach ($data['meses'] as $m) {
+                $hoja->fromArray([
+                    $m['periodo'], $m['tipo'], $m['haberes'], $m['descuentos'], $m['neto'],
+                    $m['formal'], $m['efectivo'] ?? 'oculto', $m['mt'], $m['variacion_neto_pct'],
+                ], null, 'A'.$r++);
+            }
+            $a = $data['acumulado'];
+            $hoja->fromArray(['ACUMULADO', '', $a['haberes'], $a['descuentos'], $a['neto'], $a['formal'], $a['efectivo'] ?? 'oculto', $a['mt'], ''], null, 'A'.$r);
+            $filename = "sueldos_dashboard_{$anio}.xlsx";
+        }
+
+        return response()->streamDownload(function () use ($sp) {
+            (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($sp))->save('php://output');
+        }, $filename, ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+    }
 }

@@ -271,6 +271,11 @@ class PagosSueldosService
                     'diferencia_redondeo' => $difRedondeo,
                 ];
 
+                // G-12: la caja REAL entrega los billetes — baja saldo_actual
+                // por lo entregado para que el próximo arqueo (v1.42) cierre.
+                DB::table('erp_cajas')->where('id', $caja->id)
+                    ->decrement('saldo_actual', $entregado);
+
                 $pago = Pago::create([
                     'liquidacion_id'  => $liq->id,
                     'empleado_id'     => $emp->id,

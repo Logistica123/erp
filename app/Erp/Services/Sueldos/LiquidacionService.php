@@ -114,7 +114,13 @@ class LiquidacionService
             ]);
         });
 
-        return $liq->fresh();
+        $liqF = $liq->fresh();
+        \App\Erp\Support\AuditoriaSueldos::log('LIQUIDACION_CALCULADA', sprintf(
+            'Liquidación #%d %s (%s) calculada por user #%s: %d empleados, neto $%s.',
+            $liqF->id, $liqF->periodo, $liqF->tipo, $userId ?? '?', (int) $liqF->empleados_count,
+            number_format((float) $liqF->total_neto, 2, ',', '.')));
+
+        return $liqF;
     }
 
     /**
@@ -453,6 +459,10 @@ class LiquidacionService
             'aprobado_por_id'  => $userId,
             'hash_integridad'  => $this->hashIntegridad($liq),
         ]);
+
+        \App\Erp\Support\AuditoriaSueldos::log('LIQUIDACION_APROBADA', sprintf(
+            'Liquidación #%d %s aprobada por user #%d — snapshot sellado (hash %s…).',
+            $liq->id, $liq->periodo, $userId, substr((string) $liq->fresh()->hash_integridad, 0, 12)));
 
         return $liq->fresh();
     }

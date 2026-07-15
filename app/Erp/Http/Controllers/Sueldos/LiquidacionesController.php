@@ -60,6 +60,10 @@ class LiquidacionesController extends Controller
             'estado'  => Liquidacion::ESTADO_BORRADOR,
             'observaciones' => $datos['observaciones'] ?? null,
         ]);
+
+        \App\Erp\Support\AuditoriaSueldos::log('LIQUIDACION_CREADA', sprintf(
+            'Liquidación #%d %s (%s) creada por user #%d.',
+            $liq->id, $liq->periodo, $liq->tipo, $request->user()->id));
         return response()->json(['ok' => true, 'data' => $liq], 201);
     }
 
@@ -119,6 +123,10 @@ class LiquidacionesController extends Controller
                 'empleados_count' => 0,
             ]);
         });
+        \App\Erp\Support\AuditoriaSueldos::log('LIQUIDACION_ANULADA', sprintf(
+            'Liquidación #%d anulada por user #%d. Motivo: %s',
+            $id, $request->user()->id, $datos['motivo'] ?? '-'));
+
         return response()->json(['ok' => true, 'data' => $liq->fresh()]);
     }
 
@@ -141,6 +149,10 @@ class LiquidacionesController extends Controller
                 'observaciones'         => 'Rectificativa de #'.$original->id.' — '.$datos['motivo'],
             ]);
         });
+
+        \App\Erp\Support\AuditoriaSueldos::log('LIQUIDACION_RECTIFICADA', sprintf(
+            'Liquidación #%d marcada RECTIFICADA por user #%d (nueva liquidación AJUSTE encadenada).',
+            $id, $request->user()->id));
 
         return response()->json(['ok' => true, 'data' => $nueva], 201);
     }

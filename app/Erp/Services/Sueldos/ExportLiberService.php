@@ -137,6 +137,10 @@ class ExportLiberService
             ->where('componente', LiquidacionItem::COMPONENTE_FORMAL)
             ->distinct('empleado_id')->count('empleado_id');
 
+        \App\Erp\Support\AuditoriaSueldos::log('EXPORT_LIBER_GENERADO', sprintf(
+            'Export LIBER de liquidación #%d %s generado (hash %s…).',
+            $liq->id, $liq->periodo, substr($hash, 0, 12)));
+
         return ExportLiber::create([
             'liquidacion_id'  => $liq->id,
             'periodo'         => $liq->periodo,

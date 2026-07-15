@@ -134,6 +134,10 @@ class PagosSueldosService
 
             $liq->update(['asiento_id' => $asiento->id]);
 
+            \App\Erp\Support\AuditoriaSueldos::log('SUELDOS_DEVENGO_CONTABILIZADO', sprintf(
+                'Devengo de liquidación #%d %s contabilizado (asiento #%d) por user #%s.',
+                $liq->id, $liq->periodo, $asiento->id, $userId ?? '?'));
+
             return $asiento;
         });
     }
@@ -218,6 +222,10 @@ class PagosSueldosService
             $resultado['prestamos_cancelados'] = $this->actualizarEstadoLiquidacion($liq);
         });
 
+        \App\Erp\Support\AuditoriaSueldos::log('SUELDOS_PAGO_FORMAL', sprintf(
+            'Liquidación #%d %s: %d pago(s) FORMAL registrados por user #%s.',
+            $liq->id, $liq->periodo, count($resultado['pagos']), $userId ?? '?'));
+
         return $resultado;
     }
 
@@ -299,6 +307,10 @@ class PagosSueldosService
 
             $resultado['prestamos_cancelados'] = $this->actualizarEstadoLiquidacion($liq);
         });
+
+        \App\Erp\Support\AuditoriaSueldos::log('SUELDOS_PAGO_EFECTIVO', sprintf(
+            'Liquidación #%d %s: %d pago(s) EFECTIVO registrados por user #%s.',
+            $liq->id, $liq->periodo, count($resultado['pagos']), $userId ?? '?'));
 
         return $resultado;
     }
@@ -386,6 +398,10 @@ class PagosSueldosService
 
             $resultado['prestamos_cancelados'] = $this->actualizarEstadoLiquidacion($liq);
         });
+
+        \App\Erp\Support\AuditoriaSueldos::log('SUELDOS_PAGO_MT', sprintf(
+            'Liquidación #%d %s: %d pago(s) MT registrados por user #%s.',
+            $liq->id, $liq->periodo, count($resultado['pagos']), $userId ?? '?'));
 
         return $resultado;
     }
@@ -507,6 +523,9 @@ class PagosSueldosService
                     'empleado_id' => $p->empleado_id,
                     'mensaje' => "Préstamo #{$p->id} completó {$p->cuotas_total} cuotas y quedó CANCELADO.",
                 ];
+                \App\Erp\Support\AuditoriaSueldos::log('PRESTAMO_EMP_CANCELADO', sprintf(
+                    'Préstamo %s (#%d, empleado #%d) completó %d cuotas al pagarse la liquidación #%d — auto-CANCELADO.',
+                    $p->codigo ?? '-', $p->id, $p->empleado_id, $p->cuotas_total, $liq->id));
             }
             $p->update($update);
         }

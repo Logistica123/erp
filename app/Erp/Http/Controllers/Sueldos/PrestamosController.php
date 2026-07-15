@@ -79,6 +79,13 @@ class PrestamosController extends Controller
                 'observaciones'         => $datos['observaciones'] ?? null,
             ]);
 
+            \App\Erp\Support\AuditoriaSueldos::log('PRESTAMO_EMP_OTORGADO', sprintf(
+                'Préstamo #%d otorgado a empleado #%d por user #%d: capital $%s en %d cuotas de $%s.',
+                $prestamo->id, $prestamo->empleado_id, $request->user()->id,
+                number_format((float) $prestamo->capital, 2, ',', '.'),
+                (int) $prestamo->cuotas_total,
+                number_format((float) $prestamo->cuota_mensual, 2, ',', '.')));
+
             // Garantizar CC tipo PRESTAMO del empleado.
             $cc = CC::firstOrCreate(
                 ['empleado_id' => $datos['empleado_id'], 'tipo' => CC::TIPO_PRESTAMO],
@@ -141,6 +148,9 @@ class PrestamosController extends Controller
             ]], 422);
         }
 
+        \App\Erp\Support\AuditoriaSueldos::log('PRESTAMO_EMP_PAUSADO', sprintf(
+            'Préstamo %s (#%d) PAUSADO por user #%d: %s',
+            $p->codigo ?? '-', $p->id, $request->user()->id, $data['motivo']));
         $p->update([
             'estado' => Prestamo::ESTADO_PAUSADO,
             'observaciones' => trim(($p->observaciones ?? '')
@@ -163,6 +173,8 @@ class PrestamosController extends Controller
             ]], 422);
         }
 
+        \App\Erp\Support\AuditoriaSueldos::log('PRESTAMO_EMP_REANUDADO', sprintf(
+            'Préstamo %s (#%d) REANUDADO por user #%d.', $p->codigo ?? '-', $p->id, $request->user()->id));
         $p->update([
             'estado' => Prestamo::ESTADO_VIGENTE,
             'observaciones' => trim(($p->observaciones ?? '')

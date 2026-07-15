@@ -35,8 +35,9 @@ class AuditLogger
         ?array $datosAntes = null,
         ?array $datosDespues = null,
         ?string $descripcion = null,
+        ?string $moduloOverride = null,
     ): ?AuditLog {
-        $modulo = $this->moduloDe($model);
+        $modulo = $moduloOverride ?? $this->moduloDe($model);
         $entidad = class_basename($model);
         $empresaId = $this->resolverEmpresaId($model);
 
@@ -195,7 +196,9 @@ class AuditLogger
             public function getKey() { return null; }
         };
 
-        return $this->log($accion, $dummy, null, null, $descripcion);
+        // Fix G-04 (2026-07-13): el parámetro $modulo se ignoraba — todos
+        // los eventos quedaban etiquetados por moduloDe(dummy) = 'otros'.
+        return $this->log($accion, $dummy, null, null, $descripcion, $modulo);
     }
 
     private function redact(array $data): array

@@ -138,6 +138,10 @@ class EmpleadosController extends Controller
                 'activo' => 1,
             ]);
 
+        \App\Erp\Support\AuditoriaSueldos::log('EMPLEADO_ALTA', sprintf(
+            'Alta de empleado %s (#%d) por user #%d — régimen %s.',
+            $emp->legajo, $emp->id, $request->user()->id, $emp->regimen));
+
             BasicoHistorial::create([
                 'empleado_id'      => $emp->id,
                 'basico_total'     => $datos['basico_inicial'],
@@ -193,6 +197,9 @@ class EmpleadosController extends Controller
         ]);
 
         $emp->update($datos);
+
+        \App\Erp\Support\AuditoriaSueldos::log('EMPLEADO_EDITADO', sprintf(
+            'Empleado #%d editado por user #%d.', $id, $request->user()->id));
         return response()->json(['ok' => true, 'data' => $emp->fresh(['categoria', 'convenio'])]);
     }
 
@@ -238,6 +245,13 @@ class EmpleadosController extends Controller
                 'fecha_aprobacion' => now(),
                 'observaciones'    => $datos['observaciones'] ?? null,
             ]);
+
+            \App\Erp\Support\AuditoriaSueldos::log('BASICO_APROBADO', sprintf(
+                'Cambio de básico de %s (#%d) por user #%d: $%s → $%s desde %s (%s).',
+                $emp->legajo, $emp->id, $request->user()->id,
+                $vigente ? number_format((float) $vigente->basico_total, 2, ',', '.') : '—',
+                number_format((float) $datos['basico_total'], 2, ',', '.'),
+                $datos['vigencia_desde'], $datos['motivo']));
 
             return response()->json(['ok' => true, 'data' => $nuevo->load('aprobador:id,name')], 201);
         });

@@ -228,6 +228,10 @@ class GrillaSueldosService
             }
         });
 
+        \App\Erp\Support\AuditoriaSueldos::log('GRILLA_GUARDADA', sprintf(
+            'Grilla de liquidación #%d %s: %d fila(s) editadas por user #%d y recalculada.',
+            $liq->id, $liq->periodo, count($filas), $userId));
+
         $this->liquidaciones->calcular($liq->fresh(), $userId);
 
         return $this->armar($liq->fresh());

@@ -110,6 +110,7 @@ class PrestamosPausadoTest extends TestCase
         $svc->aprobar($liq->fresh(), $this->user->id);
 
         $cajaId = (int) DB::table('erp_cajas')->where('activo', 1)->value('id');
+        DB::table('erp_cajas')->where('id', $cajaId)->update(['saldo_actual' => 50000000]);
         $resultado = app(PagosSueldosService::class)->pagarEfectivo(
             $liq->fresh(), $cajaId, now()->toDateString(),
             [['empleado_id' => $this->empleadoId, 'recibido_por' => 'Test G08', 'dni_recibio' => '87654321']],

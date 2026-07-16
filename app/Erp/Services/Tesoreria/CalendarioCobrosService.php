@@ -84,6 +84,7 @@ class CalendarioCobrosService
         $hoy = now()->startOfDay();
         $enRango = [];
         $sinPlazo = [];
+        $aRevisar = [];
         foreach ($items as $it) {
             if ($it['fecha'] === null) {
                 $sinPlazo[] = $it;
@@ -92,6 +93,18 @@ class CalendarioCobrosService
             }
             $f = Carbon::parse($it['fecha']);
             $it['vencido'] = $f->lt($hoy);
+
+            // Un CHEQUE con vencimiento pasado no es un cobro futuro: ya se
+            // puede (o se pudo) depositar — casi seguro falta registrarlo.
+            // Va a 'a_revisar', NO al calendario (fix 2026-07-16, reporte
+            // de Francisco: cheques de mayo/junio apareciendo hoy).
+            if ($it['tipo'] === 'CHEQUE' && $it['vencido']) {
+                $it['dias_vencido'] = (int) $f->diffInDays($hoy);
+                $aRevisar[] = $it;
+
+                continue;
+            }
+
             $it['fecha_bucket'] = ($f->lt($hoy) ? $hoy : $f)->toDateString();
             if ($f->gt($hasta) || Carbon::parse($it['fecha_bucket'])->lt($desde)) {
                 continue;
@@ -122,12 +135,14 @@ class CalendarioCobrosService
             'items' => $enRango,
             'por_dia' => array_values($porDia),
             'sin_plazo' => $sinPlazo,
+            'a_revisar' => $aRevisar,
             'totales' => [
                 'total' => round(array_sum(array_column($enRango, 'importe')), 2),
                 'facturas' => round(array_sum(array_map(fn ($i) => $i['tipo'] === 'FACTURA' ? $i['importe'] : 0, $enRango)), 2),
                 'cheques' => round(array_sum(array_map(fn ($i) => $i['tipo'] === 'CHEQUE' ? $i['importe'] : 0, $enRango)), 2),
                 'vencido' => round(array_sum(array_map(fn ($i) => ! empty($i['vencido']) ? $i['importe'] : 0, $enRango)), 2),
                 'sin_plazo' => round(array_sum(array_column($sinPlazo, 'importe')), 2),
+                'a_revisar' => round(array_sum(array_column($aRevisar, 'importe')), 2),
             ],
         ];
     }

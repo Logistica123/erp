@@ -14,9 +14,10 @@ type Item = {
   fecha: string | null; fecha_bucket?: string; importe: number; vencido?: boolean; estado_cheque?: string;
 };
 type Dia = { fecha: string; total: number; facturas: number; cheques: number; items: number };
+type ItemRevisar = Item & { dias_vencido: number };
 type Calendario = {
-  desde: string; hasta: string; items: Item[]; por_dia: Dia[]; sin_plazo: Item[];
-  totales: { total: number; facturas: number; cheques: number; vencido: number; sin_plazo: number };
+  desde: string; hasta: string; items: Item[]; por_dia: Dia[]; sin_plazo: Item[]; a_revisar: ItemRevisar[];
+  totales: { total: number; facturas: number; cheques: number; vencido: number; sin_plazo: number; a_revisar: number };
 };
 type Plazo = { auxiliar_id: number; codigo: string; nombre: string; cuit: string | null; plazo_cobro_dias: number | null };
 
@@ -103,6 +104,23 @@ function CalendarioTab() {
           </div>
         )}
       </div>
+
+      {data && data.a_revisar.length > 0 && (
+        <div className="text-[12.5px] text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/10 rounded px-3 py-2 space-y-1">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            {data.a_revisar.length} cheque(s) por {fmtMoney(data.totales.a_revisar)} con vencimiento YA operado —
+            no se proyectan como cobro: verificá si se depositaron/cobraron y registralo en Cheques recibidos.
+          </div>
+          <ul className="pl-6 list-disc">
+            {data.a_revisar.map((c) => (
+              <li key={c.id}>
+                {c.referencia} · {c.cliente ?? '—'} · {fmtMoney(c.importe)} — venció el {c.fecha?.split('-').reverse().join('/')} ({c.dias_vencido} días)
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {data && data.sin_plazo.length > 0 && (
         <div className="flex items-center gap-2 text-[12.5px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10 rounded px-3 py-1.5">

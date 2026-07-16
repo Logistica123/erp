@@ -144,4 +144,36 @@ class CalendarioCobrosTest extends TestCase
         $this->assertSame($vto, $item['fecha']);
         $this->assertEqualsWithDelta(250000, $item['importe'], 0.01);
     }
+
+    public function test_cheque_vencido_va_a_revisar_no_al_calendario(): void
+    {
+        // Fix 2026-07-16: un cheque con vencimiento pasado (mayo/junio) no
+        // es un cobro futuro — va al bloque a_revisar, no al bucket de hoy.
+        $facturaId = $this->crearFacturaVenta(80000, now()->subDays(60)->toDateString());
+        $reciboId = (int) DB::table('erp_recibos')->insertGetId([
+            'empresa_id' => 1, 'numero_correlativo' => 'ZZR-'.random_int(10000, 99999),
+            'cliente_auxiliar_id' => $this->clienteId, 'factura_venta_id' => $facturaId,
+            'fecha_emision' => now()->subDays(60)->toDateString(), 'monto_cobrable' => 80000,
+            'total_factura' => 80000, 'saldo_factura_post' => 0,
+            'estado' => 'EMITIDO', 'created_by_user_id' => $this->user->id,
+            'created_at' => now(),
+        ]);
+        $chequeId = (int) DB::table('erp_cheques_recibidos')->insertGetId([
+            'empresa_id' => 1, 'recibo_id' => $reciboId, 'numero_cheque' => 'ZV'.random_int(1000, 9999),
+            'banco_emisor' => 'Banco Test', 'librador_nombre' => 'Vencido Test',
+            'cuit_librador' => '30111222333', 'importe' => 80000,
+            'fecha_emision' => now()->subDays(60)->toDateString(),
+            'fecha_pago' => now()->subDays(45)->toDateString(),
+            'estado' => 'EN_CARTERA', 'created_by_user_id' => $this->user->id,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $data = $this->getJson('/api/erp/tesoreria/calendario-cobros')->assertOk()->json('data');
+
+        $this->assertNull(collect($data['items'])->first(fn ($i) => $i['tipo'] === 'CHEQUE' && $i['id'] === $chequeId),
+            'el cheque vencido NO va al calendario');
+        $rev = collect($data['a_revisar'])->first(fn ($i) => $i['id'] === $chequeId);
+        $this->assertNotNull($rev, 'el cheque vencido va a a_revisar');
+        $this->assertSame(45, $rev['dias_vencido']);
+    }
 }

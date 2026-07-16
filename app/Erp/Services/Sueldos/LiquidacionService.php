@@ -199,8 +199,11 @@ class LiquidacionService
             base: $basicoTotal
         ));
 
-        // Presentismo (8.5% sobre básico, sólo formal).
-        if ($emp->regimen !== Empleado::REGIMEN_MONOTRIBUTISTA && $liq->tipo === Liquidacion::TIPO_MENSUAL) {
+        // Presentismo (8.5% sobre básico, sólo formal). Camino A: OFF por
+        // default — el Excel no lo tiene y era la diferencia fantasma de
+        // $136.000 en los FORMAL_PURO (Aclaración 1, 2026-07-14).
+        if (config('erp.sueldos.aplicar_presentismo', false)
+            && $emp->regimen !== Empleado::REGIMEN_MONOTRIBUTISTA && $liq->tipo === Liquidacion::TIPO_MENSUAL) {
             $presentismo = round($brutoBasico * 0.085, 2);
             $items = array_merge($items, $this->descomponer(
                 $conceptosByCodigo['PRESENTISMO'] ?? null,

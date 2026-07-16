@@ -89,4 +89,37 @@ class CaminoABolsilloTest extends TestCase
         $this->assertGreaterThan(0, $this->itemsLegales($liq->id),
             'con la config prendida (Camino B futuro) los legales vuelven');
     }
+
+    public function test_formal_puro_neto_igual_al_basico_sin_presentismo_fantasma(): void
+    {
+        // Aclaración 1 (Barrios): el presentismo automático 8,5% solo-FORMAL
+        // agregaba $136.000 fantasma. Bajo Camino A el neto = básico exacto.
+        $empId = (int) DB::table('erp_emp_empleados')->insertGetId([
+            'legajo' => 'ZZCEO', 'apellido' => 'Test', 'nombre' => 'FormalPuro',
+            'fecha_ingreso' => '2029-01-01', 'regimen' => 'FORMAL_PURO',
+            'jornada_formal_pct' => 100, 'es_vendedor' => 0, 'paga_sac' => 1,
+            'activo' => 1, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('erp_emp_basicos_historial')->insert([
+            'empleado_id' => $empId, 'basico_total' => 1600000,
+            'vigencia_desde' => '2029-01-01', 'vigencia_hasta' => null,
+            'motivo' => 'INGRESO', 'aprobado_por_id' => $this->user->id,
+            'fecha_aprobacion' => now(), 'created_at' => now(),
+        ]);
+        DB::table('erp_emp_composicion_sueldo')->insert([
+            'empleado_id' => $empId, 'porc_formal' => 100, 'porc_efectivo' => 0,
+            'porc_mt' => 0, 'vigencia_desde' => '2029-01-01',
+            'vigencia_hasta' => null, 'created_at' => now(),
+        ]);
+
+        $liq = Liquidacion::create(['periodo' => '2030-08', 'tipo' => 'MENSUAL', 'estado' => 'BORRADOR']);
+        app(LiquidacionService::class)->calcular($liq->fresh(), $this->user->id);
+
+        $neto = (float) DB::table('erp_emp_liquidaciones_items as i')
+            ->join('erp_emp_conceptos as c', 'c.id', '=', 'i.concepto_id')
+            ->where('i.liquidacion_id', $liq->id)->where('i.empleado_id', $empId)
+            ->selectRaw("SUM(CASE WHEN c.signo='HABER' THEN i.importe ELSE -i.importe END) n")
+            ->value('n');
+        $this->assertEqualsWithDelta(1600000, $neto, 0.01, 'neto = básico, sin presentismo fantasma');
+    }
 }

@@ -33,5 +33,9 @@ return [
         // del empleado (JUB/OS/19032/sindicato) los calcula LIBER, NO el
         // ERP. true = Camino B futuro (reemplazo total de LIBER).
         'aplicar_descuentos_legales' => (bool) env('ERP_SUELDOS_DESCUENTOS_LEGALES', false),
+        // Aclaración 1 (testeo Matías 14/07): el presentismo automático
+        // 8,5% solo-FORMAL del SPEC 08 rompe la paridad con el Excel
+        // (los $136.000 fantasma de Barrios). OFF bajo Camino A.
+        'aplicar_presentismo' => (bool) env('ERP_SUELDOS_PRESENTISMO', false),
     ],
 ];

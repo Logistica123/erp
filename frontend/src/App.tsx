@@ -32,6 +32,7 @@ import { EcheqPage } from './pages/EcheqPage';
 import { TransferenciasPage } from './pages/TransferenciasPage';
 import { ArqueosPage } from './pages/ArqueosPage';
 import { CargasSaldoInicialPage } from './pages/CargasSaldoInicialPage';
+import { CalendarioCobrosPage } from './pages/CalendarioCobrosPage';
 import { ArqueosPendientesPage } from './pages/ArqueosPendientesPage';
 import { CajaOperadoresPage } from './pages/CajaOperadoresPage';
 import { FlujoFondosPage } from './pages/FlujoFondosPage';
@@ -173,6 +174,7 @@ export default function App() {
               <Route path="/erp/arqueos" element={<ArqueosPage />} handle={{ crumb: 'Arqueos' }} />
               {/* v1.52 — Carga de saldo inicial (Cajas y Bancos) */}
               <Route path="/erp/tesoreria/cargar-saldo-inicial" element={<CargasSaldoInicialPage />} handle={{ crumb: 'Cargar saldo inicial' }} />
+              <Route path="/erp/tesoreria/calendario-cobros" element={<CalendarioCobrosPage />} handle={{ crumb: 'Calendario de cobros' }} />
               <Route path="/erp/tesoreria/caja-efectivo/arqueos-pendientes" element={<ArqueosPendientesPage />} handle={{ crumb: 'Arqueos pendientes' }} />
               <Route path="/erp/tesoreria/caja-efectivo/operadores" element={<CajaOperadoresPage />} handle={{ crumb: 'Operadores de caja' }} />
               <Route path="/erp/tesoreria/flujo-de-fondos" element={<FlujoFondosPage />} handle={{ crumb: 'Flujo de fondos' }} />

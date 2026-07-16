@@ -434,6 +434,13 @@ Route::prefix('api/erp')->group(function () {
         Route::get('/caja/denominaciones-catalogo', [CajaController::class, 'denominacionesCatalogo'])
             ->name('erp.caja.denominaciones-catalogo');
         // v1.52 — carga de saldo inicial (Cajas y Bancos).
+        // Calendario de cobros proyectados (2026-07-15).
+        Route::get('/tesoreria/calendario-cobros', [\App\Erp\Http\Controllers\CalendarioCobrosController::class, 'calendario'])
+            ->middleware('erp.permiso:tesoreria.calendario_cobros.ver')->name('erp.tes.calendario-cobros');
+        Route::get('/tesoreria/plazos-cobro', [\App\Erp\Http\Controllers\CalendarioCobrosController::class, 'plazos'])
+            ->middleware('erp.permiso:tesoreria.calendario_cobros.ver')->name('erp.tes.plazos-cobro.index');
+        Route::put('/tesoreria/plazos-cobro/{auxiliarId}', [\App\Erp\Http\Controllers\CalendarioCobrosController::class, 'guardarPlazo'])
+            ->whereNumber('auxiliarId')->middleware('erp.permiso:tesoreria.plazos_cobro.editar')->name('erp.tes.plazos-cobro.guardar');
         Route::get('/tesoreria/cargas-saldo-inicial', [\App\Erp\Http\Controllers\CargasSaldoInicialController::class, 'index'])
             ->name('erp.tesoreria.cargas-saldo-inicial.index')
             ->middleware('erp.permiso:tesoreria.saldos_iniciales.ver');

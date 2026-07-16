@@ -56,6 +56,7 @@ export const sections: NavSection[] = [
       { to: '/erp/ordenes-pago', label: 'Órdenes de pago', icon: ArrowLeftRight },
       { to: '/erp/echeq', label: 'eCheq', icon: Banknote },
       { to: '/erp/tesoreria/cheques-recibidos', label: 'Cheques recibidos', icon: Banknote },
+      { to: '/erp/tesoreria/calendario-cobros', label: 'Calendario de cobros', icon: CalendarCheck },
       { to: '/erp/transferencias', label: 'Transferencias int.', icon: Split },
       { to: '/erp/arqueos', label: 'Arqueos de caja', icon: Calculator },
       { to: '/erp/tesoreria/flujo-de-fondos', label: 'Flujo de Fondos', icon: Calculator },

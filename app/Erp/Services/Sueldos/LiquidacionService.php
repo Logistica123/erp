@@ -127,13 +127,13 @@ class LiquidacionService
      * Calcula los ítems de un empleado para la liquidación dada.
      * @return array<int, array<string, mixed>> Filas listas para insert masivo.
      */
-    private function calcularEmpleado(Empleado $emp, Liquidacion $liq, string $cierre, $conceptosByCodigo): array
+    private function calcularEmpleado(Empleado $emp, Liquidacion $liq, string $cierre, $conceptosByCodigo, ?object $compVigForzada = null): array
     {
         $basicoVig = $this->basicoVigente($emp->id, $cierre);
         if (! $basicoVig) {
             return [];
         }
-        $compVig = $this->composicionVigente($emp->id, $cierre);
+        $compVig = $compVigForzada ?? $this->composicionVigente($emp->id, $cierre);
         // G-07 (P1): el override por (liquidación, empleado) pisa el
         // default del maestro SOLO en esta liquidación.
         $override = DB::table('erp_emp_liquidacion_reparto_override')
@@ -141,7 +141,7 @@ class LiquidacionService
         $sumaOverride = $override
             ? round((float) $override->porc_formal + (float) $override->porc_efectivo + (float) $override->porc_mt, 2)
             : 0.0;
-        if ($override && abs($sumaOverride - 100.0) <= 0.01) {
+        if ($compVigForzada === null && $override && abs($sumaOverride - 100.0) <= 0.01) {
             $compVig = (object) [
                 'porc_formal' => (float) $override->porc_formal,
                 'porc_efectivo' => (float) $override->porc_efectivo,
@@ -291,7 +291,21 @@ class LiquidacionService
         $items = array_merge($items, $this->descuentosInternos($emp, $compVig, $liq, $conceptosByCodigo, $now));
 
         // Filtrar items vacíos / nulos.
-        return array_values(array_filter($items, fn ($it) => $it !== null && abs((float) $it['importe']) > 0.005));
+        $items = array_values(array_filter($items, fn ($it) => $it !== null && abs((float) $it['importe']) > 0.005));
+
+        // Pedido 2 (grilla en importes, 2026-07-14): si el override fija
+        // montos Formal/MT, se recalcula el reparto para clavar EXACTO esos
+        // importes; el efectivo queda como residual.
+        if ($compVigForzada === null && $override
+            && ($override->monto_formal !== null || $override->monto_mt !== null)) {
+            return $this->reajustarPorMontos(
+                $emp, $liq, $cierre, $conceptosByCodigo, $items,
+                $override->monto_formal !== null ? (float) $override->monto_formal : 0.0,
+                $override->monto_mt !== null ? (float) $override->monto_mt : 0.0,
+            );
+        }
+
+        return $items;
     }
 
     private function resolverImporteNovedad(Novedad $nov, Concepto $c, float $valorHora, float $basicoDiario): float
@@ -592,5 +606,81 @@ class LiquidacionService
         $proporcion = min(1.0, $trabajados / count($mesesSemestre));
 
         return round(($mejor / 2) * $proporcion, 2);
+    }
+
+    /**
+     * Pedido 2 — reparto por IMPORTES: recalcula los ítems del empleado con
+     * porcentajes derivados (float, sin redondear a 2) y ajusta los centavos
+     * de redondeo por ítem para que FORMAL y MT queden EXACTOS; el efectivo
+     * absorbe el residuo. Lanza si formal+mt supera el neto.
+     */
+    private function reajustarPorMontos(Empleado $emp, Liquidacion $liq, string $cierre, $conceptosByCodigo, array $itemsPrevios, float $montoFormal, float $montoMt): array
+    {
+        $signoPorConcepto = [];
+        foreach ($conceptosByCodigo as $c) {
+            $signoPorConcepto[$c->id] = $c->signo;
+        }
+        $netoDe = function (array $items, ?string $componente = null) use ($signoPorConcepto): float {
+            $t = 0.0;
+            foreach ($items as $i) {
+                if ($componente !== null && $i['componente'] !== $componente) {
+                    continue;
+                }
+                $t += ($signoPorConcepto[$i['concepto_id']] ?? 'HABER') === 'HABER' ? $i['importe'] : -$i['importe'];
+            }
+
+            return round($t, 2);
+        };
+
+        $neto = $netoDe($itemsPrevios);
+        if ($neto <= 0) {
+            return $itemsPrevios;
+        }
+        if (round($montoFormal + $montoMt, 2) > $neto + 0.009) {
+            throw new DomainException(sprintf(
+                'REPARTO_EXCEDE_NETO: %s — Formal $%s + MT $%s supera el neto $%s (el efectivo no puede ser negativo).',
+                $emp->legajo,
+                number_format($montoFormal, 2, ',', '.'),
+                number_format($montoMt, 2, ',', '.'),
+                number_format($neto, 2, ',', '.')));
+        }
+
+        $comp = (object) [
+            'porc_formal' => $montoFormal / $neto * 100,
+            'porc_mt' => $montoMt / $neto * 100,
+            'porc_efectivo' => max(0, 100 - ($montoFormal / $neto * 100) - ($montoMt / $neto * 100)),
+        ];
+        $items = $this->calcularEmpleado($emp, $liq, $cierre, $conceptosByCodigo, $comp);
+
+        // Clavar centavos: el redondeo por ítem puede desviar unos centavos
+        // del target — se corrige en el ítem HABER más grande de cada
+        // componente, compensando contra su par EFECTIVO.
+        foreach ([['FORMAL', $montoFormal], ['MT', $montoMt]] as [$componente, $target]) {
+            $delta = round($target - $netoDe($items, $componente), 2);
+            if (abs($delta) < 0.005) {
+                continue;
+            }
+            $idxComp = null;
+            $idxEf = null;
+            foreach ($items as $k => $i) {
+                if (($signoPorConcepto[$i['concepto_id']] ?? '') !== 'HABER') {
+                    continue;
+                }
+                if ($i['componente'] === $componente && ($idxComp === null || $i['importe'] > $items[$idxComp]['importe'])) {
+                    $idxComp = $k;
+                }
+                if ($i['componente'] === 'EFECTIVO' && ($idxEf === null || $i['importe'] > $items[$idxEf]['importe'])) {
+                    $idxEf = $k;
+                }
+            }
+            if ($idxComp !== null) {
+                $items[$idxComp]['importe'] = round($items[$idxComp]['importe'] + $delta, 2);
+                if ($idxEf !== null) {
+                    $items[$idxEf]['importe'] = round($items[$idxEf]['importe'] - $delta, 2);
+                }
+            }
+        }
+
+        return $items;
     }
 }

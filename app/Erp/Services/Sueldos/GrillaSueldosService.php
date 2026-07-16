@@ -134,6 +134,10 @@ class GrillaSueldosService
                 'efectivo' => $netoEfectivo,
                 'mt' => round((float) ($tot->mt ?? 0), 2),
                 'reparto' => $reparto + ['override' => $repartoOverride],
+                'reparto_importes' => [
+                    'formal' => $ov && $ov->monto_formal !== null ? (float) $ov->monto_formal : null,
+                    'mt' => $ov && $ov->monto_mt !== null ? (float) $ov->monto_mt : null,
+                ],
                 'efectivo_redondeado' => $efectivoRedondeado,
                 'diferencia_redondeo' => $difRedondeo,
             ];
@@ -173,17 +177,30 @@ class GrillaSueldosService
                 // Días + reparto → tabla de override.
                 $tieneDias = array_key_exists('dias_trabajados', $fila);
                 $reparto = $fila['reparto'] ?? null;
+                $importes = array_key_exists('reparto_importes', $fila) ? ($fila['reparto_importes'] ?? []) : null;
                 if ($reparto !== null) {
                     $suma = round((float) $reparto['porc_formal'] + (float) $reparto['porc_efectivo'] + (float) $reparto['porc_mt'], 2);
                     if (abs($suma - 100.0) > 0.01) {
                         throw new DomainException("REPARTO_NO_SUMA_100: empleado #{$empId} suma {$suma}.");
                     }
                 }
-                if ($tieneDias || $reparto !== null) {
+                if ($importes !== null) {
+                    foreach (['formal', 'mt'] as $k) {
+                        $v = $importes[$k] ?? null;
+                        if ($v !== null && (float) $v < 0) {
+                            throw new DomainException("IMPORTE_INVALIDO: {$k} no puede ser negativo.");
+                        }
+                    }
+                }
+                if ($tieneDias || $reparto !== null || $importes !== null) {
                     $update = ['updated_at' => now(), 'creado_por_id' => $userId];
                     if ($tieneDias) {
                         $update['dias_trabajados'] = $fila['dias_trabajados'] !== null
                             ? max(0, min(30, (int) $fila['dias_trabajados'])) : null;
+                    }
+                    if ($importes !== null) {
+                        $update['monto_formal'] = isset($importes['formal']) && $importes['formal'] !== null ? round((float) $importes['formal'], 2) : null;
+                        $update['monto_mt'] = isset($importes['mt']) && $importes['mt'] !== null ? round((float) $importes['mt'], 2) : null;
                     }
                     if ($reparto !== null) {
                         $update += [

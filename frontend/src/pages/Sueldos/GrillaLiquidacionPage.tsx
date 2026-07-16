@@ -19,6 +19,7 @@ type Fila = {
   prestamo_cuota: number;
   neto: number; formal: number; efectivo: number; mt: number;
   reparto: { porc_formal: number; porc_efectivo: number; porc_mt: number; override: boolean };
+  reparto_importes: { formal: number | null; mt: number | null };
   efectivo_redondeado: number; diferencia_redondeo: number;
 };
 type Grilla = {
@@ -30,7 +31,7 @@ type Grilla = {
 /** Edición local por empleado: solo lo tocado viaja en el PUT. */
 type Edicion = {
   dias_trabajados?: number | null;
-  reparto?: { porc_formal: number; porc_efectivo: number; porc_mt: number };
+  reparto_importes?: { formal: number | null; mt: number | null };
   valores?: Record<string, { cantidad?: number | null; importe?: number | null }>;
 };
 
@@ -60,7 +61,7 @@ export function GrillaLiquidacionPage() {
       const filas = Object.entries(ediciones).map(([empId, e]) => ({
         empleado_id: Number(empId),
         ...(e.dias_trabajados !== undefined ? { dias_trabajados: e.dias_trabajados } : {}),
-        ...(e.reparto ? { reparto: e.reparto } : {}),
+        ...(e.reparto_importes ? { reparto_importes: e.reparto_importes } : {}),
         ...(e.valores ? { valores: e.valores } : {}),
       }));
       return api.put(`/api/erp/sueldos/liquidaciones/${id}/grilla`, { filas });
@@ -146,7 +147,7 @@ export function GrillaLiquidacionPage() {
                 <th colSpan={haberes.length + 1} className="px-2 py-1 text-center border-b bg-emerald-50/50 dark:bg-emerald-900/10">Haberes</th>
                 <th colSpan={descuentos.length + 1} className="px-2 py-1 text-center border-b bg-rose-50/50 dark:bg-rose-900/10">Descuentos</th>
                 <th colSpan={1} className="px-2 py-1 text-center border-b bg-sky-50/60 dark:bg-sky-900/10">Liquidación</th>
-                <th colSpan={5} className="px-2 py-1 text-center border-b">Forma de pago</th>
+                <th colSpan={4} className="px-2 py-1 text-center border-b">Forma de pago</th>
               </tr>
               <tr className="text-left text-[11px]">
                 <th className="px-2 py-1 border-b sticky left-0 bg-slate-50 dark:bg-slate-900">Legajo</th>
@@ -158,10 +159,9 @@ export function GrillaLiquidacionPage() {
                 {descuentos.map((c) => <th key={c.codigo} className="px-1 py-1 border-b text-right" title={c.nombre}>{c.codigo}{c.por_cantidad ? ' (hs/d)' : ''}</th>)}
                 <th className="px-2 py-1 border-b text-right" title="Cuota de préstamos (automática)">Préstamo</th>
                 <th className="px-2 py-1 border-b text-right font-semibold bg-sky-50/60 dark:bg-sky-900/10">NETO</th>
-                <th className="px-2 py-1 border-b text-right" title="% Formal / % Efectivo / % MT (suma 100)">Reparto %</th>
-                <th className="px-2 py-1 border-b text-right">Formal</th>
-                <th className="px-2 py-1 border-b text-right">MT</th>
-                <th className="px-2 py-1 border-b text-right">Efectivo</th>
+                <th className="px-2 py-1 border-b text-right" title="Importe FORMAL exacto por empleado (vacío = default % del maestro)">Formal ($)</th>
+                <th className="px-2 py-1 border-b text-right" title="Importe MT exacto por empleado (vacío = default % del maestro)">MT ($)</th>
+                <th className="px-2 py-1 border-b text-right" title="Residual automático: neto − formal − mt (no editable)">Efectivo</th>
                 <th className="px-2 py-1 border-b text-right" title="Efectivo redondeado a 500 (+ diferencia)">Efvo. red.</th>
               </tr>
             </thead>
@@ -169,7 +169,6 @@ export function GrillaLiquidacionPage() {
               {g.filas.map((f) => {
                 const ed = ediciones[f.empleado_id];
                 const dias = ed?.dias_trabajados !== undefined ? ed.dias_trabajados : f.dias_trabajados;
-                const rep = ed?.reparto ?? f.reparto;
                 const totHab = (f.basico_vigente ?? 0) * (Number(dias ?? 30) / 30);
                 return (
                   <tr key={f.empleado_id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
@@ -194,23 +193,34 @@ export function GrillaLiquidacionPage() {
                     {descuentos.map((c) => celdaValor(f, c))}
                     <td className="px-2 py-0.5 border-b border-slate-100 dark:border-slate-800 text-right text-slate-500">{f.prestamo_cuota > 0 ? fmtMoney(f.prestamo_cuota) : '—'}</td>
                     <td className="px-2 py-0.5 border-b border-slate-100 dark:border-slate-800 text-right font-semibold bg-sky-50/40 dark:bg-sky-900/10">{fmtMoney(f.neto)}</td>
-                    <td className="px-1 py-0.5 border-b border-slate-100 dark:border-slate-800">
-                      <div className="flex items-center gap-0.5 justify-end" title={`Formal/Efectivo/MT${f.reparto.override ? ' (override de esta liquidación)' : ' (default del maestro)'}`}>
-                        {(['porc_formal', 'porc_efectivo', 'porc_mt'] as const).map((k) => (
-                          <input key={k} type="text" inputMode="decimal" disabled={!editable}
-                            className={`w-10 text-right text-[11.5px] px-0.5 py-0.5 rounded border ${rep === f.reparto && !f.reparto.override ? 'border-transparent bg-slate-50 dark:bg-slate-900/40' : 'border-blue-200 bg-blue-50/60 dark:bg-blue-900/20'}`}
-                            value={String(rep[k])}
+                    {(['formal', 'mt'] as const).map((k) => {
+                      const ed = ediciones[f.empleado_id]?.reparto_importes;
+                      const base = f.reparto_importes[k];
+                      const actual = ed !== undefined ? (ed[k] ?? '') : (base ?? '');
+                      const computado = k === 'formal' ? f.formal : f.mt;
+                      return (
+                        <td key={k} className="px-1 py-0.5 border-b border-slate-100 dark:border-slate-800">
+                          <input type="text" inputMode="decimal" disabled={!editable}
+                            className="w-24 text-right text-[12px] px-1 py-0.5 rounded border border-transparent bg-amber-50/60 dark:bg-amber-900/10 focus:border-blue-400 focus:bg-white dark:focus:bg-slate-900 disabled:bg-transparent"
+                            value={actual === null ? '' : String(actual)}
+                            placeholder={computado > 0 ? String(computado) : ''}
+                            title={`Actual: ${fmtMoney(computado)}${base !== null ? ' (importe fijado)' : ' (por % default)'} — vaciar vuelve al default`}
                             onChange={(ev) => {
-                              const nuevo = { porc_formal: rep.porc_formal, porc_efectivo: rep.porc_efectivo, porc_mt: rep.porc_mt, [k]: num(ev.target.value) ?? 0 };
-                              editar(f.empleado_id, (e) => ({ ...e, reparto: nuevo }));
+                              const v = num(ev.target.value);
+                              editar(f.empleado_id, (e) => ({
+                                ...e,
+                                reparto_importes: {
+                                  formal: k === 'formal' ? v : (e.reparto_importes?.formal ?? f.reparto_importes.formal),
+                                  mt: k === 'mt' ? v : (e.reparto_importes?.mt ?? f.reparto_importes.mt),
+                                },
+                              }));
                             }}
                           />
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-2 py-0.5 border-b border-slate-100 dark:border-slate-800 text-right">{fmtMoney(f.formal)}</td>
-                    <td className="px-2 py-0.5 border-b border-slate-100 dark:border-slate-800 text-right">{fmtMoney(f.mt)}</td>
-                    <td className="px-2 py-0.5 border-b border-slate-100 dark:border-slate-800 text-right">{fmtMoney(f.efectivo)}</td>
+                        </td>
+                      );
+                    })}
+                    <td className="px-2 py-0.5 border-b border-slate-100 dark:border-slate-800 text-right text-slate-500"
+                        title="Residual automático (neto − formal − mt)">{fmtMoney(f.efectivo)}</td>
                     <td className="px-2 py-0.5 border-b border-slate-100 dark:border-slate-800 text-right" title={f.diferencia_redondeo > 0 ? `Diferencia de redondeo: ${fmtMoney(f.diferencia_redondeo)}` : ''}>
                       {f.efectivo > 0 ? fmtMoney(f.efectivo_redondeado) : '—'}
                     </td>
@@ -226,7 +236,6 @@ export function GrillaLiquidacionPage() {
                   <td colSpan={descuentos.length} />
                   <td className="px-2 py-1 text-right">{fmtMoney(totales.prestamos)}</td>
                   <td className="px-2 py-1 text-right">{fmtMoney(totales.neto)}</td>
-                  <td />
                   <td className="px-2 py-1 text-right">{fmtMoney(totales.formal)}</td>
                   <td className="px-2 py-1 text-right">{fmtMoney(totales.mt)}</td>
                   <td className="px-2 py-1 text-right">{fmtMoney(totales.efectivo)}</td>
@@ -240,8 +249,8 @@ export function GrillaLiquidacionPage() {
 
       <p className="text-[11px] text-slate-500">
         Celdas amarillas = editables (como el Excel). Las columnas por horas (HE_50/HE_100/HORAS_DESC) cargan cantidad y el importe
-        se calcula a básico/240; el resto carga importe directo. Vaciar una celda borra la novedad. El reparto % pisa el default del
-        maestro solo en esta liquidación. «Guardar y recalcular» aplica todo junto.
+        se calcula a básico/240; el resto carga importe directo. Vaciar una celda borra la novedad. Formal($)/MT($) fijan importes EXACTOS por empleado solo en esta
+        liquidación (vacío = % default del maestro); el Efectivo siempre es el residual. «Guardar y recalcular» aplica todo junto.
       </p>
     </div>
   );
